@@ -1,0 +1,63 @@
+{
+  "name": "chem-review",
+  "version": "1.0.0",
+  "main": "expo-router/entry",
+  "dependencies": {
+    "@expo-google-fonts/nunito": "^0.4.2",
+    "@fontsource-variable/nunito": "^5.3.0",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo": "~58.0.25",
+    "expo-asset": "~58.0.21",
+    "expo-constants": "~58.0.16",
+    "expo-font": "~58.0.12",
+    "expo-linking": "~58.0.17",
+    "expo-router": "~58.0.31",
+    "expo-splash-screen": "~58.0.14",
+    "expo-status-bar": "~58.0.5",
+    "expo-system-ui": "~58.0.7",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-native": "0.88.1",
+    "react-native-gesture-handler": "~3.3.0",
+    "react-native-reanimated": "4.7.1",
+    "react-native-safe-area-context": "~5.11.1",
+    "react-native-screens": "~4.30.1",
+    "react-native-web": "~0.21.4",
+    "react-native-worklets": "0.13.0",
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/react": "~19.3.0",
+    "@types/three": "^0.187.0",
+    "eslint": "^9.39.5",
+    "eslint-config-expo": "~58.0.4",
+    "playwright": "1.64.1",
+    "serve": "^14.2.7",
+    "typescript": "~6.0.3",
+    "vitest": "^5.1.0"
+  },
+  "scripts": {
+    "start": "expo start",
+    "web": "expo start --web",
+    "ios": "expo start --ios",
+    "android": "expo start --android",
+    "web:build": "expo export -p web",
+    "web:serve": "serve dist -l 5210 --no-clipboard",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "expo lint",
+    "verify": "tsc --noEmit && vitest run && expo export -p web",
+    "check:browser": "node scripts/check-browser.mjs",
+    "gen:elements": "node scripts/gen-elements.mjs"
+  },
+  "private": true,
+  "description": "Chem Review: a general chemistry practice app. One Expo codebase for web, iOS and Android.",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "11.5.1",
+      "onFail": "warn"
+    }
+  }
+}

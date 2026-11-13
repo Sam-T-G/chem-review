@@ -1,0 +1,164 @@
+[
+  {
+    "symbol": "H",
+    "name": "Hydrogen",
+    "z": 1,
+    "group": 1,
+    "period": 1,
+    "valence": 1,
+    "en": 2.2
+  },
+  {
+    "symbol": "Be",
+    "name": "Beryllium",
+    "z": 4,
+    "group": 2,
+    "period": 2,
+    "valence": 2,
+    "en": 1.57
+  },
+  {
+    "symbol": "B",
+    "name": "Boron",
+    "z": 5,
+    "group": 13,
+    "period": 2,
+    "valence": 3,
+    "en": 2.04
+  },
+  {
+    "symbol": "C",
+    "name": "Carbon",
+    "z": 6,
+    "group": 14,
+    "period": 2,
+    "valence": 4,
+    "en": 2.55
+  },
+  {
+    "symbol": "N",
+    "name": "Nitrogen",
+    "z": 7,
+    "group": 15,
+    "period": 2,
+    "valence": 5,
+    "en": 3.04
+  },
+  {
+    "symbol": "O",
+    "name": "Oxygen",
+    "z": 8,
+    "group": 16,
+    "period": 2,
+    "valence": 6,
+    "en": 3.44
+  },
+  {
+    "symbol": "F",
+    "name": "Fluorine",
+    "z": 9,
+    "group": 17,
+    "period": 2,
+    "valence": 7,
+    "en": 3.98
+  },
+  {
+    "symbol": "Al",
+    "name": "Aluminum",
+    "z": 13,
+    "group": 13,
+    "period": 3,
+    "valence": 3,
+    "en": 1.61
+  },
+  {
+    "symbol": "Si",
+    "name": "Silicon",
+    "z": 14,
+    "group": 14,
+    "period": 3,
+    "valence": 4,
+    "en": 1.9
+  },
+  {
+    "symbol": "P",
+    "name": "Phosphorus",
+    "z": 15,
+    "group": 15,
+    "period": 3,
+    "valence": 5,
+    "en": 2.19
+  },
+  {
+    "symbol": "S",
+    "name": "Sulfur",
+    "z": 16,
+    "group": 16,
+    "period": 3,
+    "valence": 6,
+    "en": 2.58
+  },
+  {
+    "symbol": "Cl",
+    "name": "Chlorine",
+    "z": 17,
+    "group": 17,
+    "period": 3,
+    "valence": 7,
+    "en": 3.16
+  },
+  {
+    "symbol": "As",
+    "name": "Arsenic",
+    "z": 33,
+    "group": 15,
+    "period": 4,
+    "valence": 5,
+    "en": 2.18
+  },
+  {
+    "symbol": "Se",
+    "name": "Selenium",
+    "z": 34,
+    "group": 16,
+    "period": 4,
+    "valence": 6,
+    "en": 2.55
+  },
+  {
+    "symbol": "Br",
+    "name": "Bromine",
+    "z": 35,
+    "group": 17,
+    "period": 4,
+    "valence": 7,
+    "en": 2.96
+  },
+  {
+    "symbol": "Kr",
+    "name": "Krypton",
+    "z": 36,
+    "group": 18,
+    "period": 4,
+    "valence": 8,
+    "en": 3
+  },
+  {
+    "symbol": "I",
+    "name": "Iodine",
+    "z": 53,
+    "group": 17,
+    "period": 5,
+    "valence": 7,
+    "en": 2.66
+  },
+  {
+    "symbol": "Xe",
+    "name": "Xenon",
+    "z": 54,
+    "group": 18,
+    "period": 5,
+    "valence": 8,
+    "en": 2.6
+  }
+]

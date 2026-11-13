@@ -1,0 +1,4 @@
+# React Native's bundler (Metro) expects a flat node_modules
+nodeLinker: hoisted
+minimumReleaseAgeExclude:
+  - expo@58.0.25
