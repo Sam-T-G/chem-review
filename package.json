@@ -50,8 +50,11 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "expo lint",
-    "verify": "tsc --noEmit && vitest run && expo export -p web",
+    "verify": "tsc --noEmit && expo lint && vitest run && node scripts/check-repo.mjs && expo export -p web",
     "check:browser": "node scripts/check-browser.mjs",
+    "check:repo": "node scripts/check-repo.mjs",
+    "who": "node scripts/who.mjs",
+    "docs:index": "node scripts/check-repo.mjs --write-index",
     "pages:build": "node scripts/deploy-pages.mjs --build-only",
     "pages:deploy": "node scripts/deploy-pages.mjs",
     "gen:elements": "node scripts/gen-elements.mjs"

@@ -1,0 +1,2 @@
+# Keep both sides when two branches each add a handoff entry.
+HANDOFF.md merge=union

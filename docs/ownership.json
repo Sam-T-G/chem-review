@@ -1,0 +1,134 @@
+{
+  "teams": {
+    "lead": {
+      "name": "Lead",
+      "does": "Root rules, the docs structure, architecture, the roadmap order, and merges into main.",
+      "docs": ["docs/org.md", "docs/architecture.md", "docs/roadmap.md"],
+      "check": "pnpm check:repo"
+    },
+    "chem": {
+      "name": "Chemistry engine",
+      "does": "The rules of Lewis structures and VSEPR as plain TypeScript, each with a test written from the textbook.",
+      "docs": ["docs/chemistry/sources.md"],
+      "check": "pnpm exec vitest run assess layout problems solve structure vsepr"
+    },
+    "lewis": {
+      "name": "Lewis module",
+      "does": "The Lewis structures and shapes module: the 3D board, the panel, the step flow and its state.",
+      "docs": ["docs/learning/guided-steps.md", "docs/learning/wrong-answers.md", "docs/design/look-and-motion.md"],
+      "check": "pnpm exec vitest run guide store"
+    },
+    "shell": {
+      "name": "App shell",
+      "does": "Routes, the home screen, saved progress and the list of modules.",
+      "docs": ["docs/architecture.md", "docs/platform/expo.md"],
+      "check": "pnpm typecheck && pnpm lint"
+    },
+    "design": {
+      "name": "Design system",
+      "does": "Colors, type, spacing, the look of the atoms and how things move. Reviews anything a student sees.",
+      "docs": ["docs/design/look-and-motion.md"],
+      "check": "pnpm typecheck && pnpm lint"
+    },
+    "learning": {
+      "name": "Learning design",
+      "does": "The order students learn in, the problem list, every sentence a student reads, and what the app says when an answer is wrong. Reviews anything a student reads.",
+      "docs": ["docs/learning/guided-steps.md", "docs/learning/wrong-answers.md"],
+      "check": "pnpm exec vitest run guide"
+    },
+    "platform": {
+      "name": "Quality and platform",
+      "does": "The checks, the build, the scripts, CI, hosting and store builds.",
+      "docs": ["docs/platform/verify.md", "docs/platform/expo.md", "docs/verified.md"],
+      "check": "pnpm exec vitest run repo && pnpm check:repo"
+    }
+  },
+
+  "scopes": [
+    { "dir": "", "files": false },
+    { "dir": "docs", "files": false },
+    { "dir": "src/chem", "files": true },
+    { "dir": "src/modules", "files": true },
+    { "dir": "src/modules/lewis", "files": true },
+    { "dir": "src/app", "files": true },
+    { "dir": "src/shell", "files": true },
+    { "dir": "src/theme", "files": true },
+    { "dir": "tests", "files": true },
+    { "dir": "scripts", "files": true }
+  ],
+
+  "owners": [
+    { "path": "AGENTS.md", "team": "lead" },
+    { "path": "CLAUDE.md", "team": "lead" },
+    { "path": "README.md", "team": "lead" },
+    { "path": "CONTRIBUTING.md", "team": "lead" },
+    { "path": "HANDOFF.md", "team": "lead" },
+    { "path": ".claude/", "team": "lead" },
+    { "path": "docs/", "team": "lead" },
+    { "path": "docs/chemistry/", "team": "chem" },
+    { "path": "docs/design/", "team": "design" },
+    { "path": "docs/learning/", "team": "learning" },
+    { "path": "docs/platform/", "team": "platform" },
+    { "path": "docs/verified.md", "team": "platform" },
+    { "path": "src/chem/", "team": "chem" },
+    { "path": "src/chem/problems.ts", "team": "chem", "review": ["learning"] },
+    { "path": "scripts/gen-elements.mjs", "team": "chem" },
+    { "path": "tests/assess.test.ts", "team": "chem" },
+    { "path": "tests/layout.test.ts", "team": "chem" },
+    { "path": "tests/problems.test.ts", "team": "chem" },
+    { "path": "tests/solve.test.ts", "team": "chem" },
+    { "path": "tests/structure.test.ts", "team": "chem" },
+    { "path": "tests/vsepr.test.ts", "team": "chem" },
+    { "path": "src/modules/AGENTS.md", "team": "lead" },
+    { "path": "src/modules/CLAUDE.md", "team": "lead" },
+    { "path": "src/modules/registry.ts", "team": "shell" },
+    { "path": "src/modules/lewis/", "team": "lewis" },
+    { "path": "src/modules/lewis/guide.ts", "team": "lewis", "review": ["learning"] },
+    { "path": "src/modules/lewis/styles.css", "team": "lewis", "review": ["design"] },
+    { "path": "src/modules/lewis/palette.ts", "team": "lewis", "review": ["design"] },
+    { "path": "tests/guide.test.ts", "team": "lewis", "review": ["learning"] },
+    { "path": "tests/store.test.ts", "team": "lewis" },
+    { "path": "src/app/", "team": "shell" },
+    { "path": "src/shell/", "team": "shell" },
+    { "path": "app.json", "team": "shell" },
+    { "path": "src/theme/", "team": "design" },
+    { "path": "assets/", "team": "design" },
+    { "path": "scripts/make-icons.mjs", "team": "design" },
+    { "path": "tests/", "team": "platform" },
+    { "path": "scripts/", "team": "platform" },
+    { "path": "src/types/", "team": "platform" },
+    { "path": ".github/", "team": "platform" },
+    { "path": ".gitignore", "team": "platform" },
+    { "path": ".gitattributes", "team": "platform" },
+    { "path": "package.json", "team": "platform" },
+    { "path": "pnpm-lock.yaml", "team": "platform" },
+    { "path": "pnpm-workspace.yaml", "team": "platform" },
+    { "path": "tsconfig.json", "team": "platform" },
+    { "path": "eslint.config.js", "team": "platform" },
+    { "path": "vitest.config.mts", "team": "platform" },
+    { "path": "app.config.js", "team": "platform" }
+  ],
+
+  "reviewByContent": [
+    { "team": "design", "when": "a student can see the change, or something moves" },
+    { "team": "learning", "when": "a student reads it, or the problem list or its order changes" },
+    { "team": "chem", "when": "it states a chemistry fact, number or rule" },
+    { "team": "platform", "when": "it adds a package, a script, a config file or a check" },
+    { "team": "lead", "when": "it crosses a boundary or changes a contract in docs/architecture.md" }
+  ],
+
+  "imports": [
+    { "from": "src/chem/", "internal": ["src/chem/"], "packages": [] },
+    { "from": "src/theme/", "internal": ["src/theme/"], "packages": [] },
+    { "from": "src/modules/*/", "internal": ["{self}", "src/chem/", "src/theme/"], "packages": "any" },
+    { "from": "src/modules/registry.ts", "internal": ["src/chem/"], "packages": ["expo-router"] },
+    { "from": "src/shell/", "internal": ["src/shell/", "src/theme/", "src/chem/", "src/modules/registry.ts", "assets/"], "packages": "any" },
+    { "from": "src/app/", "internal": ["src/app/", "src/shell/", "src/theme/", "src/modules/", "assets/"], "packages": "any" },
+    { "from": "src/types/", "internal": [], "packages": "any" },
+    { "from": "scripts/", "internal": ["scripts/"], "packages": "any" }
+  ],
+
+  "importExceptions": [
+    { "from": "src/shell/Atom.tsx", "to": "src/modules/lewis/palette", "until": "W-011" }
+  ]
+}
