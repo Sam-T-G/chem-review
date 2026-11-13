@@ -53,6 +53,16 @@ const SHAPES: Record<string, { shape: ShapeName; angle: string }> = {
 
 export const ALL_SHAPES: ShapeName[] = [...new Set(Object.values(SHAPES).map((s) => s.shape))]
 
+/** Every count of bonded atoms and lone pairs that makes the named shape (bent and linear have two each). */
+export function shapeCases(name: ShapeName): { bonded: number; lonePairs: number }[] {
+  return Object.entries(SHAPES)
+    .filter(([, v]) => v.shape === name)
+    .map(([key]) => {
+      const [bonded, lonePairs] = key.split(',').map(Number) as [number, number]
+      return { bonded, lonePairs }
+    })
+}
+
 export function classify(bonded: number, lonePairs: number): ShapeInfo | null {
   const entry = SHAPES[`${bonded},${lonePairs}`]
   const groups = bonded + lonePairs

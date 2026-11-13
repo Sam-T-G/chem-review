@@ -1,9 +1,12 @@
 import Head from 'expo-router/head'
-import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { Platform, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
+import Animated, { FadeInDown } from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { MODULES } from '@/modules/registry'
 import { ModuleCard } from '@/shell/ModuleCard'
+import { Playground } from '@/shell/Playground'
+import { Sky } from '@/shell/Sky'
 import { useProgress } from '@/shell/progress'
 import { color, font, space } from '@/theme/tokens'
 
@@ -11,6 +14,10 @@ export default function HomeScreen() {
   // one hook per module; there is one module so far
   const lewis = useProgress('lewis')
   const done: Record<string, number> = { lewis: lewis.ids.length }
+  // wide screens: the title on the left, the atoms on the right. Phones: the atoms above the title.
+  const { width } = useWindowDimensions()
+  const wide = width >= 720
+  const play = wide ? 360 : Math.max(260, Math.min(340, width - 2 * space.l))
 
   return (
     <View style={styles.page}>
@@ -18,13 +25,20 @@ export default function HomeScreen() {
         <title>Chem Review</title>
         <meta name="description" content="Work general chemistry problems one step at a time. Build Lewis structures on a 3D board and see each molecule's shape." />
       </Head>
+      <Sky />
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
         <ScrollView contentContainerStyle={styles.content}>
           <View style={styles.column}>
-            <Text style={styles.title} accessibilityRole="header">
-              Chem Review
-            </Text>
-            <Text style={styles.lede}>Work general chemistry problems one step at a time, with a hint ready at every step.</Text>
+            <View style={wide ? styles.heroWide : styles.hero}>
+              {!wide && <Playground width={play} />}
+              <Animated.View style={wide ? styles.words : null} entering={FadeInDown.springify().damping(18).stiffness(160)}>
+                <Text style={[styles.title, wide && styles.titleWide]} accessibilityRole="header">
+                  Chem Review
+                </Text>
+                <Text style={styles.lede}>Work general chemistry problems one step at a time, with a hint ready at every step.</Text>
+              </Animated.View>
+              {wide && <Playground width={play} />}
+            </View>
             <Text style={styles.section} accessibilityRole="header">
               Modules
             </Text>
@@ -48,10 +62,14 @@ const styles = StyleSheet.create({
   // the same soft sky as the modules: pink at the top left fading to blueberry milk
   page: { flex: 1, backgroundColor: color.sky, ...sky },
   safe: { flex: 1 },
-  content: { flexGrow: 1, alignItems: 'center', paddingHorizontal: space.l, paddingTop: space.xxl, paddingBottom: 48 },
+  content: { flexGrow: 1, alignItems: 'center', paddingHorizontal: space.l, paddingTop: space.xl, paddingBottom: 48 },
   column: { width: '100%', maxWidth: 760 },
-  title: { fontFamily: font.black, fontSize: 44, lineHeight: 50, letterSpacing: -0.6, color: color.ink },
-  lede: { marginTop: space.s, maxWidth: 520, fontFamily: font.semi, fontSize: 18, lineHeight: 26, color: color.ink2 },
-  section: { marginTop: space.xxl, marginBottom: space.m, fontFamily: font.extra, fontSize: 15, color: color.ink2 },
+  hero: { alignItems: 'flex-start', gap: space.s },
+  heroWide: { flexDirection: 'row', alignItems: 'center', gap: space.xl },
+  words: { flex: 1 },
+  title: { fontFamily: font.displayBold, fontSize: 46, lineHeight: 52, color: color.ink },
+  titleWide: { fontSize: 56, lineHeight: 62 },
+  lede: { marginTop: space.s, maxWidth: 440, fontFamily: font.semi, fontSize: 18, lineHeight: 26, color: color.ink2 },
+  section: { marginTop: space.xl, marginBottom: space.m, fontFamily: font.display, fontSize: 19, color: color.ink2 },
   list: { gap: space.l },
 })

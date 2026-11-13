@@ -5,13 +5,16 @@
 // Usage: node scripts/check-browser.mjs [desktop|phone] [first problem index] [how many]
 //        node scripts/check-browser.mjs [desktop|phone] extras   (wrong answers, hints, refused moves, undo, keyboard, free build)
 //        node scripts/check-browser.mjs [desktop|phone] shell    (home screen, opening the module, the way back, saved progress)
-// Needs the built site served on port 5210 (pnpm web:serve), or MB_URL pointing at one.
+// Needs the built site served on port 5210 (pnpm web:serve), or MB_URL pointing at one (the live
+// site included: MB_URL=https://sam-t-g.github.io/chem-review).
 // MB_SHOTS=1 saves screenshots to shots/.
 import { chromium } from 'playwright'
 
 const [size = 'desktop', firstArg = '0', countArg = '99'] = process.argv.slice(2)
 const base = (process.env.MB_URL ?? 'http://localhost:5210').replace(/\/$/, '')
 const url = firstArg === 'shell' ? `${base}/` : `${base}/lewis`
+// the folder the site is served from: nothing for a site at the root, /chem-review on GitHub Pages
+const folder = new URL(base).pathname.replace(/\/$/, '')
 const phone = size === 'phone'
 const viewport = phone ? { width: 390, height: 844 } : { width: 1360, height: 840 }
 const SHOTS = process.env.MB_SHOTS === '1'
@@ -71,8 +74,10 @@ const PROBLEMS = firstArg === 'shell' ? [] : await mb(() => {
   return out
 })
 
-async function solve(p) {
-  console.log(`${p.id}`)
+/** Works one guided problem from the picker to the 3D shape. `wrong` adds wrong turns on the way:
+ *  an electron added by hand in the check step, wrong group counts, a wrong shape. */
+async function solve(p, wrong = {}) {
+  console.log(`${p.id}${Object.keys(wrong).length ? ' with wrong turns' : ''}`)
   // open the picker and choose the molecule
   await press('[data-key="picker"]')
   await press(`[data-key="pick-${p.i}"]`)
@@ -135,6 +140,18 @@ async function solve(p) {
   // 4. check: do what the hint says, one move at a time, until there is nothing left to fix
   const empty = { x: box.x + 30, y: box.y + box.height * 0.5 }
   const electron = async (atomId, key) => { await tapAt(await atomPoint(atomId)); await press(`[data-key="${key}"]`); await tapAt(empty) }
+  if (wrong.addElectron) {
+    // a wrong turn: fill an outer atom's shell with an electron the molecule does not have
+    const outerAtom = (await state()).atoms.find((a) => a.id !== centerId)
+    await electron(outerAtom.id, 'e-plus')
+    const lead = (await text('.mb-coach-lead')).trim()
+    ok(wrong.addElectron.test(lead), `${p.id}: an electron added by hand is called out (${lead})`)
+    ok(/can't be added to fill a shell/.test(await text('.mb-coach-why')), `${p.id}: the explanation says electrons can't be added`)
+    const ask = await text('.mb-coach-ask')
+    ok(/then “− electron”/.test(ask), `${p.id}: the explanation says how to take the electron off (${ask})`)
+    await electron(outerAtom.id, 'e-minus')
+    ok(await page.locator('.mb-coach').count() === 0, `${p.id}: taking the electron off clears the explanation`)
+  }
   for (let guard = 0; guard < 24; guard++) {
     const m = await mb(() => window.__mb.nextMove())
     if (!m) break
@@ -153,10 +170,30 @@ async function solve(p) {
 
   // 5. shape: count groups, commit to a shape, watch it lift
   const groups = await mb(() => { const s = window.__mb.store.getState(); const c = window.__mb.report().topology.center; const atom = s.s.atoms.find((a) => a.id === c); return s.s.bonds.filter((b) => b.a === c || b.b === c).length + Math.floor(atom.lone / 2) })
+  for (const w of wrong.groups ?? []) {
+    const before = (await points()).ringed
+    await press(`[data-key="grp-${w.n}"]`)
+    const lead = (await text('.mb-coach-lead')).trim()
+    ok(w.says.test(lead), `${p.id}: a count of ${w.n} groups is explained (${lead})`)
+    // the board rings each group the explanation is about, twice over
+    let ringed = 0
+    for (let i = 0; i < 60 && ringed < w.rings; i++) { await wait(200); ringed = (await points()).ringed - before }
+    await wait(500)
+    ringed = (await points()).ringed - before
+    ok(ringed === w.rings, `${p.id}: the board draws ${w.rings} rings for that answer (got ${ringed})`)
+    if (w.shot) await shot(w.shot)
+  }
   await press(`[data-key="grp-${groups}"]`)
-  await press(`[data-key="shp-${p.shape}"]`)
+  ok(await page.locator('.mb-coach').count() === 0, `${p.id}: the right group count clears the explanation`)
+  await press(`[data-key="shp-${wrong.shape ? wrong.shape.pick : p.shape}"]`)
   await wait(phone ? 2400 : 2100)
   st = await state()
+  if (wrong.shape) {
+    const said = await text('.mb-coach')
+    ok(wrong.shape.says.test(said), `${p.id}: picking ${wrong.shape.pick} is explained (${said.replace(/\s+/g, ' ')})`)
+    ok(new RegExp(`The shape is ${p.shape}\\.`).test(said), `${p.id}: the explanation ends with the right shape`)
+    await shot(`${p.id.replace(/\W/g, '')}-wrong-shape`)
+  }
   ok(st.view === 'shape', `${p.id}: the model lifts into the 3D view`)
   const shapeText = (await page.locator('.mb-readout dd.is-big').innerText()).toLowerCase()
   ok(shapeText === p.shape.toLowerCase(), `${p.id}: readout names the shape ${p.shape} (got ${shapeText})`)
@@ -193,9 +230,37 @@ async function extras() {
   console.log('extras: count step')
   await shot('count-start')
   for (let k = 0; k < 6; k++) await press('[data-key="inc-C"]') // 6 is carbon's atomic number
-  await press('[data-key="inc-H"]')
+  // the number that changed pops; the hydrogen number next to it stays still
+  const pops = await mb(() => [...document.querySelectorAll('.mb-stepper output')].map((o) => getComputedStyle(o).animationName))
+  ok(pops.length === 2 && pops[0] === 'mb-tick' && pops[1] === 'none', `count: pressing + on carbon moves carbon's number only (${pops.join(', ')})`)
+  for (let k = 0; k < 4; k++) await press('[data-key="inc-H"]') // 4 is how many hydrogen atoms methane has
   await press('[data-key="count-check"]')
   ok(/atomic number/.test(await text('.mb-fb')), 'count: answering 6 for carbon names the atomic-number mix-up')
+  // each wrong count gets its own explanation in three parts: what the number is, why it is not the answer, what to do
+  const cards = page.locator('.mb-rows .mb-coach')
+  ok(await cards.count() === 2, `count: two wrong counts get two explanations (${await cards.count()})`)
+  ok(/^6 is carbon's atomic number\.$/.test((await cards.nth(0).locator('.mb-coach-lead').innerText()).trim()), 'count: the first line says what 6 is')
+  ok(/2 of them are in the inner shell/.test(await cards.nth(0).locator('.mb-coach-why').innerText()), 'count: the second line says why 6 is too many')
+  ok(/outer shell/.test(await cards.nth(0).locator('.mb-coach-ask').innerText()), 'count: the third line says what to count')
+  ok(/4 is the number of hydrogen atoms in methane/.test(await cards.nth(1).innerText()), 'count: answering 4 for hydrogen says 4 is the number of hydrogen atoms')
+  // the picture of carbon's shells: 2 gray electrons inside, 4 on the outer ring
+  const fig = page.locator('.mb-shells[data-el="C"]')
+  ok(await fig.locator('.mb-sh-core').count() === 2 && await fig.locator('.mb-sh-e').count() === 4, 'count: the picture of carbon shows 2 inner and 4 outer electrons')
+  ok(await cards.nth(1).locator('.mb-shells').count() === 0, 'count: the hydrogen explanation has no picture (the count of atoms was the mix-up)')
+  await fig.scrollIntoViewIfNeeded()
+  await wait(250)
+  const figBox = await fig.locator('svg').boundingBox()
+  const onTop = figBox ? await mb(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('.mb-shells'), { x: figBox.x + figBox.width / 2, y: figBox.y + figBox.height / 2 }) : false
+  ok(!!figBox && figBox.width >= 70 && figBox.height >= 70 && onTop, `count: the picture is on screen and not covered (${figBox ? Math.round(figBox.width) + ' x ' + Math.round(figBox.height) : 'missing'})`)
+  await shot('count-coach')
+  // changing the number keeps the explanation up, so the picture can still be counted from
+  await press('[data-key="dec-H"]')
+  ok(await page.locator('.mb-rows .mb-coach').count() === 2, 'count: the explanations stay while a number is changed')
+  ok(await page.locator('.mb-rows .mb-coach.is-same').count() === 2, 'count: an explanation already on screen does not shake again')
+  await press('[data-key="dec-H"]'); await press('[data-key="dec-H"]')
+  await press('[data-key="count-check"]')
+  // carbon's second miss: the same first line, now with the group rule
+  ok(/atomic number/.test(await text('.mb-fb')) && /Carbon is in group 14/.test(await text('.mb-coach-ask')), 'count: a second miss on carbon adds the group rule')
   ok(await page.locator('.mb-row[data-state="right"]').count() === 1, 'count: hydrogen is marked right while carbon is not')
   ok(await page.locator('[data-key="next"]').isDisabled(), 'count: Next stays off until the counts are right')
   await press('[data-key="hint"]')
@@ -217,6 +282,21 @@ async function extras() {
   await page.keyboard.press('Enter')
   await wait(150)
   ok(/Count every atom/.test(await text('.mb-total .mb-fb')), 'count: a total of 5 says to count every atom')
+  ok(/5 counts hydrogen once/.test(await text('.mb-total .mb-coach-lead')) && /4 hydrogen atoms/.test(await text('.mb-total .mb-coach-why')), 'count: a total of 5 says hydrogen was counted once')
+  // the picture of how the total is built: one ball for the carbon atom, four for the hydrogen atoms, no sums yet
+  const tally = page.locator('.mb-total .mb-tally')
+  const perRow = await tally.locator('li').evaluateAll((rows) => rows.map((li) => li.querySelectorAll('.mb-ball').length))
+  ok(perRow.join(',') === '1,4', `count: the picture has a ball for every atom (${perRow.join(',')})`)
+  ok(/1 carbon atom brings 4/.test(await tally.innerText()) && /4 hydrogen atoms bring 1 each/.test(await tally.innerText()), 'count: the picture says what each kind of atom brings')
+  ok((await tally.getAttribute('data-reveal')) === 'atoms' && /\?/.test(await tally.locator('.mb-tally-total').innerText()), 'count: the first miss leaves the sums and the total to the student')
+  ok(!/[×=]/.test(await text('.mb-total .mb-coach')), 'count: the explanation is in words, with no bare sum')
+  await shot('total-coach')
+  // a second miss that fits no known mix-up: each kind of atom is added up, in words and in the picture
+  await page.keyboard.type('7', { delay: 30 })
+  await page.keyboard.press('Enter')
+  await wait(150)
+  ok(/The 4 hydrogen atoms bring 1 each, which makes 4/.test(await text('.mb-total .mb-coach-why')), 'count: a second wrong total adds up each kind of atom')
+  ok((await tally.getAttribute('data-reveal')) === 'sums' && (await tally.locator('.mb-tally-sum').allInnerTexts()).join(',') === '4,4', 'count: the picture now shows each row\'s sum')
   // the wrong answer comes back selected, so typing replaces it
   await page.keyboard.type('8', { delay: 30 })
   await page.keyboard.press('Enter')
@@ -241,8 +321,23 @@ async function extras() {
   await page.keyboard.type('24', { delay: 30 })
   await press('[data-key="total-check"]')
   await press('[data-key="next"]')
+  // a move to the next step: the old step's text leaves as bubbles that pop, and the new step's text blows up into place
+  ok(await page.locator('.mb-fx .mb-ghost').count() === 1 && await page.locator('.mb-fx .mb-drop').count() > 0, 'step change: the old text is drawn once more to deflate, and small bubbles burst from it')
+  // the deflating copy of the old step is out of reach: one title, and it is the new step's
+  ok(await page.locator('.mb-title').count() === 1 && /Put the atoms on the board/.test(await text('.mb-title')), 'step change: only the new step can be found on the page while the old one deflates')
+  const arriving = await mb(() => [...document.querySelectorAll('.mb-step > *')].map((n) => `${n.classList.contains('is-new')}:${getComputedStyle(n).animationName.split(',')[0].trim()}`))
+  ok(arriving.length >= 3 && arriving.every((a) => a === 'true:mb-inflate'), `step change: every chunk of the new step blows up into place (${arriving.join(' ')})`)
+  await wait(900)
+  ok(await page.locator('.mb-fx .mb-ghost, .mb-fx .mb-drop').count() === 0, 'step change: the old text and the bubbles are gone a moment later')
+  // the animation clock runs with the frames, which a software renderer draws slowly: wait for the end instead of a fixed time
+  const settled = await page.waitForFunction(() => [...document.querySelectorAll('.mb-step > *')].every((n) => { const cs = getComputedStyle(n); return cs.opacity === '1' && (cs.scale === 'none' || cs.scale === '1' || cs.scale === '1 1') }), null, { timeout: 8000 }).then(() => true, () => false)
+  ok(settled, 'step change: the new text ends at full size and fully visible')
   await press('[data-key="mid-O"]')
+  // inside a step only what is new moves: the explanation blows up, the question above it stays still
+  const inStep = await mb(() => ({ q: document.querySelector('.mb-step > .mb-q').classList.contains('is-new'), card: document.querySelector('.mb-step > .mb-coach').classList.contains('is-new') }))
+  ok(inStep.q === false && inStep.card === true, `in a step: the new explanation arrives and the question stays still (${JSON.stringify(inStep)})`)
   ok(/Pick again/.test(await text('.mb-fb')), 'middle: picking oxygen for carbonate says why and asks again')
+  ok(/3 oxygen atoms, and only 1 atom is in the middle/.test(await text('.mb-coach-lead')), 'middle: picking oxygen says there are 3 oxygen atoms and 1 middle')
   ok(await page.locator('[data-tray]').count() === 2, 'middle: the tray is ready with carbon and oxygen')
   await press('[data-key="mid-C"]')
   ok(/least electronegative/.test(await text('.mb-fb')), 'middle: picking carbon gives the rule')
@@ -261,7 +356,17 @@ async function extras() {
   await press('[data-key="mid-C"]')
   // a tap on a tray chip drops the atom on a free spot
   await press('[data-tray="C"]'); await wait(300)
-  await press('[data-tray="H"]'); await wait(300)
+  await press('[data-tray="H"]')
+  // a line whose words changed ("1 of 5" to "2 of 5") leaves and arrives the same way as any other text
+  const line = await mb(() => { const n = [...document.querySelectorAll('.mb-step > .mb-fb')].pop(); return `${n.textContent.trim()}|${n.classList.contains('is-new')}|${getComputedStyle(n).animationName}` })
+  ok(/^2 of 5 atoms on the board\.\|true\|mb-inflate$/.test(line), `text: a progress line that changes blows up into place like any other text (${line})`)
+  ok(await page.locator('.mb-fx .mb-ghost').count() === 1, 'text: the line it replaces deflates')
+  // the body text above it did not change, so it stays still
+  ok(await mb(() => !document.querySelector('.mb-step > .mb-body').classList.contains('is-new')), 'text: the paragraph above the line stays still')
+  // one kind of arrival and one kind of leaving, everywhere: no other entrance animation is in use
+  const names = await mb(() => [...new Set([...document.querySelectorAll('.mb-panel *, .mb-ledger *, .mb-dock *')].flatMap((n) => getComputedStyle(n).animationName.split(',').map((x) => x.trim())))].sort().join(' '))
+  ok(/mb-inflate/.test(names) && !/mb-rise|mb-wobble/.test(names), `text: one arrival animation is in use, with no leftover slide or blink (${names})`)
+  await wait(300)
   await press('[data-tray="H"]'); await wait(300)
   let st = await state()
   ok(st.atoms.length === 3, `tray: tapping a chip puts the atom on the board (${st.atoms.length} of 3)`)
@@ -279,6 +384,9 @@ async function extras() {
   await drag(dot, await atomPoint(h1))
   st = await state()
   ok(st.bonds.length === 1, 'board: dragging a carbon dot onto hydrogen makes a bond')
+  // the counter: the bond changed "In bonds" and "Unshared", so those two pop and the total stays still
+  const tiles = await mb(() => [...document.querySelectorAll('.mb-tile-v b')].map((b) => getComputedStyle(b).animationName))
+  ok(tiles.length === 3 && tiles[0] === 'none' && tiles[1] === 'mb-tick' && tiles[2] === 'mb-tick', `board: a new bond moves the two counter numbers that changed, and the total stays still (${tiles.join(', ')})`)
   // a second bond to hydrogen is refused with the reason
   await drag(await atomPoint(h1), await atomPoint(c))
   st = await state()
@@ -432,6 +540,22 @@ async function extras() {
     await page.setViewportSize(viewport)
     await wait(400)
   }
+
+  // ---- wrong turns in the check and shape steps: carbon dioxide, then water
+  console.log('extras: wrong turns')
+  await press('[data-key="mode-guided"]')
+  await solve(byId('CO2'), {
+    addElectron: /^The board has 17 electrons, 1 more than carbon dioxide has\.$/,
+    groups: [
+      { n: 4, says: /^4 counts every shared pair as its own group\.$/, rings: 4, shot: 'groups-coach' },
+      { n: 6, says: /^6 counts the lone pairs on the outer atoms\.$/, rings: 4 },
+    ],
+    shape: { pick: 'bent', says: /Bent is the shape for 2 atoms and 1 or 2 lone pairs/ },
+  })
+  await solve(byId('H2O'), {
+    groups: [{ n: 2, says: /^2 is the number of atoms bonded to oxygen\.$/, rings: 4 }],
+    shape: { pick: 'linear', says: /Linear would be the shape if oxygen had no lone pairs/ },
+  })
 }
 
 async function shell() {
@@ -445,7 +569,7 @@ async function shell() {
   await noSideScroll('home')
   if (phone) await card.tap(); else await card.click()
   await page.waitForFunction(() => !!window.__mb, null, { timeout: 15000 })
-  ok(new URL(page.url()).pathname === '/lewis', `home: the card opens /lewis (${page.url()})`)
+  ok(new URL(page.url()).pathname === `${folder}/lewis`, `home: the card opens /lewis (${page.url()})`)
   ok(await page.locator('.mb-canvas').count() === 1, 'module: the board is on screen')
   ok((await page.title()) === 'Lewis structures and shapes', `module: the page title names the module (${await page.title()})`)
   const fonts = await mb(() => document.fonts.check('900 20px "Nunito Variable"'))
@@ -459,7 +583,7 @@ async function shell() {
   await solve(list)
   await press('[data-key="exit"]')
   await page.waitForFunction(() => !window.__mb, null, { timeout: 10000 })
-  ok(new URL(page.url()).pathname === '/', `back: the back button returns to the home screen (${page.url()})`)
+  ok(new URL(page.url()).pathname === `${folder}/`, `back: the back button returns to the home screen (${page.url()})`)
   ok(await page.locator('.mb-canvas').count() === 0, 'back: the board is taken down')
   await page.waitForTimeout(300)
   ok(/1 of 20 molecules finished/.test(await page.getByRole('link', { name: /Lewis structures and shapes/ }).innerText()), 'back: the card now says 1 of 20 molecules finished')

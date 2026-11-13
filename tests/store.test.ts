@@ -41,11 +41,14 @@ describe('guided steps', () => {
     const c = store.getState().count
     expect(c.right.H).toBe(true)
     expect(c.right.C).toBeUndefined()
-    expect(c.feedback.C).toMatch(/atomic number/)
+    expect(c.feedback.C).toMatchObject({ lead: "6 is carbon's atomic number.", show: { kind: 'shells', el: 'C' } })
+    expect(c.tries.C).toBe(1)
     store.setCount('H', 5) // locked: no change
     expect(store.getState().count.answers.H).toBe(1)
+    // the explanation stays up while the number is changed, and the row stops showing as wrong
     store.setCount('C', 4)
-    expect(store.getState().count.feedback.C).toBeUndefined()
+    expect(store.getState().count.feedback.C).toMatchObject({ lead: "6 is carbon's atomic number." })
+    expect(store.getState().count.changed.C).toBe(true)
     store.checkCounts()
     expect(store.getState().count.right.C).toBe(true)
   })
@@ -82,17 +85,43 @@ describe('guided steps', () => {
     expect(store.getState().shape.pick).toBeNull()
     store.answerGroups(5)
     expect(store.getState().shape.groupsRight).toBe(false)
+    // a wrong count is explained, and each one gets a new number so the board rings the groups once per answer
+    const first = store.getState().shape.groupsCoach!
+    expect(first).toMatchObject({ lead: '5 counts carbon as a group.', show: { kind: 'groups', which: 'all' } })
+    store.answerGroups(3)
+    expect(store.getState().shape.groupsCoach!.n).toBeGreaterThan(first.n)
     store.answerGroups(4)
+    expect(store.getState().shape).toMatchObject({ groupsRight: true, groupsCoach: null })
     store.pickShape('square planar')
     const s = store.getState()
     expect(s.shape.pickRight).toBe(false)
-    expect(s.shape.pickFeedback).toMatch(/^The shape is tetrahedral/)
+    expect(s.shape.pickFeedback).toBeNull()
+    expect(s.shape.pickCoach).toMatchObject({ lead: 'Square planar is how the 4 bonds look in a flat drawing, 90° apart.', ask: 'The shape is tetrahedral.' })
     expect(s.view).toBe('shape')
     expect(s.solved).toContain('CH4')
     store.next()
     expect(store.getState().problem).toBe(1)
     expect(store.getState().step).toBe('count')
     expect(store.getState().s.atoms).toHaveLength(0)
+  })
+
+  it('hints in the count step are about the atoms first, then about the total', () => {
+    store.moreHint()
+    store.moreHint()
+    expect(store.currentHints()[0]).toMatch(/periodic table/)
+    expect(store.totalNext()).toBe(false)
+    store.setCount('C', 4)
+    store.setCount('H', 1)
+    store.checkCounts()
+    // every count is right: the hints start over, and they say how the total is built
+    expect(store.totalNext()).toBe(true)
+    expect(store.currentHints()).toEqual([])
+    expect(store.hintsLeft()).toBe(2)
+    store.moreHint()
+    expect(store.currentHints()).toEqual(['The total is every valence electron in methane: the carbon atom brings 4 and each of the 4 hydrogen atoms brings 1.'])
+    store.typeTotal(7)
+    store.checkTotal()
+    expect(store.getState().count.totalFeedback).toMatchObject({ lead: 'The total is not 7.', show: { kind: 'tally', reveal: 'atoms' } })
   })
 
   it('a refused move leaves the board alone and shows the reason', () => {
@@ -105,7 +134,7 @@ describe('guided steps', () => {
     const before = store.getState().s
     store.bond(h, c)
     expect(store.getState().s).toBe(before)
-    expect(store.getState().toast?.text).toBe('Hydrogen already has 2 electrons around it. Its outer shell holds 2.')
+    expect(store.getState().toast?.text).toBe('Hydrogen already has 2 electrons around it. Its outer shell holds 2, so a hydrogen atom makes only 1 bond.')
   })
 
   it('undo steps back one move at a time, and editing resets the shape answers', () => {

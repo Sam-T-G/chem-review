@@ -5,12 +5,15 @@
 //
 // The scene owns no chemistry. It reports gestures through callbacks and redraws on sync().
 import * as THREE from 'three'
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { assess } from '../../chem/assess'
 import { ELEMENTS, type El } from '../../chem/elements'
 import { atomRadius, bondLength, layoutStep, slotsFor, type P2 } from '../../chem/layout2d'
 import { bondWeight, isTextbook, makeDomains, normalize, textbookNear, tick, type Dom, type V3 } from '../../chem/repulsion'
 import { atomById, bondsOf, formalCharge, shellCount, type Structure } from '../../chem/structure'
 import { centerDomains } from '../../chem/vsepr'
+import { Face } from './face'
+import { Ripples, Sparks, glowTexture } from './fx'
 import { BALL } from './palette'
 
 export interface SceneCallbacks {
@@ -20,6 +23,8 @@ export interface SceneCallbacks {
   bond(a: string, b: string): void
   place(el: El, at: P2 | null): void
   remove(id: string): void
+  /** Something the hand should feel on a phone: an atom landing, a bond forming, a refused move. */
+  feel?(kind: 'land' | 'bond' | 'refuse'): void
 }
 
 export interface SceneInput {
@@ -36,6 +41,13 @@ export interface SceneInput {
   showCharges: boolean
   /** Per-atom shell report from the checker: id -> [count, target, status]. */
   shells: Map<string, { count: number; target: number; status: 'short' | 'full' | 'over' }>
+  /** The last move the board refused: the atoms involved shake their heads. `n` goes up by one each time. */
+  refused: { ids: string[]; n: number } | null
+  /** Electron groups around the middle atom to ring after a wrong group count: its double and
+   *  triple bonds, its lone pairs, or every group in turn. `n` goes up by one each time. */
+  point: { n: number; which: 'multiple' | 'lone' | 'all' } | null
+  /** Bond angles to mark on the 3D model: the angle each is close to in the textbook arrangement, and the words to print. */
+  angles: { near: number; text: string; under: boolean }[]
 }
 
 export interface Insets {
@@ -52,6 +64,8 @@ const DOT_R = 0.085
 /** Count step: the sample atoms and their dots are drawn this much larger. */
 const SPECIMEN_SCALE = 1.75
 const TILT = 0.34 // flat view: radians away from straight down
+/** Width of the tray's raised rim, in board units. */
+const RIM = 0.2
 
 type Hit = { kind: 'atom'; id: string } | { kind: 'dot'; atomId: string } | { kind: 'bond'; id: string } | { kind: 'lobe'; dom: number } | null
 
@@ -60,11 +74,27 @@ interface AtomView {
   el: El
   r: number
   mesh: THREE.Mesh
+  /** A dark shell just behind the ball: the ink outline of a toy. */
+  outline: THREE.Mesh
   label: THREE.Sprite
+  face: Face
   /** The ball's shadow on the board. */
   shade: THREE.Mesh
   pos: THREE.Vector3
   grow: number
+  /** Each atom bobs to its own rhythm. */
+  phase: number
+  /** Squash and stretch: 0 at rest, above 0 is taller and thinner. A spring pulls it back. */
+  squash: number
+  squashV: number
+  /** Height above its resting place while a new atom drops in. */
+  drop: number
+  dropV: number
+  landed: boolean
+  /** Seconds of head-shake left after a refused move. */
+  shake: number
+  /** 0 to 1: the pointer is over this atom. */
+  hover: number
   badge: HTMLElement
   charge: HTMLElement
   hit: HTMLButtonElement
@@ -75,6 +105,8 @@ interface DotView {
   pos: THREE.Vector3
   grow: number
   dying: boolean
+  /** Each electron jitters to its own rhythm. */
+  phase: number
 }
 
 const v3 = (a: V3) => new THREE.Vector3(a[0], a[1], a[2])
@@ -129,7 +161,12 @@ export class Scene {
   private readonly ballGeo = new THREE.SphereGeometry(1, 40, 28)
   private readonly dotGeo = new THREE.SphereGeometry(1, 18, 14)
   private readonly stickGeo = new THREE.CylinderGeometry(1, 1, 1, 14, 1)
-  private readonly dotMat = new THREE.MeshStandardMaterial({ color: COLOR.electron, emissive: COLOR.electronGlow, emissiveIntensity: 0.35, roughness: 0.35 })
+  private readonly dotMat = new THREE.MeshStandardMaterial({ color: COLOR.electron, emissive: COLOR.electronGlow, emissiveIntensity: 0.55, roughness: 0.3 })
+  private readonly glow = glowTexture()
+  /** The halo around every electron. One material, so they all pulse together. */
+  private readonly haloMat = new THREE.SpriteMaterial({ map: this.glow, color: 0xffc23a, transparent: true, opacity: 0.5, depthWrite: false, blending: THREE.AdditiveBlending })
+  private readonly sparks: Sparks
+  private readonly ripples: Ripples
   private readonly rimMat = new THREE.MeshBasicMaterial({ color: COLOR.ink, side: THREE.BackSide })
   private readonly stickMat = new THREE.MeshStandardMaterial({ color: COLOR.bond, roughness: 0.5 })
   private readonly stickSelMat = new THREE.MeshStandardMaterial({ color: COLOR.bondSel, roughness: 0.5, emissive: 0x7467c2, emissiveIntensity: 0.5 })
@@ -148,7 +185,7 @@ export class Scene {
   private readonly rubber: THREE.Mesh
   private ghost: { el: El; mesh: THREE.Mesh; startX: number; startY: number; moved: boolean } | null = null
 
-  private input: SceneInput = { s: { atoms: [], bonds: [], seq: 1 }, editable: false, selection: null, view: 'flat', specimen: false, showCounts: false, showCharges: false, shells: new Map() }
+  private input: SceneInput = { s: { atoms: [], bonds: [], seq: 1 }, editable: false, selection: null, view: 'flat', specimen: false, showCounts: false, showCharges: false, shells: new Map(), refused: null, point: null, angles: [] }
   private insets: Insets = { top: 96, right: 16, bottom: 132, left: 16 }
   private halfW = 5.6
   private halfH = 3.5
@@ -160,6 +197,26 @@ export class Scene {
   private orbit = { az: 0.55, pol: 1.2, zoom: 1 }
   private dotsDirty = true
   private reduced = false
+  /** Seconds since the scene started: the clock for every idle motion. */
+  private time = 0
+  /** Where the pointer last was on the board, and when: the atoms look at it. */
+  private pointer: { at: THREE.Vector3; seen: number } | null = null
+  private hoverId: string | null = null
+  /** Bonds and electrons that just appeared: celebrated on the next frame, once positions are known. */
+  private pending: ({ kind: 'bond'; a: string; b: string } | { kind: 'electron'; id: string })[] = []
+  private refusedSeen = -1
+  /** Dotted arcs between two bonds on the 3D model, each with the textbook angle printed beside it. */
+  private arcs: { beads: THREE.InstancedMesh; mat: THREE.MeshBasicMaterial; label: HTMLElement; pair: [string, string] | null; show: number }[] = []
+  private readonly beadGeo = new THREE.SphereGeometry(1, 10, 8)
+  /** Atoms waiting for their turn to hop after a step is finished. */
+  private cheers: { id: string; at: number }[] = []
+  private pointSeen = -1
+  /** Rings still to draw around electron groups: when, and how to find the group at that moment (atoms may still be moving). */
+  private groupRings: { at: number; where: () => { x: number; z: number; from: number; to: number } | null }[] = []
+  /** How many group rings have been drawn, for tests. */
+  private ringed = 0
+  /** Seconds since the 3D model was last touched; it turns slowly on its own after a pause. */
+  private untouched = 0
 
   // shape view
   private liftRaw = 0
@@ -194,11 +251,18 @@ export class Scene {
     this.renderer.domElement.setAttribute('aria-hidden', 'true')
     wrap.appendChild(this.renderer.domElement)
 
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0xd6cff5, 2.1))
-    const sun = new THREE.DirectionalLight(0xffffff, 1.7)
+    // A plain lit room for the balls to reflect: it is what makes them read as glossy candy.
+    const pmrem = new THREE.PMREMGenerator(this.renderer)
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+    pmrem.dispose()
+    this.scene.environmentIntensity = 0.5
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0xd6cff5, 1.55))
+    const sun = new THREE.DirectionalLight(0xffffff, 1.5)
     sun.position.set(-5, 14, 6)
     this.scene.add(sun)
     this.scene.add(this.boardGroup)
+    this.sparks = new Sparks(this.scene, this.glow)
+    this.ripples = new Ripples(this.scene)
 
     const ringGeo = new THREE.TorusGeometry(1, 0.05, 10, 64)
     ringGeo.rotateX(Math.PI / 2)
@@ -217,6 +281,7 @@ export class Scene {
     el.addEventListener('pointerup', this.onUp)
     el.addEventListener('pointercancel', this.onCancel)
     el.addEventListener('lostpointercapture', this.onCancel)
+    el.addEventListener('pointerleave', this.onLeave)
     el.addEventListener('wheel', this.onWheel, { passive: false })
 
     this.ro = new ResizeObserver(() => this.fit())
@@ -236,6 +301,7 @@ export class Scene {
     el.removeEventListener('pointerup', this.onUp)
     el.removeEventListener('pointercancel', this.onCancel)
     el.removeEventListener('lostpointercapture', this.onCancel)
+    el.removeEventListener('pointerleave', this.onLeave)
     el.removeEventListener('wheel', this.onWheel)
     this.scene.traverse((obj) => {
       const mesh = obj as THREE.Mesh
@@ -247,6 +313,8 @@ export class Scene {
       }
     })
     for (const tex of this.labelTex.values()) tex.dispose()
+    this.scene.environment?.dispose()
+    this.glow.dispose()
     this.overlay.replaceChildren()
     this.renderer.dispose()
     this.renderer.domElement.remove()
@@ -271,9 +339,10 @@ export class Scene {
       // Gone, or the same id now names a different element: the Guided and Free build boards both
       // number their atoms from a1, so switching boards can swap what an id means.
       if (atomById(s, id)?.el !== view.el) {
-        this.scene.remove(view.mesh, view.label, view.shade)
+        this.scene.remove(view.mesh, view.outline, view.label, view.shade, view.face.group)
         ;(view.mesh.material as THREE.Material).dispose()
         view.label.material.dispose()
+        view.face.dispose()
         view.badge.remove()
         view.charge.remove()
         view.hit.remove()
@@ -298,6 +367,7 @@ export class Scene {
     for (const key of wanted) {
       if (this.sticks.has(key)) continue
       const mesh = new THREE.Mesh(this.stickGeo, this.stickMat)
+      mesh.userData.born = this.time
       this.scene.add(mesh)
       this.sticks.set(key, mesh)
     }
@@ -351,6 +421,37 @@ export class Scene {
     }
 
     this.dotsDirty = true
+    // what just happened on the board, for the sparks and hops on the next frame
+    if (!input.specimen && !before.specimen && before.s !== s) {
+      for (const b of s.bonds) {
+        const was = before.s.bonds.find((x) => x.id === b.id)?.order ?? 0
+        if (b.order > was && atomById(before.s, b.a) && atomById(before.s, b.b)) this.pending.push({ kind: 'bond', a: b.a, b: b.b })
+      }
+      if (s.bonds.length === before.s.bonds.length && s.bonds.every((b) => before.s.bonds.find((x) => x.id === b.id)?.order === b.order)) {
+        for (const atom of s.atoms) {
+          const was = atomById(before.s, atom.id)
+          if (was && atom.lone > was.lone) this.pending.push({ kind: 'electron', id: atom.id })
+        }
+      }
+    }
+    // a refusal from before this board was opened is old news
+    if (this.refusedSeen < 0) this.refusedSeen = input.refused?.n ?? 0
+    if (input.refused && input.refused.n !== this.refusedSeen) {
+      this.refusedSeen = input.refused.n
+      for (const id of input.refused.ids) {
+        const view = this.atoms.get(id)
+        if (view) view.shake = 0.5
+      }
+      this.cb.feel?.('refuse')
+    }
+    // a wrong group count: ring the groups it was about (not ones from before this board was opened)
+    if (this.pointSeen < 0) this.pointSeen = input.point?.n ?? 0
+    if (before.s !== s || input.view !== 'flat') this.groupRings.length = 0
+    if (input.point && input.point.n !== this.pointSeen) {
+      this.pointSeen = input.point.n
+      this.groupRings.length = 0
+      if (input.view === 'flat') this.ringGroups(input.point.which)
+    }
     if (input.view === 'shape' && (before.view !== 'shape' || before.s !== s)) this.enterShape()
     if (input.view === 'flat') this.liftTarget = 0
     if (!input.editable) {
@@ -382,7 +483,10 @@ export class Scene {
       if (Math.hypot(e.clientX - g.startX, e.clientY - g.startY) > 6) g.moved = true
       const p = this.boardPoint(e.clientX, e.clientY, atomRadius(g.el))
       g.mesh.visible = g.moved && !!p
-      if (p) g.mesh.position.set(p.x, atomRadius(g.el) + 0.25, -p.y)
+      if (p) {
+        g.mesh.position.set(p.x, atomRadius(g.el) + 0.25, -p.y)
+        this.pointer = { at: g.mesh.position.clone(), seen: this.time }
+      }
     }
     const up = (e: PointerEvent) => {
       if (e.pointerId !== pointerId) return
@@ -407,6 +511,57 @@ export class Scene {
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
     window.addEventListener('pointercancel', up)
+  }
+
+  /** A step was finished: every atom hops, one after another, with a few sparks. */
+  /** Queues a ring around each of the named electron groups of the middle atom, one after another,
+   *  then once more. A bonded atom gets a ring around it, a double or triple bond a ring around the
+   *  bond, a lone pair a ring around its 2 electrons. */
+  private ringGroups(which: 'multiple' | 'lone' | 'all') {
+    const s = this.input.s
+    const top = assess(s).topology
+    if (top.kind !== 'star' || this.reduced) return
+    const centerId = top.center
+    type Spot = { x: number; z: number; from: number; to: number }
+    const spots: (() => Spot | null)[] = []
+    if (which !== 'lone') {
+      for (const b of bondsOf(s, centerId)) {
+        const otherId = b.a === centerId ? b.b : b.a
+        if (which === 'all') {
+          spots.push(() => {
+            const other = this.atoms.get(otherId)
+            return other ? { x: other.pos.x, z: other.pos.z, from: other.r * 0.9, to: other.r * 1.75 } : null
+          })
+        } else if (b.order > 1) {
+          spots.push(() => {
+            const f = this.bondFrame(b.a, b.b)
+            return f ? { x: f.mid.x, z: f.mid.z, from: 0.22, to: 0.8 } : null
+          })
+        }
+      }
+    }
+    if (which !== 'multiple') {
+      const pairs = slotsFor(s, this.positions, centerId, this.pinned ?? undefined).groups.filter((g) => g.count === 2).length
+      for (let k = 0; k < pairs; k++) {
+        spots.push(() => {
+          const center = this.atoms.get(centerId)
+          const g = slotsFor(this.input.s, this.positions, centerId, this.pinned ?? undefined).groups.filter((x) => x.count === 2)[k]
+          if (!center || !g) return null
+          const reach = center.r + DOT_R * 0.55
+          return { x: center.pos.x + Math.cos(g.angle) * reach, z: center.pos.z - Math.sin(g.angle) * reach, from: 0.16, to: 0.6 }
+        })
+      }
+    }
+    const beat = 0.34
+    spots.forEach((where, i) => {
+      for (const round of [0, 1]) this.groupRings.push({ where, at: this.time + 0.25 + i * beat + round * (spots.length * beat + 0.55) })
+    })
+  }
+
+  cheer() {
+    if (this.reduced) return
+    let i = 0
+    for (const atom of this.input.s.atoms) this.cheers.push({ id: atom.id, at: this.time + 0.09 * i++ })
   }
 
   // ------------------------------------------------------------------ build
@@ -440,14 +595,17 @@ export class Scene {
 
   private makeAtom(id: string, el: El): AtomView {
     const r = atomRadius(el) * (this.input.specimen ? SPECIMEN_SCALE : 1)
-    const mesh = new THREE.Mesh(this.ballGeo, new THREE.MeshStandardMaterial({ color: BALL[el].color, roughness: 0.42 }))
+    const mesh = new THREE.Mesh(this.ballGeo, new THREE.MeshPhysicalMaterial({ color: BALL[el].color, roughness: 0.34, clearcoat: 0.65, clearcoatRoughness: 0.3 }))
+    const outline = new THREE.Mesh(this.ballGeo, this.rimMat)
+    const face = new Face(BALL[el].color)
     // a soft round shadow on the board under the ball (see blobTexture)
     const shade = new THREE.Mesh(this.blobGeo, this.blobMat)
     shade.rotation.x = -Math.PI / 2
     shade.renderOrder = 1
     const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.labelTexture(el), transparent: true, depthWrite: false }))
-    label.scale.setScalar(r * 1.5)
-    this.scene.add(mesh, label, shade)
+    label.scale.setScalar(r * 1.24)
+    label.renderOrder = 4
+    this.scene.add(mesh, outline, label, shade, face.group)
 
     // both start invisible: the frame loop fades them in where the step shows them
     const badge = document.createElement('span')
@@ -463,7 +621,21 @@ export class Scene {
     hit.addEventListener('click', () => this.cb.tapAtom(id, true))
     this.overlay.append(hit, badge, charge)
     const p = this.positions.get(id) ?? { x: 0, y: 0 }
-    return { id, el, r, mesh, label, shade, pos: new THREE.Vector3(p.x, r, -p.y), grow: this.reduced ? 1 : 0.3, badge, charge, hit }
+    // a new atom drops onto the board and lands with a bounce; the count step's samples just pop in
+    const drops = !this.reduced && !this.input.specimen
+    return {
+      id, el, r, mesh, outline, label, face, shade, badge, charge, hit,
+      pos: new THREE.Vector3(p.x, r, -p.y),
+      grow: this.reduced ? 1 : drops ? 0.8 : 0.3,
+      phase: Math.random() * 10,
+      squash: 0,
+      squashV: 0,
+      drop: drops ? 1.3 : 0,
+      dropV: 0,
+      landed: !drops,
+      shake: 0,
+      hover: 0,
+    }
   }
 
   private buildBoard() {
@@ -480,43 +652,77 @@ export class Scene {
     this.boardGroup.clear()
     const w = this.halfW
     const h = this.halfH
-    const rad = 0.7
-    const shape = new THREE.Shape()
-    shape.moveTo(-w + rad, -h)
-    shape.lineTo(w - rad, -h)
-    shape.absarc(w - rad, -h + rad, rad, -Math.PI / 2, 0, false)
-    shape.lineTo(w, h - rad)
-    shape.absarc(w - rad, h - rad, rad, 0, Math.PI / 2, false)
-    shape.lineTo(-w + rad, h)
-    shape.absarc(-w + rad, h - rad, rad, Math.PI / 2, Math.PI, false)
-    shape.lineTo(-w, -h + rad)
-    shape.absarc(-w + rad, -h + rad, rad, Math.PI, Math.PI * 1.5, false)
-    const slab = new THREE.ExtrudeGeometry(shape, { depth: 0.34, bevelEnabled: true, bevelSize: 0.06, bevelThickness: 0.06, bevelSegments: 3, curveSegments: 20 })
-    slab.rotateX(-Math.PI / 2)
-    slab.translate(0, -0.4, 0)
-    const board = new THREE.Mesh(slab, new THREE.MeshStandardMaterial({ color: COLOR.board, roughness: 0.95 }))
-    this.boardGroup.add(board)
+    const rounded = (hw: number, hh: number, rad: number) => {
+      const sh = new THREE.Shape()
+      sh.moveTo(-hw + rad, -hh)
+      sh.lineTo(hw - rad, -hh)
+      sh.absarc(hw - rad, -hh + rad, rad, -Math.PI / 2, 0, false)
+      sh.lineTo(hw, hh - rad)
+      sh.absarc(hw - rad, hh - rad, rad, 0, Math.PI / 2, false)
+      sh.lineTo(-hw + rad, hh)
+      sh.absarc(-hw + rad, hh - rad, rad, Math.PI / 2, Math.PI, false)
+      sh.lineTo(-hw, -hh + rad)
+      sh.absarc(-hw + rad, -hh + rad, rad, Math.PI, Math.PI * 1.5, false)
+      return sh
+    }
+    const floor = rounded(w, h, 0.7)
 
-    // faint dimples, so the board reads as a surface and motion across it is visible
+    // the tray's body: a thick slab whose sides show under the rim
+    const slab = new THREE.ExtrudeGeometry(rounded(w + RIM, h + RIM, 0.7 + RIM), { depth: 0.5, bevelEnabled: true, bevelSize: 0.07, bevelThickness: 0.07, bevelSegments: 3, curveSegments: 20 })
+    slab.rotateX(-Math.PI / 2)
+    slab.translate(0, -0.62, 0)
+    this.boardGroup.add(new THREE.Mesh(slab, new THREE.MeshStandardMaterial({ color: 0x8fcdb0, roughness: 0.8 })))
+
+    // the raised rim around the floor
+    const ring = rounded(w + RIM, h + RIM, 0.7 + RIM)
+    ring.holes.push(rounded(w, h, 0.7))
+    const rim = new THREE.ExtrudeGeometry(ring, { depth: 0.16, bevelEnabled: true, bevelSize: 0.05, bevelThickness: 0.05, bevelSegments: 3, curveSegments: 20 })
+    rim.rotateX(-Math.PI / 2)
+    rim.translate(0, -0.04, 0)
+    this.boardGroup.add(new THREE.Mesh(rim, new THREE.MeshStandardMaterial({ color: 0xb4e2cc, roughness: 0.55 })))
+
+    // the floor, painted once: mint that is lighter toward the upper left, darker at the edges,
+    // with one small dot per board unit so movement across it is easy to see
+    const px = 96
     const c = document.createElement('canvas')
-    c.width = c.height = 64
+    c.width = Math.round(w * 2 * px)
+    c.height = Math.round(h * 2 * px)
     const g = c.getContext('2d')!
-    g.fillStyle = '#b5dcc6'
-    g.beginPath()
-    g.arc(32, 32, 4.5, 0, Math.PI * 2)
-    g.fill()
+    g.fillStyle = '#d3eede'
+    g.fillRect(0, 0, c.width, c.height)
+    const light = g.createRadialGradient(c.width * 0.28, c.height * 0.22, 0, c.width * 0.28, c.height * 0.22, c.width * 0.75)
+    light.addColorStop(0, 'rgba(255, 255, 255, 0.55)')
+    light.addColorStop(0.5, 'rgba(255, 255, 255, 0.12)')
+    light.addColorStop(1, 'rgba(120, 190, 160, 0.22)')
+    g.fillStyle = light
+    g.fillRect(0, 0, c.width, c.height)
+    g.fillStyle = 'rgba(88, 168, 134, 0.42)'
+    for (let x = -Math.floor(w) ; x <= Math.floor(w); x++) {
+      for (let y = -Math.floor(h); y <= Math.floor(h); y++) {
+        g.beginPath()
+        g.arc((x + w) * px, (y + h) * px, px * 0.055, 0, Math.PI * 2)
+        g.fill()
+      }
+    }
+    // a soft inner shadow along the rim
+    const edge = px * 0.5
+    for (const [x0, y0, x1, y1] of [[0, 0, 0, edge], [0, c.height, 0, c.height - edge], [0, 0, edge, 0], [c.width, 0, c.width - edge, 0]] as const) {
+      const fall = g.createLinearGradient(x0, y0, x1, y1)
+      fall.addColorStop(0, 'rgba(60, 130, 100, 0.22)')
+      fall.addColorStop(1, 'rgba(60, 130, 100, 0)')
+      g.fillStyle = fall
+      g.fillRect(0, 0, c.width, c.height)
+    }
     const tex = new THREE.CanvasTexture(c)
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping
-    tex.repeat.set(w * 2, h * 2)
     tex.colorSpace = THREE.SRGBColorSpace
-    const top = new THREE.Mesh(new THREE.ShapeGeometry(shape, 20), new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.9 }))
-    // ShapeGeometry uvs are in shape units; remap to 0..1 so the dimples repeat once per unit
+    tex.anisotropy = 4
+    const top = new THREE.Mesh(new THREE.ShapeGeometry(floor, 20), new THREE.MeshBasicMaterial({ map: tex }))
+    // ShapeGeometry uvs are in board units; stretch the picture across the whole floor
     const uv = top.geometry.attributes.uv!
     for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) + w) / (2 * w), (uv.getY(i) + h) / (2 * h))
     top.rotation.x = -Math.PI / 2
     top.position.y = 0.004
     this.boardGroup.add(top)
-
   }
 
   // ------------------------------------------------------------------ camera
@@ -539,15 +745,15 @@ export class Scene {
     // The board fills the safe area. On a narrow stage it is smaller in board units, so atoms
     // stay big enough to grab with a finger.
     const ratio = Math.max(0.55, Math.min(1.25, sh / sw))
-    const halfW = sw >= 700 ? 5 : 3.1 + (Math.max(0, sw - 360) / 340) * 1.9
+    const halfW = sw >= 700 ? 4.3 : 3.1 + (Math.max(0, sw - 360) / 340) * 1.2
     this.halfW = Math.round(halfW * 10) / 10
-    this.halfH = Math.round(Math.max(2.2, Math.min(4.4, halfW * ratio)) * 10) / 10
+    this.halfH = Math.round(Math.max(2.2, Math.min(3.8, halfW * ratio)) * 10) / 10
     this.buildBoard()
     this.placeSpecimens()
     this.onBoardSize?.(this.halfW, this.halfH)
 
     // flat view: the whole board, seen from just far enough away
-    this.flatDist = this.fitRect(this.halfW + 0.15, this.halfH + 0.15)
+    this.flatDist = this.fitRect(this.halfW + RIM + 0.12, this.halfH + RIM + 0.12)
 
     // shape view: a ball of radius 3 around the lifted model stays inside the safe area
     const t = Math.tan((this.camera.fov * Math.PI) / 360)
@@ -608,6 +814,16 @@ export class Scene {
     const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1)
     this.raycaster.setFromCamera(ndc, this.camera)
     return this.raycaster.ray
+  }
+  /** Remember where the pointer is, in the scene, so the atoms can look at it. */
+  private watch(clientX: number, clientY: number) {
+    let at: THREE.Vector3 | null = null
+    if (this.liftRaw > 0.5) at = this.ray(clientX, clientY).closestPointToPoint(new THREE.Vector3(0, LIFT_HEIGHT, 0), new THREE.Vector3())
+    else {
+      const p = this.boardPoint(clientX, clientY, 0.5)
+      if (p) at = new THREE.Vector3(p.x, 0.5, -p.y)
+    }
+    if (at) this.pointer = { at, seen: this.time }
   }
   /** Where the pointer meets the board, at ball height `y`. */
   private boardPoint(clientX: number, clientY: number, y: number): P2 | null {
@@ -761,14 +977,57 @@ export class Scene {
     if (this.liftRaw > 0) this.stepShape(dt)
     this.placeCamera(lift)
 
+    this.time += dt
+    const still = this.reduced
+    const camRight = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0)
+    const camUp = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 1)
+    const held = this.pinned ? this.atoms.get(this.pinned) : undefined
+    // what the atoms look at: the atom in the student's hand, else wherever the pointer was a moment ago
+    const gaze = held ? held.pos : this.pointer && this.time - this.pointer.seen < 2.5 ? this.pointer.at : null
+
     // atoms
-    const centerPos = new THREE.Vector3(0, LIFT_HEIGHT, 0)
+    const centerPos = new THREE.Vector3(0, LIFT_HEIGHT + (still ? 0 : Math.sin(this.time * 1.2) * 0.06), 0)
     const centerAtom = this.centerId ? atomById(s, this.centerId) : undefined
     for (const atom of s.atoms) {
       const view = this.atoms.get(atom.id)
       const p = this.positions.get(atom.id)
       if (!view || !p) continue
-      const flat = new THREE.Vector3(p.x, view.r + (atom.id === this.pinned ? 0.22 : 0), -p.y)
+      const pinned = atom.id === this.pinned
+
+      // a new atom falls onto the board and bounces once
+      if (view.drop > 0) {
+        view.dropV -= 30 * dt
+        view.drop += view.dropV * dt
+        if (view.drop <= 0) {
+          if (!view.landed) {
+            view.landed = true
+            view.squashV -= 6.5
+            this.ripples.ping(p.x, -p.y, 0xffffff, view.r * 0.9, view.r * 2.8)
+            this.cb.feel?.('land')
+          }
+          if (view.dropV < -3) {
+            view.drop = 0.001
+            view.dropV = -view.dropV * 0.3
+          } else {
+            view.drop = 0
+            view.dropV = 0
+          }
+        }
+      }
+      // squash and stretch settle on a spring
+      view.squashV += (-190 * view.squash - 14 * view.squashV) * dt
+      view.squash = Math.max(-0.34, Math.min(0.4, view.squash + view.squashV * dt))
+      const hot = atom.id === this.hoverId || atom.id === this.dropTarget ? 1 : 0
+      view.hover += (hot - view.hover) * (1 - Math.exp(-14 * dt))
+      // resting atoms bob gently, each to its own rhythm; a refused move makes an atom shake its head
+      const bob = still || pinned ? 0 : Math.sin(this.time * 1.5 + view.phase) * 0.03 * (0.6 + view.r) * (1 - lift)
+      let sway = 0
+      if (view.shake > 0) {
+        view.shake -= dt
+        sway = Math.sin(view.shake * 46) * 0.08 * Math.min(1, view.shake / 0.25)
+      }
+
+      const flat = new THREE.Vector3(p.x + sway, view.r + (pinned ? 0.24 : 0) + view.drop + bob, -p.y)
       let target = flat
       if (lift > 0 && centerAtom) {
         if (atom.id === this.centerId) target = flat.clone().lerp(centerPos, lift)
@@ -783,10 +1042,35 @@ export class Scene {
       }
       view.pos.copy(target)
       view.grow += (1 - view.grow) * (1 - Math.exp(-14 * dt))
-      view.mesh.position.copy(view.pos)
-      view.mesh.scale.setScalar(view.r * view.grow)
-      const toCam = this.camera.position.clone().sub(view.pos).normalize()
-      view.label.position.copy(view.pos).addScaledVector(toCam, view.r * 1.02)
+      const size = view.r * view.grow * (1 + 0.06 * view.hover)
+      const sq = view.squash
+      // a squashed ball keeps its underside where it was
+      const body = view.pos.clone()
+      body.y += view.r * sq * (1 - lift)
+      view.mesh.position.copy(body)
+      view.mesh.scale.set(size * (1 - 0.45 * sq), size * (1 + sq), size * (1 - 0.45 * sq))
+      view.outline.position.copy(body)
+      view.outline.scale.copy(view.mesh.scale).multiplyScalar(1.05)
+      const toCam = this.camera.position.clone().sub(body).normalize()
+      // A squashed ball is wider than its radius and a stretched one taller, so the face and the
+      // symbol ride in front of whichever is bigger and never sink into the ball.
+      const bulge = size * Math.max(1 + sq, 1 - 0.45 * sq)
+      // the symbol sits below the middle of the ball, under the eyes
+      view.label.position.copy(body).addScaledVector(toCam, bulge * 1.03).addScaledVector(camUp, -size * 0.23)
+      view.label.scale.setScalar(size * 1.24)
+      view.face.update(dt, this.time, {
+        center: body,
+        radius: size,
+        front: bulge * 1.02,
+        toCam,
+        right: camRight,
+        up: camUp,
+        quat: this.camera.quaternion,
+        lookAt: gaze && gaze !== view.pos ? gaze : null,
+        wide: pinned || view.shake > 0,
+        content: this.input.shells.get(atom.id)?.status === 'full' && bondsOf(s, atom.id).length > 0,
+        still,
+      })
       // The shadow sits on the board a little to the right of the ball and toward the viewer, as
       // if lit from the upper left. A lifted ball casts a wider shadow, further off.
       const height = Math.max(0, view.pos.y - view.r)
@@ -794,10 +1078,68 @@ export class Scene {
       view.shade.scale.setScalar(view.r * view.grow * (2.75 + height * 0.5))
     }
 
+    // what just happened: a new bond gets sparks and a hop from both atoms, a new electron a small pop
+    for (const fx of this.pending) {
+      if (still) break
+      if (fx.kind === 'bond') {
+        const f = this.bondFrame(fx.a, fx.b)
+        if (!f) continue
+        this.sparks.burst(f.mid, 0xffd15c, 14)
+        this.ripples.ping(f.mid.x, f.mid.z, 0xffc23a, 0.25, 1.6)
+        for (const v of [f.A, f.B]) {
+          v.squashV += 6.5
+          v.face.joy = 0.8
+        }
+      } else {
+        const v = this.atoms.get(fx.id)
+        if (!v) continue
+        this.sparks.burst(v.pos.clone().add(new THREE.Vector3(0, v.r, 0)), 0xffd15c, 6, 1.5)
+        v.squashV += 3.5
+      }
+    }
+    if (this.pending.some((fx) => fx.kind === 'bond')) this.cb.feel?.('bond')
+    if (this.cheers.length) {
+      this.cheers = this.cheers.filter((c) => {
+        if (c.at > this.time) return true
+        const v = this.atoms.get(c.id)
+        if (v) {
+          v.squashV += 7
+          v.face.joy = 1.1
+          this.sparks.burst(v.pos.clone().add(new THREE.Vector3(0, v.r * 0.9, 0)), 0xffd15c, 5, 1.8)
+        }
+        return false
+      })
+    }
+    this.pending.length = 0
+    if (this.groupRings.length) {
+      this.groupRings = this.groupRings.filter((g) => {
+        if (g.at > this.time) return true
+        const spot = g.where()
+        if (spot) {
+          // two rings, one inside the other, read as one thick ring
+          this.ripples.ping(spot.x, spot.z, COLOR.ring, spot.from, spot.to, 1.1, 0.9)
+          this.ripples.ping(spot.x, spot.z, COLOR.ring, spot.from * 0.82, spot.to * 0.9, 1.1, 0.9)
+          this.ringed++
+        }
+        return false
+      })
+    }
+    this.sparks.update(dt)
+    this.ripples.update(dt)
+    this.haloMat.opacity = still ? 0.45 : 0.42 + 0.14 * Math.sin(this.time * 2.2)
+
+    // left alone, the lifted model turns slowly so every side comes into view
+    if (this.liftRaw >= 1 && !still) {
+      this.untouched += dt
+      // the turn eases in over a second
+      if (this.untouched > 2.5 && !this.press) this.orbit.az += dt * 0.16 * Math.min(1, this.untouched - 2.5)
+    } else this.untouched = 0
+
     this.updateSticks()
     this.updateDots(dt, lift)
     this.updateLobes(lift)
     this.updateRings(lift)
+    this.updateArcs(dt, lift)
     this.updateOverlay(lift)
     this.renderer.render(this.scene, this.camera)
   }
@@ -827,7 +1169,11 @@ export class Scene {
         mesh.position.copy(f.A.pos).addScaledVector(f.dir, f.dist / 2).addScaledVector(f.side, off)
         mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), f.dir)
         const selected = sel?.kind === 'bond' && sel.id === b.id
-        mesh.scale.set(selected ? 0.085 : 0.06, f.dist, selected ? 0.085 : 0.06)
+        // a new stick grows out from the middle and overshoots a little before it settles
+        const age = Math.min(1, (this.time - ((mesh.userData.born as number | undefined) ?? -9)) / 0.32)
+        const k = this.reduced ? 1 : 1 + 2.2 * (age - 1) ** 3 + 1.2 * (age - 1) ** 2
+        const thick = (selected ? 0.085 : 0.065) * (0.5 + 0.5 * k)
+        mesh.scale.set(thick, f.dist * Math.max(0.05, k), thick)
         mesh.material = selected ? this.stickSelMat : this.stickMat
       }
     }
@@ -901,8 +1247,9 @@ export class Scene {
       for (let i = 0; i < b.order; i++) {
         const off = (i - (b.order - 1) / 2) * 0.21
         const base = f.mid.clone().addScaledVector(f.side, off)
-        out.set(`B:${b.id}:${i}:0`, base.clone().addScaledVector(f.dir, -0.125))
-        out.set(`B:${b.id}:${i}:1`, base.clone().addScaledVector(f.dir, 0.125))
+        const slide = this.reduced ? 0 : Math.sin(this.time * 1.7 + i * Math.PI + f.dist) * 0.05
+        out.set(`B:${b.id}:${i}:0`, base.clone().addScaledVector(f.dir, -0.125 + slide))
+        out.set(`B:${b.id}:${i}:1`, base.clone().addScaledVector(f.dir, 0.125 + slide))
       }
     }
     return out
@@ -914,9 +1261,12 @@ export class Scene {
     bead.scale.setScalar(DOT_R)
     const rim = new THREE.Mesh(this.dotGeo, this.rimMat)
     rim.scale.setScalar(DOT_R * 1.3)
-    group.add(rim, bead)
+    const halo = new THREE.Sprite(this.haloMat)
+    halo.scale.setScalar(DOT_R * 4.6)
+    halo.renderOrder = 3
+    group.add(rim, bead, halo)
     this.scene.add(group)
-    return { key, mesh: group, pos: at.clone(), grow: this.reduced ? 1 : 0, dying: false }
+    return { key, mesh: group, pos: at.clone(), grow: this.reduced ? 1 : 0, dying: false, phase: Math.random() * 20 }
   }
 
   private updateDots(dt: number, lift: number) {
@@ -949,8 +1299,15 @@ export class Scene {
       const t = targets.get(d.key)
       if (t && !d.dying) d.pos.lerp(t, k)
       d.grow += ((d.dying ? 0 : 1) - d.grow) * (1 - Math.exp(-16 * dt))
+      const big = this.input.specimen ? SPECIMEN_SCALE : 1
       d.mesh.position.copy(d.pos)
-      d.mesh.scale.setScalar(Math.max(0.001, d.grow) * (this.input.specimen ? SPECIMEN_SCALE : 1))
+      if (!this.reduced) {
+        const w = 0.013 * big
+        d.mesh.position.x += Math.cos(this.time * 1.9 + d.phase) * w
+        d.mesh.position.y += Math.sin(this.time * 2.6 + d.phase * 1.3) * w * 0.9
+        d.mesh.position.z += Math.sin(this.time * 2.1 + d.phase * 0.7) * w
+      }
+      d.mesh.scale.setScalar(Math.max(0.001, d.grow) * big)
     }
     this.dots = this.dots.filter((d) => {
       if (d.dying && d.grow < 0.03) {
@@ -978,7 +1335,8 @@ export class Scene {
       const dir = v3(dom.dir)
       m.position.copy(center.pos).addScaledVector(dir, center.r + 0.2)
       m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir)
-      m.scale.set(0.4, 0.52, 0.4)
+      const breath = this.reduced ? 1 : 1 + 0.05 * Math.sin(this.time * 1.5 + i * 1.7)
+      m.scale.set(0.4 * breath, 0.52 * breath, 0.4 * breath)
     })
   }
 
@@ -1018,6 +1376,110 @@ export class Scene {
       const c = this.toScreen(f.mid)
       btn.style.transform = `translate(${c.x - 14}px, ${c.y - 14}px)`
     }
+  }
+
+  /** The angle marks on the lifted model. An arc is drawn only while its two bonds really are at
+   *  that angle, so it goes away while a student is pulling the model out of shape. */
+  private updateArcs(dt: number, lift: number) {
+    const marks = lift > 0.97 ? this.input.angles : []
+    while (this.arcs.length < marks.length) {
+      const mat = new THREE.MeshBasicMaterial({ color: COLOR.ink, transparent: true, opacity: 0, depthWrite: false })
+      const beads = new THREE.InstancedMesh(this.beadGeo, mat, 48)
+      beads.frustumCulled = false
+      beads.renderOrder = 2
+      this.scene.add(beads)
+      const label = document.createElement('span')
+      label.className = 'mb-angle'
+      this.overlay.appendChild(label)
+      this.arcs.push({ beads, mat, label, pair: null, show: 0 })
+    }
+    const center = this.centerId ? this.atoms.get(this.centerId) : undefined
+    const outer = this.domAtoms.filter((id): id is string => !!id).map((id) => this.atoms.get(id)).filter((v): v is AtomView => !!v)
+    const dirOf = (v: AtomView) => v.pos.clone().sub(center!.pos).normalize()
+    const between = (a: AtomView, b: AtomView) => (Math.acos(Math.max(-1, Math.min(1, dirOf(a).dot(dirOf(b))))) * 180) / Math.PI
+    const camUp = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 1)
+    const taken = new Set<string>()
+    const m4 = new THREE.Matrix4()
+
+    this.arcs.forEach((arc, k) => {
+      const mark = marks[k]
+      let want = 0
+      let A: AtomView | undefined
+      let B: AtomView | undefined
+      if (mark && center && outer.length >= 2) {
+        // "less than 109.5°" is met by anything a little under it; a plain number has to be matched closely
+        const ok = (deg: number) => (mark.under ? deg <= mark.near + 1.5 && deg >= mark.near - 28 : Math.abs(deg - mark.near) <= 5)
+        // How far the label for a pair of bonds would sit from the middle atom on screen, in
+        // ball radii. Under about 1.3 the label would cover the ball.
+        const clear = (a: AtomView, b: AtomView) => {
+          const mid = dirOf(a).add(dirOf(b))
+          if (mid.length() < 0.15) mid.copy(camUp)
+          const at = center.pos.clone().addScaledVector(mid.normalize(), center.r + 0.9)
+          const c0 = this.toScreen(center.pos)
+          const c1 = this.toScreen(at)
+          return Math.hypot(c1.x - c0.x, c1.y - c0.y) / Math.max(1, this.pxRadius(center.pos, center.r))
+        }
+        const held = arc.pair ? ([this.atoms.get(arc.pair[0]), this.atoms.get(arc.pair[1])] as const) : null
+        const dragging = this.press?.kind === 'dom'
+        const keep = held?.[0] && held[1] && outer.includes(held[0]) && outer.includes(held[1]) && !taken.has(`${held[0].id}|${held[1].id}`)
+        if (keep && (dragging || (ok(between(held[0]!, held[1]!)) && clear(held[0]!, held[1]!) > 1.3))) [A, B] = held as readonly [AtomView, AtomView]
+        else {
+          // of the pairs of bonds at this angle that another mark has not taken, the one whose
+          // label sits furthest out from the middle atom as seen from here
+          let best = keep && ok(between(held[0]!, held[1]!)) ? clear(held[0]!, held[1]!) + 0.25 : -1
+          if (best > 0) [A, B] = held as readonly [AtomView, AtomView]
+          for (let i = 0; i < outer.length; i++) {
+            for (let j = i + 1; j < outer.length; j++) {
+              if (taken.has(`${outer[i]!.id}|${outer[j]!.id}`) || !ok(between(outer[i]!, outer[j]!))) continue
+              const score = clear(outer[i]!, outer[j]!)
+              if (score > best) {
+                best = score
+                A = outer[i]
+                B = outer[j]
+              }
+            }
+          }
+          // a mark that moves to another pair of bonds fades in there
+          if (A && B && (arc.pair?.[0] !== A.id || arc.pair[1] !== B.id)) arc.show = 0
+          arc.pair = A && B ? [A.id, B.id] : null
+        }
+        if (A && B) {
+          taken.add(`${A.id}|${B.id}`)
+          taken.add(`${B.id}|${A.id}`)
+          if (ok(between(A, B))) want = 1
+        }
+      }
+      arc.show += (want - arc.show) * (1 - Math.exp(-(want ? 5 : 16) * dt))
+      const visible = arc.show > 0.02 && !!A && !!B && !!center && !!mark
+      arc.beads.visible = visible
+      arc.label.style.opacity = visible ? String(Math.min(1, arc.show * 1.2)) : '0'
+      if (!visible || !A || !B || !center || !mark) return
+
+      const a = dirOf(A)
+      const b = dirOf(B)
+      const theta = Math.acos(Math.max(-1, Math.min(1, a.dot(b))))
+      // the arc swings from one bond toward the other; two bonds on a straight line get an arc over the top
+      let v = b.clone().addScaledVector(a, -a.dot(b))
+      if (v.length() < 0.09) v = camUp.clone().addScaledVector(a, -a.dot(camUp))
+      v.normalize()
+      const reach = Math.min(A.pos.distanceTo(center.pos), B.pos.distanceTo(center.pos))
+      const rho = center.r + 0.14 + (reach - center.r) * (k === 0 ? 0.3 : 0.52)
+      const edge = Math.min(0.2, theta * 0.12)
+      const n = Math.max(3, Math.min(48, Math.round(((theta - 2 * edge) * rho) / 0.105)))
+      for (let i = 0; i < n; i++) {
+        const phi = edge + ((theta - 2 * edge) * i) / (n - 1)
+        const at = center.pos.clone().addScaledVector(a, Math.cos(phi) * rho).addScaledVector(v, Math.sin(phi) * rho)
+        m4.makeScale(0.03, 0.03, 0.03).setPosition(at)
+        arc.beads.setMatrixAt(i, m4)
+      }
+      arc.beads.count = n
+      arc.beads.instanceMatrix.needsUpdate = true
+      arc.mat.opacity = arc.show * 0.85
+      const mid = center.pos.clone().addScaledVector(a, Math.cos(theta / 2) * (rho + 0.34)).addScaledVector(v, Math.sin(theta / 2) * (rho + 0.34))
+      const c = this.toScreen(mid)
+      if (arc.label.textContent !== mark.text) arc.label.textContent = mark.text
+      arc.label.style.transform = `translate(${c.x}px, ${c.y}px) translate(-50%, -50%)`
+    })
   }
 
   /** Screen offset from an atom's center to a spot clear of its bonds, for the electron count. */
@@ -1139,6 +1601,8 @@ export class Scene {
   private readonly onDown = (e: PointerEvent) => {
     if (e.button !== 0 || this.press) return
     this.coarse = e.pointerType === 'touch'
+    this.untouched = 0
+    this.watch(e.clientX, e.clientY)
     const hit = this.pick(e.clientX, e.clientY)
     const base = { pointerId: e.pointerId, x: e.clientX, y: e.clientY, moved: false }
     if (this.liftRaw > 0.5) {
@@ -1160,14 +1624,17 @@ export class Scene {
 
   private readonly onMove = (e: PointerEvent) => {
     const p = this.press
+    this.watch(e.clientX, e.clientY)
     if (!p) {
       if (e.pointerType === 'mouse') {
         const hit = this.pick(e.clientX, e.clientY)
         const can = this.liftRaw > 0.5 ? hit !== null : this.input.editable && hit !== null
         this.wrap.classList.toggle('is-hot', can)
+        this.hoverId = can && hit?.kind === 'atom' ? hit.id : null
       }
       return
     }
+    this.untouched = 0
     // a second finger on the board does not take over the drag
     if (e.pointerId !== p.pointerId) return
     // the button was let go somewhere the release never reached this page (a context menu, another window)
@@ -1226,7 +1693,12 @@ export class Scene {
       if (p.kind === 'atom' && p.id) this.cb.tapAtom(p.id, false)
       else if (p.kind === 'dot' && p.id) this.cb.tapAtom(p.id, false)
       else if (p.kind === 'bond' && p.id) this.cb.tapBond(p.id)
-      else this.cb.tapEmpty()
+      else {
+        // a tap on the bare board leaves a ring where it landed
+        const at = this.liftRaw < 0.5 && !this.reduced ? this.boardPoint(e.clientX, e.clientY, 0) : null
+        if (at && Math.abs(at.x) <= this.halfW && Math.abs(at.y) <= this.halfH) this.ripples.ping(at.x, -at.y, 0xffffff, 0.12, 0.9, 0.5)
+        this.cb.tapEmpty()
+      }
       return
     }
     const over = p.id ? this.pick(e.clientX, e.clientY, p.id) : null
@@ -1244,6 +1716,11 @@ export class Scene {
     if (!this.press || e.pointerId === this.press.pointerId) this.release(e)
   }
 
+  private readonly onLeave = () => {
+    this.hoverId = null
+    this.pointer = null
+  }
+
   private release(e: PointerEvent) {
     if (this.press?.kind === 'dom' && this.press.dom !== undefined && this.doms[this.press.dom]) this.doms[this.press.dom]!.pinned = false
     this.press = null
@@ -1258,6 +1735,7 @@ export class Scene {
   private readonly onWheel = (e: WheelEvent) => {
     if (this.liftRaw < 0.5) return
     e.preventDefault()
+    this.untouched = 0
     this.orbit.zoom = Math.max(0.7, Math.min(1.6, this.orbit.zoom * Math.exp(e.deltaY * 0.0012)))
   }
 
@@ -1281,7 +1759,7 @@ export class Scene {
       const c = this.toScreen(d.pos)
       return { key: d.key, x: rect.left + c.x, y: rect.top + c.y }
     })
-    return { atoms, bonds, lobes, dots, lift: this.liftRaw, board: { halfW: this.halfW, halfH: this.halfH } }
+    return { atoms, bonds, lobes, dots, lift: this.liftRaw, ringed: this.ringed, board: { halfW: this.halfW, halfH: this.halfH } }
   }
   /** For tests: the angle in degrees between two bonded atoms as seen from the center, in the 3D model. */
   debugAngles(): number[] {

@@ -1,10 +1,12 @@
+import * as Haptics from 'expo-haptics'
 import { useRouter } from 'expo-router'
 import Head from 'expo-router/head'
 import { useCallback, useState } from 'react'
-import { StyleSheet, View } from 'react-native'
+import { Platform, StyleSheet, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 import LewisModule from '@/modules/lewis/LewisModule'
+import type { Feel } from '@/modules/lewis/ui'
 import { useProgress } from '@/shell/progress'
 import { color } from '@/theme/tokens'
 
@@ -20,7 +22,18 @@ function Board({ start, record }: { start: string[]; record: (ids: string[]) => 
     if (router.canGoBack()) router.back()
     else router.replace('/')
   }, [router])
-  return <LewisModule dom={DOM} solved={solved} onSolved={onSolved} onExit={onExit} />
+  // On a phone, the board's bumps come through the phone's motor. Browsers have no such motor to ask.
+  const onFeel = useCallback(async (kind: Feel) => {
+    if (Platform.OS === 'web') return
+    try {
+      if (kind === 'done') await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+      else if (kind === 'refuse') await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
+      else await Haptics.impactAsync(kind === 'bond' ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light)
+    } catch {
+      // a phone with its motor switched off
+    }
+  }, [])
+  return <LewisModule dom={DOM} solved={solved} onSolved={onSolved} onExit={onExit} onFeel={onFeel} />
 }
 
 export default function LewisScreen() {

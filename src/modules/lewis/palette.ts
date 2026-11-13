@@ -23,6 +23,15 @@ export const BALL: Record<El, { color: number; ink: string }> = {
   Xe: { color: 0x86d6e2, ink: '#143f47' },
 }
 
+/** How much white goes over the ball's color to make the pale patch its face sits on. */
+export const FACE_WHITE = 0.72
+
+/** The color of the face patch on a ball of the given color. Mixed channel by channel, the way a browser lays white over a color. */
+export function faceColor(ball: number): number {
+  const mix = (c: number) => Math.round(c + (255 - c) * FACE_WHITE)
+  return (mix((ball >> 16) & 255) << 16) | (mix((ball >> 8) & 255) << 8) | mix(ball & 255)
+}
+
 export function ballStyle(el: El): string {
   const b = BALL[el]
   return `background:#${b.color.toString(16).padStart(6, '0')};color:${b.ink}`

@@ -24,6 +24,14 @@ export function element(el: El): ElementInfo {
   return ELEMENTS[el]
 }
 
+/** How many electrons each shell of the neutral atom holds, innermost first. The last entry is
+ *  the outer shell (the valence electrons); the others are the core electrons (OpenStax
+ *  Chemistry 2e, 6.4). For the main-group atoms here the inner shells are full: 2, 8, 18, 18. */
+export function shellsOf(el: El): number[] {
+  const e = ELEMENTS[el]
+  return [...[2, 8, 18, 18].slice(0, e.period - 1), e.valence]
+}
+
 /** Electrons that fill the atom's outer shell in a Lewis structure.
  *  Hydrogen fills at 2. Beryllium (4), boron and aluminum (6) are the usual electron-deficient
  *  centers (OpenStax Chemistry 2e, 7.3). Every other atom here follows the octet rule. */

@@ -20,10 +20,10 @@ import { shapeOf, type ShapeName } from '../../chem/vsepr'
 import {
   STEPS,
   boardStepDone,
-  countFeedback,
+  countCoach,
   elementsOf,
   groupFacts,
-  groupsFeedback,
+  groupsCoach,
   groupsRight,
   hintsFor,
   middleFeedback,
@@ -31,7 +31,8 @@ import {
   refusalText,
   shapeFeedback,
   shapeInfoFor,
-  totalFeedback,
+  totalCoach,
+  type Coach,
   type StepId,
 } from './guide'
 
@@ -49,27 +50,38 @@ export interface CountState {
   answers: Partial<Record<El, number>>
   right: Partial<Record<El, boolean>>
   tries: Partial<Record<El, number>>
-  feedback: Partial<Record<El, string>>
+  /** What the panel says about each atom's last wrong count. It stays up while the student changes
+   *  the number, so a picture in it can be counted from; the next check replaces it. */
+  feedback: Partial<Record<El, Coach>>
+  /** The number was changed after its last check. */
+  changed: Partial<Record<El, boolean>>
   total: number | null
   totalRight: boolean
   totalTries: number
-  totalFeedback: string | null
+  totalFeedback: Coach | null
 }
 export interface ShapeState {
   groups: number | null
   groupsRight: boolean
   groupsTries: number
+  /** The line shown once the count is right. */
   groupsFeedback: string | null
+  /** What the panel says about the last wrong count. `n` goes up with each wrong answer, so the board rings the groups once. */
+  groupsCoach: (Coach & { n: number }) | null
   pick: ShapeName | null
   pickRight: boolean
+  /** The line shown for a right pick. */
   pickFeedback: string | null
+  /** What the panel says about a wrong pick. */
+  pickCoach: Coach | null
 }
 export interface State {
   mode: Mode
   problem: number
   step: StepId
   count: CountState
-  middle: { pick: El | null; right: boolean; text: string | null }
+  /** `text` is the line for the right pick; `coach` explains a wrong one. */
+  middle: { pick: El | null; right: boolean; text: string | null; coach: Coach | null }
   shape: ShapeState
   s: Structure
   past: Structure[]
@@ -79,10 +91,13 @@ export interface State {
   pickerOpen: boolean
   solved: string[]
   toast: Toast | null
+  /** The atoms in the last move the board refused. `n` goes up with each refusal, so the scene can shake them once. */
+  refused: { ids: string[]; n: number } | null
 }
 
-const freshCount = (): CountState => ({ answers: {}, right: {}, tries: {}, feedback: {}, total: null, totalRight: false, totalTries: 0, totalFeedback: null })
-const freshShape = (): ShapeState => ({ groups: null, groupsRight: false, groupsTries: 0, groupsFeedback: null, pick: null, pickRight: false, pickFeedback: null })
+const freshCount = (): CountState => ({ answers: {}, right: {}, tries: {}, feedback: {}, changed: {}, total: null, totalRight: false, totalTries: 0, totalFeedback: null })
+const freshShape = (): ShapeState => ({ groups: null, groupsRight: false, groupsTries: 0, groupsFeedback: null, groupsCoach: null, pick: null, pickRight: false, pickFeedback: null, pickCoach: null })
+const freshMiddle = (): State['middle'] => ({ pick: null, right: false, text: null, coach: null })
 
 const SOLVED_KEY = 'chem-review:lewis:solved'
 function loadSolved(): string[] {
@@ -108,7 +123,7 @@ function initial(): State {
     problem: 0,
     step: 'count',
     count: freshCount(),
-    middle: { pick: null, right: false, text: null },
+    middle: freshMiddle(),
     shape: freshShape(),
     s: EMPTY,
     past: [],
@@ -118,6 +133,7 @@ function initial(): State {
     pickerOpen: false,
     solved: loadSolved(),
     toast: null,
+    refused: null,
   }
 }
 
@@ -197,20 +213,27 @@ export function trayItems(s: State = state): { el: El; n: number }[] {
   return elementsOf(p).map((el) => ({ el, n: Math.max(0, left.get(el) ?? 0) }))
 }
 
+/** Count step: every atom's count is right, so the total is the open question. */
+export function totalNext(s: State = state): boolean {
+  return s.step === 'count' && elementsOf(problemOf(s)).every((el) => s.count.right[el])
+}
+function stepHints(s: State): string[] {
+  return hintsFor(s.step, problemOf(s), s.s, totalNext(s))
+}
 export function currentHints(s: State = state): string[] {
   if (s.mode !== 'guided') return []
-  return hintsFor(s.step, problemOf(s), s.s).slice(0, s.hints)
+  return stepHints(s).slice(0, s.hints)
 }
 export function hintsLeft(s: State = state): number {
   if (s.mode !== 'guided') return 0
-  return Math.max(0, hintsFor(s.step, problemOf(s), s.s).length - s.hints)
+  return Math.max(0, stepHints(s).length - s.hints)
 }
 
 // ---------------------------------------------------------------- navigation
 
 function resetBoard(problem: number): Partial<State> {
   positions.clear()
-  return { problem, step: 'count', count: freshCount(), middle: { pick: null, right: false, text: null }, shape: freshShape(), s: EMPTY, past: [], selection: null, view: 'flat', hints: 0, pickerOpen: false }
+  return { problem, step: 'count', count: freshCount(), middle: freshMiddle(), shape: freshShape(), s: EMPTY, past: [], selection: null, view: 'flat', hints: 0, pickerOpen: false }
 }
 
 export function selectProblem(i: number) {
@@ -278,9 +301,7 @@ export function clearToast() {
 export function setCount(el: El, n: number) {
   if (state.count.right[el]) return
   const value = Math.max(0, Math.min(8, Math.round(n)))
-  const feedback = { ...state.count.feedback }
-  delete feedback[el]
-  set({ count: { ...state.count, answers: { ...state.count.answers, [el]: value }, feedback } })
+  set({ count: { ...state.count, answers: { ...state.count.answers, [el]: value }, changed: { ...state.count.changed, [el]: true } } })
 }
 export function checkCounts() {
   const c = state.count
@@ -295,10 +316,12 @@ export function checkCounts() {
       delete feedback[el]
     } else {
       tries[el] = (tries[el] ?? 0) + 1
-      feedback[el] = countFeedback(el, answer, tries[el]!)
+      feedback[el] = countCoach(problemOf(), el, answer, tries[el]!)
     }
   }
-  set({ count: { ...c, right, tries, feedback } })
+  // once every count is right the hints are about the total, and they start over
+  const allRight = elementsOf(problemOf()).every((el) => right[el])
+  set({ count: { ...c, right, tries, feedback, changed: {} }, ...(allRight ? { hints: 0 } : {}) })
 }
 /** Typing in the total box: remembered without redrawing the panel. */
 export function typeTotal(n: number | null) {
@@ -309,7 +332,7 @@ export function checkTotal() {
   if (c.totalRight || c.total === null) return
   const p = problemOf()
   if (c.total === totalElectrons(p)) set({ count: { ...c, totalRight: true, totalFeedback: null } })
-  else set({ count: { ...c, totalTries: c.totalTries + 1, totalFeedback: totalFeedback(p, c.total, c.totalTries + 1) } })
+  else set({ count: { ...c, totalTries: c.totalTries + 1, totalFeedback: totalCoach(p, c.total, c.totalTries + 1) } })
 }
 
 // ---------------------------------------------------------------- step 2: the middle atom
@@ -317,7 +340,7 @@ export function checkTotal() {
 export function pickMiddle(el: El) {
   if (state.middle.right) return
   const r = middleFeedback(problemOf(), el)
-  set({ middle: { pick: el, right: r.right, text: r.text } })
+  set({ middle: { pick: el, right: r.right, text: r.right ? r.text : null, coach: r.coach } })
 }
 
 // ---------------------------------------------------------------- the board
@@ -325,12 +348,13 @@ export function pickMiddle(el: El) {
 function commit(s: Structure, extra: Partial<State> = {}) {
   set({ s, past: [...state.past.slice(-60), state.s], shape: freshShape(), ...extra })
 }
-function apply(op: Op, extra: Partial<State> = {}): boolean {
+function apply(op: Op, ids: string[], extra: Partial<State> = {}): boolean {
   if (op.ok) {
     commit(op.s, extra)
     return true
   }
-  set({ toast: { text: refusalText(state.s, op.why, op.atomId), tone: 'warn', n: ++toastSeq } })
+  const n = ++toastSeq
+  set({ toast: { text: refusalText(state.s, op.why, op.atomId), tone: 'warn', n }, refused: { ids, n } })
   return false
 }
 
@@ -369,7 +393,7 @@ export function remove(id: string) {
 }
 export function bond(a: string, b: string) {
   if (!editable()) return
-  apply(share(state.s, a, b), { selection: null })
+  apply(share(state.s, a, b), [a, b], { selection: null })
 }
 export function unbond(bondId: string) {
   if (!editable()) return
@@ -379,13 +403,13 @@ export function unbond(bondId: string) {
 export function addBondOn(bondId: string) {
   const b = state.s.bonds.find((x) => x.id === bondId)
   if (!editable() || !b) return
-  apply(share(state.s, b.a, b.b), { selection: state.selection })
+  apply(share(state.s, b.a, b.b), [b.a, b.b], { selection: state.selection })
 }
 export function plusElectron(id: string) {
-  if (editable()) apply(addElectronOp(state.s, id), { selection: state.selection })
+  if (editable()) apply(addElectronOp(state.s, id), [id], { selection: state.selection })
 }
 export function minusElectron(id: string) {
-  if (editable()) apply(removeElectronOp(state.s, id), { selection: state.selection })
+  if (editable()) apply(removeElectronOp(state.s, id), [id], { selection: state.selection })
 }
 export function undo() {
   const prev = state.past[state.past.length - 1]
@@ -422,10 +446,10 @@ export function answerGroups(n: number) {
   const f = groupFacts(state.s)
   if (!f || state.shape.groupsRight) return
   const center = problemOf().center
-  if (n === f.groups) set({ shape: { ...state.shape, groups: n, groupsRight: true, groupsFeedback: groupsRight(center, f) } })
+  if (n === f.groups) set({ shape: { ...state.shape, groups: n, groupsRight: true, groupsFeedback: groupsRight(center, f), groupsCoach: null } })
   else {
     const tries = state.shape.groupsTries + 1
-    set({ shape: { ...state.shape, groups: n, groupsTries: tries, groupsFeedback: groupsFeedback(center, f, n, tries) } })
+    set({ shape: { ...state.shape, groups: n, groupsTries: tries, groupsCoach: { ...groupsCoach(center, f, n, tries), n: ++toastSeq } } })
   }
 }
 /** The student commits to a shape; right or wrong, the model then lifts into 3D. */
@@ -436,7 +460,7 @@ export function pickShape(name: ShapeName) {
   const id = problemOf().id
   const solved = state.solved.includes(id) ? state.solved : [...state.solved, id]
   saveSolved(solved)
-  set({ shape: { ...state.shape, pick: name, pickRight: r.right, pickFeedback: r.text }, view: 'shape', solved, selection: null })
+  set({ shape: { ...state.shape, pick: name, pickRight: r.right, pickFeedback: r.right ? r.text : null, pickCoach: r.coach }, view: 'shape', solved, selection: null })
 }
 export function setView(view: 'flat' | 'shape') {
   if (view === state.view) return

@@ -10,7 +10,8 @@ import { MoleculeMark } from './MoleculeMark'
 
 export function ModuleCard({ info, done, order = 0 }: { info: ModuleInfo; done: number; order?: number }) {
   const pressed = useSharedValue(0)
-  const squeeze = useAnimatedStyle(() => ({ transform: [{ scale: 1 - 0.025 * pressed.value }] }))
+  // the card sits on a darker edge and sinks onto it while it is pressed
+  const squeeze = useAnimatedStyle(() => ({ transform: [{ translateY: 5 * pressed.get() }, { scale: 1 - 0.012 * pressed.get() }] }))
   const share = Math.min(1, done / info.problems)
   const progress = done > 0 ? `${done} of ${info.problems} ${info.problemWord} finished` : `${info.problems} ${info.problemWord}`
 
@@ -40,8 +41,8 @@ export function ModuleCard({ info, done, order = 0 }: { info: ModuleInfo; done: 
         <Pressable
           accessibilityRole="link"
           accessibilityLabel={`${info.title}. ${info.summary} ${progress}.`}
-          onPressIn={() => (pressed.value = withSpring(1, { damping: 18, stiffness: 320 }))}
-          onPressOut={() => (pressed.value = withSpring(0, { damping: 14, stiffness: 260 }))}
+          onPressIn={() => pressed.set(withSpring(1, { damping: 18, stiffness: 420 }))}
+          onPressOut={() => pressed.set(withSpring(0, { damping: 11, stiffness: 260 }))}
           style={styles.hit}>
           {wide ? (
             <Animated.View style={[styles.card, styles.row, squeeze]}>
@@ -76,20 +77,20 @@ const styles = StyleSheet.create({
     padding: space.l,
     borderRadius: radius.l,
     backgroundColor: color.paper,
-    boxShadow: '0 14px 32px -14px rgba(74, 58, 140, 0.45)',
+    boxShadow: `0 6px 0 ${color.paperLip}, 0 22px 34px -18px rgba(74, 58, 140, 0.55)`,
   },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.l, paddingHorizontal: space.xl },
   column: { gap: space.m, padding: space.xl - 4 },
   lead: { flexDirection: 'row', alignItems: 'center', gap: space.l },
   body: { flex: 1, gap: 6 },
-  title: { fontFamily: font.black, fontSize: 22, lineHeight: 27, color: color.ink },
+  title: { fontFamily: font.display, fontSize: 24, lineHeight: 29, color: color.ink },
   summary: { fontFamily: font.semi, fontSize: 16, lineHeight: 23, color: color.ink2 },
   meter: { marginTop: 6, gap: 6 },
-  track: { height: 8, borderRadius: 4, backgroundColor: color.tint2, overflow: 'hidden' },
-  fill: { height: 8, borderRadius: 4, backgroundColor: color.mintDeep },
+  track: { height: 10, borderRadius: 5, backgroundColor: color.tint2, overflow: 'hidden' },
+  fill: { height: 10, borderRadius: 5, backgroundColor: color.mintDeep },
   progress: { fontFamily: font.extra, fontSize: 13.5, color: color.ink2 },
   titleNarrow: { flex: 1 },
-  open: { minHeight: 48, paddingHorizontal: 24, borderRadius: radius.pill, backgroundColor: color.grapeDeep, alignItems: 'center', justifyContent: 'center' },
+  open: { minHeight: 48, marginBottom: 4, paddingHorizontal: 26, borderRadius: radius.pill, backgroundColor: color.grapeDeep, boxShadow: `0 4px 0 ${color.grapeLip}`, alignItems: 'center', justifyContent: 'center' },
   openFull: { marginTop: space.xs, minHeight: 52 },
-  openText: { fontFamily: font.extra, fontSize: 16, color: '#ffffff' },
+  openText: { fontFamily: font.display, fontSize: 18, color: '#ffffff' },
 })
