@@ -64,7 +64,110 @@ async function drag(from, to, hold = 0) {
 const centerOf = async (sel) => { const b = await page.locator(sel).first().boundingBox(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 } }
 const atomPoint = async (id) => (await points()).atoms.find((a) => a.id === id)
 
+// ---- drawing dipole arrows (step 6)
+/** A point on an atom that no other atom covers, nearest its middle. Null when the atom is hidden. */
+function clearPoint(atoms, id) {
+  const a = atoms.find((x) => x.id === id)
+  const others = atoms.filter((x) => x.id !== id)
+  const free = (q) => others.every((o) => Math.hypot(o.x - q.x, o.y - q.y) > o.r + 9)
+  if (free(a)) return { x: a.x, y: a.y }
+  for (const f of [0.35, 0.6]) for (let k = 0; k < 12; k++) {
+    const q = { x: a.x + a.r * f * Math.cos((k * Math.PI) / 6), y: a.y + a.r * f * Math.sin((k * Math.PI) / 6) }
+    if (free(q)) return q
+  }
+  return null
+}
+/** Turns the 3D model with a real drag on the empty corner of the board. */
+async function turnModel() {
+  const b = await page.locator('.mb-canvas-wrap').boundingBox()
+  const from = { x: b.x + 30, y: b.y + b.height * 0.5 }
+  await drag(from, { x: from.x + 46, y: from.y })
+}
+/** Draws a bond's dipole arrow with a real drag from one atom to another. The model is turned first
+ *  when one of the two atoms is behind another atom. */
+async function drawArrow(fromId, toId) {
+  for (let i = 0; i < 12; i++) {
+    const atoms = (await points()).atoms
+    const a = clearPoint(atoms, fromId)
+    const b = clearPoint(atoms, toId)
+    const A = atoms.find((x) => x.id === fromId)
+    const B = atoms.find((x) => x.id === toId)
+    if (a && b && Math.hypot(A.x - B.x, A.y - B.y) > A.r + B.r + 6) { await drag(a, b); return }
+    await turnModel()
+  }
+  throw new Error(`no clear view of atoms ${fromId} and ${toId} to draw an arrow between`)
+}
+/** The same arrow from the keyboard: Enter on the atom it starts on, then Enter on the atom it points at. */
+async function keyArrow(fromId, toId) {
+  const label = async (id) => mb((id) => { const s = window.__mb.store.getState().s; return s.atoms.find((a) => a.id === id).el }, id)
+  const NAME = { H: 'Hydrogen', C: 'Carbon', N: 'Nitrogen', O: 'Oxygen', F: 'Fluorine', S: 'Sulfur', Cl: 'Chlorine', Br: 'Bromine', P: 'Phosphorus', B: 'Boron', Xe: 'Xenon' }
+  const focusHit = async (re) => { for (let i = 0; i < 80; i++) { await page.keyboard.press('Tab'); if (await mb((src) => document.activeElement?.classList.contains('mb-hit') && new RegExp(src).test(document.activeElement.getAttribute('aria-label') ?? ''), re.source)) return true } return false }
+  const from = NAME[await label(fromId)]
+  const to = NAME[await label(toId)]
+  ok(await focusHit(new RegExp(`^${from}\\. Press Enter to start a dipole arrow`)), `keyboard: Tab reaches ${from.toLowerCase()}, which says Enter starts an arrow there`)
+  await page.keyboard.press('Enter'); await wait(200)
+  ok((await state()).selection?.id !== undefined, `keyboard: Enter on ${from.toLowerCase()} starts the arrow`)
+  ok(await focusHit(new RegExp(`^${to}\\. Press Enter to point the dipole arrow at`)), `keyboard: Tab reaches ${to.toLowerCase()}, which says Enter points the arrow at it`)
+  await page.keyboard.press('Enter'); await wait(500)
+}
+/** Which way the net dipole points on screen, worked out here from where the atoms are drawn and
+ *  the slides' electronegativities: each polar bond is an arrow along the bond toward the atom that
+ *  pulls harder, and the arrows of one kind of bond are the same length. */
+async function netOnScreen() {
+  const { atoms } = await points()
+  const st = await state()
+  const top = (await report()).topology
+  const c = atoms.find((a) => a.id === top.center)
+  const cEl = st.atoms.find((a) => a.id === top.center).el
+  let x = 0, y = 0
+  for (const a of atoms) {
+    if (a.id === c.id || Math.abs(EN[a.el] - EN[cEl]) <= 4) continue
+    const sign = EN[a.el] > EN[cEl] ? 1 : -1
+    x += sign * (a.x - c.x); y += sign * (a.y - c.y)
+  }
+  const len = Math.hypot(x, y)
+  return { c, atoms, x: x / (len || 1), y: y / (len || 1), len }
+}
+/** Draws the net dipole with a real drag out of the middle atom, the right way or the opposite way.
+ *  Returns the direction it was drawn in on screen. */
+async function drawNet(opposite) {
+  for (let i = 0; i < 12; i++) {
+    const n = await netOnScreen()
+    const from = clearPoint(n.atoms, n.c.id)
+    if (from && n.len > 24) {
+      const k = opposite ? -1 : 1
+      await drag(from, { x: n.c.x + k * n.x * (n.c.r + 92), y: n.c.y + k * n.y * (n.c.r + 92) })
+      return { x: k * n.x, y: k * n.y }
+    }
+    await turnModel()
+  }
+  throw new Error('no clear view of the middle atom to draw the net dipole from')
+}
+const degreesApart = (a, b) => (Math.acos(Math.max(-1, Math.min(1, (a.x * b.x + a.y * b.y) / ((Math.hypot(a.x, a.y) * Math.hypot(b.x, b.y)) || 1)))) * 180) / Math.PI
+/** The net dipole from the keyboard: the arrow keys turn it 15° at a time from pointing up, Enter sets it. */
+async function keyNet() {
+  let found = false
+  for (let i = 0; i < 80 && !found; i++) { await page.keyboard.press('Tab'); found = await mb(() => document.activeElement?.classList.contains('mb-hit') && /turn the net dipole arrow/.test(document.activeElement.getAttribute('aria-label') ?? '')) }
+  ok(found, 'keyboard: Tab reaches the middle atom, which says the arrow keys turn the net dipole arrow')
+  const n = await netOnScreen()
+  const target = (Math.atan2(-n.y, n.x) * 180) / Math.PI // degrees counterclockwise from pointing right
+  const steps = Math.round((((target - 90 + 540) % 360) - 180) / 15)
+  await page.keyboard.press('Enter'); await wait(150)
+  ok((await points()).draw.drawing === true, 'keyboard: Enter on the middle atom shows the net dipole arrow')
+  for (let k = 0; k < Math.abs(steps); k++) { await page.keyboard.press(steps > 0 ? 'ArrowLeft' : 'ArrowRight'); await wait(40) }
+  await page.keyboard.press('Enter'); await wait(300)
+}
+
 const VALENCE = { H: 1, Be: 2, B: 3, C: 4, N: 5, O: 6, F: 7, P: 5, S: 6, Cl: 7, Br: 7, Xe: 8 }
+// Steps 6 and 7, from the course's chapter 7 and 8 slides and not from the app:
+// electronegativity in tenths (the table the slides subtract with), which molecules are polar (for
+// an ion: whose bond dipoles do not cancel), and how many pi bonds each finished structure has.
+const EN = { H: 21, Be: 15, B: 20, C: 25, N: 30, O: 35, F: 40, P: 21, S: 25, Cl: 30, Br: 28, Xe: 26 }
+const POLAR = new Set(['NH3', 'H2O', 'CH2O', 'HCN', 'SF4', 'ClF3', 'BrF5', 'SO2', 'NO2-'])
+const PI = { CO2: 2, CH2O: 1, HCN: 2, 'NO2-': 1, 'CO3 2-': 1, SO2: 2, 'SO4 2-': 2, 'PO4 3-': 1 }
+const HYBRID = ['sp', 'sp2', 'sp3', 'sp3d', 'sp3d2']
+/** The right answer for a bond: nonpolar when the two atoms differ by 0.4 or less, otherwise the atom that pulls harder. */
+const bondAnswer = (a, b) => (Math.abs(EN[a] - EN[b]) <= 4 ? 'nonpolar' : EN[a] > EN[b] ? a : b)
 const PROBLEMS = firstArg === 'shell' ? [] : await mb(() => {
   const s = window.__mb.store
   const out = []
@@ -74,8 +177,11 @@ const PROBLEMS = firstArg === 'shell' ? [] : await mb(() => {
   return out
 })
 
-/** Works one guided problem from the picker to the 3D shape. `wrong` adds wrong turns on the way:
- *  an electron added by hand in the check step, wrong group counts, a wrong shape. */
+/** Works one guided problem from the picker to the end of step 7. `wrong` adds wrong turns on the
+ *  way: an electron added by hand in the check step, wrong group counts, a wrong shape, a dipole
+ *  arrow drawn the wrong way round, a net dipole drawn the opposite way. `wrong.keys` draws the
+ *  arrows of step 6 from the keyboard, `wrong.flat` draws a bond's arrow on the flat drawing, and
+ *  `wrong.endOn` first draws the net dipole while it points at the viewer. */
 async function solve(p, wrong = {}) {
   console.log(`${p.id}${Object.keys(wrong).length ? ' with wrong turns' : ''}`)
   // open the picker and choose the molecule
@@ -218,6 +324,139 @@ async function solve(p, wrong = {}) {
   ok(ang1.length === ang2.length && ang1.every((a, i) => Math.abs(a - ang2[i]) <= 2), `${p.id}: after a drag in 3D the angles settle back (${ang1.join(',')} vs ${ang2.join(',')})`)
   const scroll = await mb(() => document.documentElement.scrollWidth - window.innerWidth)
   ok(scroll <= 0, `${p.id}: no sideways scroll`)
+  ok(await page.locator('[data-key="next"]').isEnabled(), `${p.id}: the shape step leads on to the polar bonds`)
+  await press('[data-key="next"]')
+
+  // 6. polar bonds: draw each polar bond's dipole arrow on the model, press the button for a
+  //    nonpolar bond, say whether the molecule is polar, then draw the net dipole of a polar one
+  st = await state()
+  ok(st.step === 'polar' && st.view === 'shape', `${p.id}: step 6 opens on the 3D model`)
+  const outerKinds = [...new Set(outer)]
+  const polarKinds = outerKinds.filter((el) => bondAnswer(p.center, el) !== 'nonpolar')
+  const outerOf = (el) => st.atoms.find((a) => a.id !== centerId && a.el === el).id
+  ok((await points()).draw.kind === 'bond', `${p.id}: the board takes a drawn arrow while a bond is asked about`)
+  for (let guard = 0; guard < 4; guard++) {
+    const asked = await mb(() => document.querySelector('[data-act="bond-polar"]')?.getAttribute('data-el') ?? null)
+    if (!asked) break
+    const answer = bondAnswer(p.center, asked)
+    // an arrow runs from the atom that pulls less to the atom that pulls harder
+    const [tail, head] = answer === asked ? [centerId, outerOf(asked)] : [outerOf(asked), centerId]
+    if (wrong.bond && guard === 0) {
+      // a wrong turn: an arrow that points at the atom that pulls less (on a nonpolar bond, any arrow is wrong)
+      await drawArrow(head, tail)
+      const lead = (await text('.mb-coach-lead')).trim()
+      ok(wrong.bond.test(lead), `${p.id}: a wrong arrow on the ${p.center}–${asked} bond is explained (${lead})`)
+      const pts = await points()
+      ok(pts.dipoles.wanted === 0, `${p.id}: no arrow is drawn for a bond that is not answered yet`)
+      ok(pts.draw.wrong === true, `${p.id}: the wrong arrow stays on the board`)
+      await shot(`${p.id.replace(/\W/g, '')}-wrong-arrow`)
+    }
+    if (answer === 'nonpolar') await press(`[data-key="pol-${asked}-nonpolar"]`)
+    else if (wrong.keys) await keyArrow(tail, head)
+    else if (wrong.flat) {
+      // the same arrow on the flat drawing
+      await press('[data-key="view-flat"]')
+      await wait(phone ? 2400 : 2100)
+      const flat = await points()
+      ok(flat.lift < 0.01 && flat.draw.kind === 'bond', `${p.id}: a bond's arrow can be drawn on the flat drawing (lift ${flat.lift.toFixed(2)})`)
+      await drawArrow(tail, head)
+      ok(await page.locator(`[data-key="pol-${asked}-nonpolar"]`).count() === 0, `${p.id}: the arrow drawn on the flat drawing is accepted`)
+      await press('[data-key="view-shape"]')
+      await wait(phone ? 2400 : 2100)
+    } else await drawArrow(tail, head)
+  }
+  ok(await page.locator('[data-act="bond-polar"]').count() === 0, `${p.id}: every kind of bond is answered (${outerKinds.map((el) => `${p.center}–${el} ${bondAnswer(p.center, el)}`).join(', ')})`)
+  const arrowsWanted = outer.filter((el) => polarKinds.includes(el)).length
+  await wait(400)
+  let dip = (await points()).dipoles
+  // a bond that points straight at the viewer leaves no room for its arrow, and the model turns slowly when left alone: wait for it to come round
+  for (let i = 0; i < 40 && arrowsWanted > 0 && dip.bonds === 0; i++) { await wait(250); dip = (await points()).dipoles }
+  ok(dip.wanted === arrowsWanted && dip.bonds >= Math.min(1, arrowsWanted), `${p.id}: the board draws a dipole arrow on each of the ${arrowsWanted} polar bonds (asked for ${dip.wanted}, on screen ${dip.bonds})`)
+  ok(dip.net === false, `${p.id}: the net dipole is not drawn before the molecule question is answered`)
+  ok((await points()).draw.kind === null, `${p.id}: no arrow can be drawn while polar or nonpolar is the question`)
+  const isPolar = POLAR.has(p.id)
+  const said = wrong.net ? !isPolar : isPolar
+  await press(`[data-key="net-${said ? 'polar' : 'nonpolar'}"]`)
+  if (wrong.net) {
+    const card = await text('.mb-coach')
+    ok(wrong.net.test(card), `${p.id}: a wrong answer about the whole molecule is explained (${card.replace(/\s+/g, ' ')})`)
+  } else ok(await page.locator('.mb-coach').count() === 0, `${p.id}: ${isPolar ? 'polar' : 'nonpolar'} is accepted`)
+  await wait(500)
+  let pts = await points()
+  ok(pts.dipoles.net === false, `${p.id}: the net dipole is not on the board ${isPolar ? 'before it is drawn' : 'because the dipoles cancel'}`)
+  ok(pts.draw.kind === (isPolar ? 'net' : null), `${p.id}: ${isPolar ? 'the net dipole is asked for as a drawing' : 'there is no net dipole to draw'} (${pts.draw.kind})`)
+  if (isPolar) {
+    ok(!(await page.locator('[data-key="next"]').isEnabled()), `${p.id}: the step waits for the net dipole`)
+    await wait(1300) // the model turns until the net dipole lies across the screen
+    if (wrong.endOn) {
+      // a wrong turn of the model: seen from above, this molecule's net dipole points at the viewer,
+      // and an arrow drawn then is not judged
+      const b = await page.locator('.mb-canvas-wrap').boundingBox()
+      const corner = { x: b.x + 30, y: b.y + b.height * 0.4 }
+      await drag(corner, { x: corner.x, y: corner.y + 200 })
+      const before = await mb(() => { const s = window.__mb.store.getState(); return { tries: s.polar.arrow.tries, aim: s.polar.aim } })
+      const top = await netOnScreen()
+      await drag(clearPoint(top.atoms, top.c.id) ?? top.c, { x: top.c.x + top.c.r + 92, y: top.c.y })
+      const after = await mb(() => { const s = window.__mb.store.getState(); return { tries: s.polar.arrow.tries, aim: s.polar.aim, right: s.polar.arrow.right, toast: s.toast?.text ?? '' } })
+      ok(/pointed toward you or away from you/.test(after.toast), `${p.id}: an arrow drawn while the net dipole points at the viewer gets a message (${after.toast})`)
+      ok(after.tries === before.tries && after.right === false && after.aim === before.aim + 1, `${p.id}: that arrow costs no try, and the model is told to turn (tries ${before.tries} to ${after.tries})`)
+      await wait(1600) // the model turns back to a side view
+      const side = await netOnScreen()
+      ok(side.len > top.len * 1.5, `${p.id}: the model turned until the net dipole lies across the screen (${top.len.toFixed(0)} px to ${side.len.toFixed(0)} px)`)
+    }
+    if (wrong.arrow) {
+      // a wrong turn: the net dipole drawn the opposite way
+      const way = await drawNet(true)
+      // the card for a wrong polar-or-nonpolar pick can still be on screen above this one: read the newest
+      const lead = (await page.locator('.mb-coach-lead').last().innerText()).trim()
+      ok(wrong.arrow.test(lead), `${p.id}: a net dipole drawn the opposite way is explained (${lead})`)
+      pts = await points()
+      ok(pts.dipoles.net === false && pts.draw.wrong === true, `${p.id}: the wrong net dipole stays on the board, and the right one is not shown`)
+      const off = pts.draw.wrongWay ? degreesApart(pts.draw.wrongWay, way) : 999
+      ok(off < 12, `${p.id}: the wrong net dipole is redrawn the way it was drawn (${off.toFixed(0)}° off)`)
+      await shot(`${p.id.replace(/\W/g, '')}-wrong-net`)
+    }
+    if (wrong.keys) await keyNet()
+    else await drawNet(false)
+    await wait(500)
+    pts = await points()
+    ok(pts.dipoles.net === true, `${p.id}: the net dipole is drawn the right way and stays on the model`)
+    ok(/net dipole/.test(await text('.mb-fb')), `${p.id}: the panel says where the net dipole points`)
+    ok(pts.draw.kind === null, `${p.id}: nothing is left to draw`)
+  }
+  ok(await page.locator('[data-key="next"]').isEnabled(), `${p.id}: step 6 is finished`)
+  await shot(`${p.id.replace(/\W/g, '')}-polar`)
+  await press('[data-key="next"]')
+
+  // 7. sigma and pi bonds, then the hybridization of the middle atom
+  st = await state()
+  ok(st.step === 'orbitals', `${p.id}: step 7 opens`)
+  const sigma = ring
+  const pi = PI[p.id] ?? 0
+  if (wrong.sigma) {
+    // a wrong turn: every line counted as a sigma bond
+    for (let k = 0; k < sigma + pi; k++) await press('[data-key="inc-sigma"]')
+    await press('[data-key="bonds-check"]')
+    const lead = (await text('.mb-coach-lead')).trim()
+    ok(wrong.sigma.test(lead), `${p.id}: a wrong count of sigma bonds is explained (${lead})`)
+    for (let k = 0; k < pi; k++) await press('[data-key="dec-sigma"]')
+  } else for (let k = 0; k < sigma; k++) await press('[data-key="inc-sigma"]')
+  for (let k = 0; k < pi; k++) await press('[data-key="inc-pi"]')
+  await press('[data-key="bonds-check"]')
+  ok(await page.locator('[data-act="hybrid"]').count() === 5, `${p.id}: ${sigma} sigma and ${pi} pi accepted, and the hybridization question opens`)
+  const hybrid = HYBRID[groups - 2]
+  if (wrong.hybrid) {
+    await press(`[data-key="hyb-${wrong.hybrid.pick}"]`)
+    const lead = (await text('.mb-coach-lead')).trim()
+    ok(wrong.hybrid.says.test(lead), `${p.id}: picking ${wrong.hybrid.pick} is explained (${lead})`)
+  }
+  await press(`[data-key="hyb-${hybrid}"]`)
+  ok(await page.locator('[data-act="hybrid"]').count() === 0, `${p.id}: ${hybrid} is accepted for ${groups} electron groups`)
+  const table = await text('.mb-readout')
+  ok(/Polarity/.test(table) && /Sigma and pi bonds/.test(table) && new RegExp(`${sigma} sigma, ${pi} pi`).test(table), `${p.id}: the table at the end lists polarity and ${sigma} sigma, ${pi} pi`)
+  ok((await mb(() => window.__mb.store.getState().solved)).includes(p.id), `${p.id}: the molecule counts as finished after step 7`)
+  ok(await page.locator('[data-key="next"]').isEnabled(), `${p.id}: the next molecule is offered`)
+  await noSideScroll(`${p.id} after step 7`)
 }
 
 const text = async (sel) => (await page.locator(sel).allInnerTexts()).join(' ')
@@ -327,11 +566,16 @@ async function extras() {
   ok(await page.locator('.mb-title').count() === 1 && /Put the atoms on the board/.test(await text('.mb-title')), 'step change: only the new step can be found on the page while the old one deflates')
   const arriving = await mb(() => [...document.querySelectorAll('.mb-step > *')].map((n) => `${n.classList.contains('is-new')}:${getComputedStyle(n).animationName.split(',')[0].trim()}`))
   ok(arriving.length >= 3 && arriving.every((a) => a === 'true:mb-inflate'), `step change: every chunk of the new step blows up into place (${arriving.join(' ')})`)
+  // a piece that is still growing takes no taps: its buttons are moving, and a tap could land on the wrong one (M-0006)
+  const early = await mb(() => [...document.querySelectorAll('.mb-step > *')].map((n) => getComputedStyle(n).pointerEvents))
+  ok(early.length >= 3 && early.every((v) => v === 'none'), `step change: the new text takes no taps while it is arriving (${early.join(' ')})`)
   await wait(900)
   ok(await page.locator('.mb-fx .mb-ghost, .mb-fx .mb-drop').count() === 0, 'step change: the old text and the bubbles are gone a moment later')
   // the animation clock runs with the frames, which a software renderer draws slowly: wait for the end instead of a fixed time
   const settled = await page.waitForFunction(() => [...document.querySelectorAll('.mb-step > *')].every((n) => { const cs = getComputedStyle(n); return cs.opacity === '1' && (cs.scale === 'none' || cs.scale === '1' || cs.scale === '1 1') }), null, { timeout: 8000 }).then(() => true, () => false)
   ok(settled, 'step change: the new text ends at full size and fully visible')
+  const late = await page.waitForFunction(() => [...document.querySelectorAll('.mb-step > *')].every((n) => getComputedStyle(n).pointerEvents !== 'none'), null, { timeout: 4000 }).then(() => true, () => false)
+  ok(late, 'step change: the new text takes taps once it has arrived')
   await press('[data-key="mid-O"]')
   // inside a step only what is new moves: the explanation blows up, the question above it stays still
   const inStep = await mb(() => ({ q: document.querySelector('.mb-step > .mb-q').classList.contains('is-new'), card: document.querySelector('.mb-step > .mb-coach').classList.contains('is-new') }))
@@ -551,11 +795,25 @@ async function extras() {
       { n: 6, says: /^6 counts the lone pairs on the outer atoms\.$/, rings: 4 },
     ],
     shape: { pick: 'bent', says: /Bent is the shape for 2 atoms and 1 or 2 lone pairs/ },
+    bond: /^That arrow points at carbon\.$/,
+    net: /polar, and the dipoles still cancel[\s\S]*Carbon dioxide is nonpolar\./,
+    sigma: /^4 counts every line as a sigma bond\.$/,
+    hybrid: { pick: 'sp3', says: /^sp³ goes with 4 electron groups\.$/ },
   })
   await solve(byId('H2O'), {
     groups: [{ n: 2, says: /^2 is the number of atoms bonded to oxygen\.$/, rings: 4 }],
     shape: { pick: 'linear', says: /Linear would be the shape if oxygen had no lone pairs/ },
+    net: /spread evenly around the middle atom[\s\S]*Water is polar\./,
+    arrow: /^That arrow points against the bond arrows\.$/,
+    endOn: true,
+    flat: true,
+    hybrid: { pick: 'sp', says: /^sp goes with 2 electron groups\.$/ },
   })
+  // ---- the arrows of step 6 from the keyboard, and an arrow on a nonpolar bond: formaldehyde
+  if (!phone) {
+    console.log('extras: dipole arrows from the keyboard')
+    await solve(byId('CH2O'), { bond: /^Only a polar bond has a dipole arrow\.$/, keys: true })
+  }
 }
 
 async function shell() {
@@ -614,7 +872,7 @@ if (firstArg === 'shell') {
   const first = Number(firstArg)
   const list = PROBLEMS.slice(first, first + Number(countArg))
   for (const p of list) {
-    try { await solve(p) } catch (e) { failed.push(`${p.id}: ${String(e).split('\n')[0]}`); console.log(`  ERROR ${String(e).split('\n')[0]}`); await shot(`${p.id.replace(/\W/g, '')}-error`) }
+    try { await solve(p) } catch (e) { failed.push(`${p.id}: ${String(e).split('\n')[0]}`); console.log(`  ERROR ${String(e).split('\n').slice(0, 14).join('\n    ')}`); await shot(`${p.id.replace(/\W/g, '')}-error`) }
   }
 }
 ok(errors.length === 0, `no console errors (${errors.slice(0, 3).join(' | ')})`)

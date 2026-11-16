@@ -16,22 +16,42 @@ import {
   type Op,
   type Structure,
 } from '../../chem/structure'
+import { hybridFor, type Hybrid } from '../../chem/orbitals'
+import type { SeenBond } from '../../chem/polarity'
+import type { V3 } from '../../chem/repulsion'
 import { shapeOf, type ShapeName } from '../../chem/vsepr'
 import {
+  AFTER_SHAPE,
+  NET_SIDE,
   STEPS,
   boardStepDone,
+  bondAnswerRight,
+  bondCoach,
+  bondCounts,
+  bondRight,
   countCoach,
+  drawRefusal,
   elementsOf,
   groupFacts,
   groupsCoach,
   groupsRight,
   hintsFor,
+  hybridCoach,
+  hybridRight,
+  judgeNetArrow,
   middleFeedback,
   middleNeeded,
+  netArrowCoach,
+  netArrowRight,
+  netFeedback,
+  polarity,
   refusalText,
   shapeFeedback,
   shapeInfoFor,
+  sigmaPiCoach,
+  sigmaPiRight,
   totalCoach,
+  type BondAnswer,
   type Coach,
   type StepId,
 } from './guide'
@@ -75,6 +95,33 @@ export interface ShapeState {
   /** What the panel says about a wrong pick. */
   pickCoach: Coach | null
 }
+/** One answered question: the line for a right answer, or the explanation of a wrong one. */
+export interface Answered {
+  right: boolean
+  tries: number
+  text: string | null
+  coach: Coach | null
+}
+const unanswered = (): Answered => ({ right: false, tries: 0, text: null, coach: null })
+/** Step 6: one answer for each kind of bond (named by its outer atom), then one for the whole
+ *  molecule, then the net dipole of a polar molecule, drawn on the model. */
+export interface PolarState {
+  /** `pick` is 'nonpolar' or the atom the drawn arrow pointed at. `drawn` is the last arrow that was drawn wrong, which the board keeps showing. */
+  bonds: Partial<Record<El, Answered & { pick: BondAnswer | null; drawn: { from: string; to: string } | null }>>
+  /** `pick` is true for "polar" (or "they do not cancel"). The first pick is final. */
+  net: Answered & { pick: boolean | null }
+  /** The net dipole, drawn. `drawn` is the direction of the last arrow that was drawn wrong, in the board's own 3D frame. */
+  arrow: Answered & { drawn: V3 | null }
+  /** Goes up by one each time the model should turn until the net dipole lies across the screen. */
+  aim: number
+}
+/** Step 7: the counts of sigma and pi bonds, then the middle atom's hybridization. */
+export interface OrbitalState {
+  sigma: number
+  pi: number
+  counts: Answered
+  hybrid: Answered & { pick: Hybrid | null }
+}
 export interface State {
   mode: Mode
   problem: number
@@ -83,6 +130,8 @@ export interface State {
   /** `text` is the line for the right pick; `coach` explains a wrong one. */
   middle: { pick: El | null; right: boolean; text: string | null; coach: Coach | null }
   shape: ShapeState
+  polar: PolarState
+  orbitals: OrbitalState
   s: Structure
   past: Structure[]
   selection: Selection | null
@@ -98,6 +147,10 @@ export interface State {
 const freshCount = (): CountState => ({ answers: {}, right: {}, tries: {}, feedback: {}, changed: {}, total: null, totalRight: false, totalTries: 0, totalFeedback: null })
 const freshShape = (): ShapeState => ({ groups: null, groupsRight: false, groupsTries: 0, groupsFeedback: null, groupsCoach: null, pick: null, pickRight: false, pickFeedback: null, pickCoach: null })
 const freshMiddle = (): State['middle'] => ({ pick: null, right: false, text: null, coach: null })
+const freshPolar = (): PolarState => ({ bonds: {}, net: { ...unanswered(), pick: null }, arrow: { ...unanswered(), drawn: null }, aim: 0 })
+const freshOrbitals = (): OrbitalState => ({ sigma: 0, pi: 0, counts: unanswered(), hybrid: { ...unanswered(), pick: null } })
+/** Everything asked about the finished structure. A change to the board throws these answers away. */
+const freshAnswers = () => ({ shape: freshShape(), polar: freshPolar(), orbitals: freshOrbitals() })
 
 const SOLVED_KEY = 'chem-review:lewis:solved'
 function loadSolved(): string[] {
@@ -124,7 +177,7 @@ function initial(): State {
     step: 'count',
     count: freshCount(),
     middle: freshMiddle(),
-    shape: freshShape(),
+    ...freshAnswers(),
     s: EMPTY,
     past: [],
     selection: null,
@@ -141,7 +194,7 @@ let state: State = initial()
 /** Where each atom sits on the board. The scene moves these every frame; they are not part of State. */
 export const positions = new Map<string, P2>()
 const listeners = new Set<(s: State) => void>()
-type BoardSlice = Pick<State, 'problem' | 'step' | 'count' | 'middle' | 'shape' | 's' | 'past' | 'view' | 'hints'> & { positions: [string, P2][] }
+type BoardSlice = Pick<State, 'problem' | 'step' | 'count' | 'middle' | 'shape' | 'polar' | 'orbitals' | 's' | 'past' | 'view' | 'hints'> & { positions: [string, P2][] }
 const stash: Partial<Record<Mode, BoardSlice>> = {}
 let toastSeq = 0
 
@@ -191,7 +244,35 @@ export function stepDone(id: StepId, s: State = state): boolean {
   if (id === 'count') return countDone(s)
   if (id === 'place') return (!middleNeeded(p) || s.middle.right) && boardStepDone('place', p, s.s)
   if (id === 'shape') return s.shape.pick !== null
+  if (id === 'polar') return polarDone(s)
+  if (id === 'orbitals') return s.orbitals.counts.right && s.orbitals.hybrid.right
   return boardStepDone(id, p, s.s)
+}
+/** Step 6 is finished when every kind of bond is right, the whole-molecule question is answered,
+ *  and the net dipole of a polar molecule is drawn the right way. */
+function polarDone(s: State): boolean {
+  const m = polarity(s.s)
+  return !!m && m.kinds.every((k) => s.polar.bonds[k.terminal]?.right) && s.polar.net.pick !== null && (!m.polar || s.polar.arrow.right)
+}
+/** The kind of bond step 6 is asking about now: the first one without a right answer. Null when all are right. */
+export function bondAsked(s: State = state): El | null {
+  return polarity(s.s)?.kinds.find((k) => !s.polar.bonds[k.terminal]?.right)?.terminal ?? null
+}
+/** Step 6 is asking for the net dipole to be drawn: the molecule is polar, the polar-or-nonpolar answer is in, and the arrow is not right yet. */
+export function netArrowAsked(s: State = state): boolean {
+  const m = polarity(s.s)
+  return s.mode === 'guided' && s.step === 'polar' && !!m && m.polar && bondAsked(s) === null && s.polar.net.pick !== null && !s.polar.arrow.right
+}
+/** What a student can draw on the board now: a bond's dipole arrow from one atom to the other (on
+ *  the flat drawing or the 3D model), or the net dipole from the middle atom (on the 3D model only). */
+export function drawing(s: State = state): 'bond' | 'net' | null {
+  if (s.mode !== 'guided' || s.step !== 'polar') return null
+  if (bondAsked(s) !== null) return 'bond'
+  return netArrowAsked(s) && s.view === 'shape' ? 'net' : null
+}
+/** True in the steps that work on the finished 3D model, once the shape has been revealed. */
+export function onModel(s: State = state): boolean {
+  return s.mode === 'guided' && (s.step === 'shape' || AFTER_SHAPE.includes(s.step)) && s.shape.pick !== null
 }
 /** Index of the furthest step the student may open: the first one that is not finished. */
 export function unlocked(s: State = state): number {
@@ -218,7 +299,7 @@ export function totalNext(s: State = state): boolean {
   return s.step === 'count' && elementsOf(problemOf(s)).every((el) => s.count.right[el])
 }
 function stepHints(s: State): string[] {
-  return hintsFor(s.step, problemOf(s), s.s, totalNext(s))
+  return hintsFor(s.step, problemOf(s), s.s, totalNext(s), netArrowAsked(s))
 }
 export function currentHints(s: State = state): string[] {
   if (s.mode !== 'guided') return []
@@ -233,7 +314,7 @@ export function hintsLeft(s: State = state): number {
 
 function resetBoard(problem: number): Partial<State> {
   positions.clear()
-  return { problem, step: 'count', count: freshCount(), middle: freshMiddle(), shape: freshShape(), s: EMPTY, past: [], selection: null, view: 'flat', hints: 0, pickerOpen: false }
+  return { problem, step: 'count', count: freshCount(), middle: freshMiddle(), ...freshAnswers(), s: EMPTY, past: [], selection: null, view: 'flat', hints: 0, pickerOpen: false }
 }
 
 export function selectProblem(i: number) {
@@ -243,8 +324,8 @@ export function selectProblem(i: number) {
 
 export function setMode(mode: Mode) {
   if (mode === state.mode) return
-  const { problem, step, count, middle, shape, s, past, view, hints } = state
-  stash[state.mode] = { problem, step, count, middle, shape, s, past, view, hints, positions: [...positions].map(([k, v]) => [k, { ...v }]) }
+  const { problem, step, count, middle, shape, polar, orbitals, s, past, view, hints } = state
+  stash[state.mode] = { problem, step, count, middle, shape, polar, orbitals, s, past, view, hints, positions: [...positions].map(([k, v]) => [k, { ...v }]) }
   const saved = stash[mode]
   positions.clear()
   if (saved) {
@@ -259,7 +340,8 @@ export function setMode(mode: Mode) {
 export function goStep(id: StepId) {
   const at = STEPS.findIndex((x) => x.id === id)
   if (at < 0 || at > unlocked()) return
-  set({ step: id, hints: 0, selection: null, view: id === 'shape' && state.shape.pick ? 'shape' : 'flat' })
+  // the steps after the shape work on the lifted model
+  set({ step: id, hints: 0, selection: null, view: (id === 'shape' || AFTER_SHAPE.includes(id)) && state.shape.pick ? 'shape' : 'flat' })
 }
 
 /** The big button at the bottom of the panel: on to the next step, or the next molecule. */
@@ -346,7 +428,7 @@ export function pickMiddle(el: El) {
 // ---------------------------------------------------------------- the board
 
 function commit(s: Structure, extra: Partial<State> = {}) {
-  set({ s, past: [...state.past.slice(-60), state.s], shape: freshShape(), ...extra })
+  set({ s, past: [...state.past.slice(-60), state.s], ...freshAnswers(), ...extra })
 }
 function apply(op: Op, ids: string[], extra: Partial<State> = {}): boolean {
   if (op.ok) {
@@ -414,7 +496,7 @@ export function minusElectron(id: string) {
 export function undo() {
   const prev = state.past[state.past.length - 1]
   if (!prev || !editable()) return
-  set({ s: prev, past: state.past.slice(0, -1), selection: null, shape: freshShape() })
+  set({ s: prev, past: state.past.slice(0, -1), selection: null, ...freshAnswers() })
 }
 export function clearBoard() {
   if (!editable() || state.s.atoms.length === 0) return
@@ -424,6 +506,13 @@ export function clearBoard() {
 /** A tap or click on an atom selects it. From the keyboard, a second atom bonds to the selected one,
  *  because the keyboard has no way to drag one atom onto another. */
 export function tapAtom(id: string, viaKeyboard = false) {
+  if (drawing() === 'bond') {
+    // without a drag, a dipole arrow takes two taps (or Enter on two atoms): where it starts, then the atom it points at
+    const from = state.selection?.kind === 'atom' ? state.selection.id : null
+    if (from && from !== id) drawBondArrow(from, id)
+    else set({ selection: from === id ? null : { kind: 'atom', id } })
+    return
+  }
   if (!editable()) return
   const sel = state.selection
   if (viaKeyboard && sel?.kind === 'atom' && sel.id !== id) {
@@ -457,15 +546,109 @@ export function pickShape(name: ShapeName) {
   const info = shapeInfoFor(state.s)
   if (!info || state.shape.pick || !state.shape.groupsRight) return
   const r = shapeFeedback(problemOf().center, info, name)
-  const id = problemOf().id
-  const solved = state.solved.includes(id) ? state.solved : [...state.solved, id]
-  saveSolved(solved)
-  set({ shape: { ...state.shape, pick: name, pickRight: r.right, pickFeedback: r.right ? r.text : null, pickCoach: r.coach }, view: 'shape', solved, selection: null })
+  set({ shape: { ...state.shape, pick: name, pickRight: r.right, pickFeedback: r.right ? r.text : null, pickCoach: r.coach }, view: 'shape', selection: null })
+}
+
+// ---------------------------------------------------------------- step 6: polar bonds and the net dipole
+
+/** An answer for one kind of bond: 'nonpolar', or the atom that is δ−. `terminal` names the bond by its outer atom. */
+export function answerBond(terminal: El, answer: BondAnswer, drawn: { from: string; to: string } | null = null) {
+  const m = polarity(state.s)
+  const kind = m?.kinds.find((k) => k.terminal === terminal)
+  const was = state.polar.bonds[terminal]
+  // one kind of bond is asked at a time, in the order the molecule lists them
+  if (state.step !== 'polar' || !kind || was?.right || terminal !== bondAsked()) return
+  const right = bondAnswerRight(kind.polarity, answer)
+  const tries = (was?.tries ?? 0) + (right ? 0 : 1)
+  const entry = right
+    ? { pick: answer, right: true, tries, text: bondRight(kind.center, kind.terminal, kind.polarity), coach: null, drawn: null }
+    : { pick: answer, right: false, tries, text: null, coach: bondCoach(kind.center, kind.terminal, kind.polarity, answer, tries), drawn }
+  // the atoms of a wrong arrow shake their heads
+  const shake = !right && drawn ? { refused: { ids: [drawn.from, drawn.to], n: ++toastSeq } } : {}
+  set({ polar: { ...state.polar, bonds: { ...state.polar.bonds, [terminal]: entry } }, selection: null, ...shake })
+}
+/** A dipole arrow drawn on the board from one atom to another. The arrow points at `to`, so it
+ *  says the bond is polar and `to` is δ−. An arrow that is not along the bond in question is refused. */
+export function drawBondArrow(from: string, to: string) {
+  const m = polarity(state.s)
+  const asked = bondAsked()
+  const kind = m?.kinds.find((k) => k.terminal === asked)
+  if (drawing() !== 'bond' || !m || !asked || !kind) return
+  const head = atomById(state.s, to)
+  const outerId = from === m.center.id ? to : to === m.center.id ? from : null
+  const outer = outerId ? m.bonds.find((b) => b.atomId === outerId) : undefined
+  if (!head || from === to || !outer || outer.el !== asked) {
+    const n = ++toastSeq
+    set({ toast: { text: drawRefusal(kind.center, kind.terminal), tone: 'warn', n }, refused: { ids: [from, to], n }, selection: null })
+    return
+  }
+  answerBond(asked, head.el, { from, to })
+}
+/** The whole-molecule answer. It is final: right or wrong, the model then shows the bond dipoles and what they add up to. */
+export function answerNet(saidPolar: boolean) {
+  const m = polarity(state.s)
+  if (state.step !== 'polar' || !m || bondAsked() !== null || state.polar.net.pick !== null) return
+  const r = netFeedback(problemOf(), m, shapeInfoFor(state.s), saidPolar)
+  // a polar molecule's net dipole is drawn next, on the 3D model, with hints of its own
+  set({ polar: { ...state.polar, net: { pick: saidPolar, right: r.right, tries: r.right ? 0 : 1, text: r.right ? r.text : null, coach: r.coach } }, ...(m.polar ? { view: 'shape' as const, hints: 0 } : {}) })
+}
+/** The net dipole drawn on the 3D model. `drawn` is its direction on screen (x to the right, y up),
+ *  `seen` is each bond as the viewer sees it at that moment, and `world` is the same direction in
+ *  the board's 3D frame, which the board uses to keep showing a wrong arrow. */
+export function drawNetArrow(drawn: { x: number; y: number }, seen: SeenBond[], world: V3) {
+  const m = polarity(state.s)
+  if (drawing() !== 'net' || !m) return
+  const verdict = judgeNetArrow(m, seen, drawn)
+  if (!verdict) return
+  const a = state.polar.arrow
+  if (verdict.kind === 'side') {
+    // seen end-on, no direction on screen is right: the model turns and the try does not count
+    set({ polar: { ...state.polar, aim: state.polar.aim + 1 }, toast: { text: NET_SIDE, tone: 'info', n: ++toastSeq } })
+  } else if (verdict.kind === 'right') {
+    // the hints were about adding the arrows: with the arrow right there is nothing left to hint at
+    set({ polar: { ...state.polar, arrow: { right: true, tries: a.tries, text: netArrowRight(m), coach: null, drawn: null } }, hints: 0 })
+  } else {
+    const tries = a.tries + 1
+    set({ polar: { ...state.polar, arrow: { right: false, tries, text: null, coach: netArrowCoach(m, verdict.idea, tries), drawn: world } }, refused: { ids: [m.center.id], n: ++toastSeq } })
+  }
+}
+
+// ---------------------------------------------------------------- step 7: sigma and pi bonds, hybridization
+
+export function setBondCount(kind: 'sigma' | 'pi', n: number) {
+  if (state.orbitals.counts.right) return
+  set({ orbitals: { ...state.orbitals, [kind]: Math.max(0, Math.min(9, Math.round(n))) } })
+}
+export function checkBondCounts() {
+  const o = state.orbitals
+  if (state.step !== 'orbitals' || o.counts.right) return
+  const c = bondCounts(state.s)
+  if (o.sigma === c.sigma && o.pi === c.pi) set({ orbitals: { ...o, counts: { right: true, tries: o.counts.tries, text: sigmaPiRight(c), coach: null } } })
+  else {
+    const tries = o.counts.tries + 1
+    set({ orbitals: { ...o, counts: { right: false, tries, text: null, coach: sigmaPiCoach(problemOf(), c, o.sigma, o.pi, tries) } } })
+  }
+}
+/** The middle atom's hybridization. A right answer finishes the molecule. */
+export function pickHybrid(h: Hybrid) {
+  const o = state.orbitals
+  const f = groupFacts(state.s)
+  if (state.step !== 'orbitals' || !f || !o.counts.right || o.hybrid.right) return
+  const center = problemOf().center
+  if (h === hybridFor(f.groups)) {
+    const id = problemOf().id
+    const solved = state.solved.includes(id) ? state.solved : [...state.solved, id]
+    saveSolved(solved)
+    set({ orbitals: { ...o, hybrid: { pick: h, right: true, tries: o.hybrid.tries, text: hybridRight(center, h, f), coach: null } }, solved })
+  } else {
+    const tries = o.hybrid.tries + 1
+    set({ orbitals: { ...o, hybrid: { pick: h, right: false, tries, text: null, coach: hybridCoach(center, f, h, tries) } } })
+  }
 }
 export function setView(view: 'flat' | 'shape') {
   if (view === state.view) return
   if (view === 'shape') {
-    const ok = state.mode === 'guided' ? state.step === 'shape' && state.shape.pick !== null : assess(state.s).complete && shapeOf(state.s) !== null
+    const ok = state.mode === 'guided' ? onModel() : assess(state.s).complete && shapeOf(state.s) !== null
     if (!ok) return
   }
   set({ view, selection: null })

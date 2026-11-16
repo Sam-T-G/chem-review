@@ -28,7 +28,7 @@ What went wrong, what it cost, and the rule or check that catches it next time. 
 - Date: 2026-11-13. Team: lewis. Logged by the lead session from Sam's message and the build session's README.
 - What happened: Sam: "when i click up to increment the amount of carbons, the number assigned to hydrogen also has the incrementing animation". The panel and the counter were redrawn as a whole, so every number replayed its animation.
 - Cost: a fix the same day.
-- Prevention: the rule "Only what changed moves" in `docs/design/look-and-motion.md`. `scripts/check-browser.mjs` checks that an explanation already on screen does not move again. `[TBD: whether a check covers the counter's own numbers]`.
+- Prevention: the rule "Only what changed moves" in `docs/design/look-and-motion.md`. `scripts/check-browser.mjs` checks that an explanation already on screen does not move again. `scripts/check-browser.mjs` also checks the counter's own numbers: after + on carbon, carbon's number animates and hydrogen's does not, and after a new bond the two counter tiles that changed animate and the total does not.
 
 ## M-0005 Some text blinked in and out when the page changed
 
@@ -36,3 +36,10 @@ What went wrong, what it cost, and the rule or check that catches it next time. 
 - What happened: Sam: "some text pops in and out very briefly, well they kind of "blink" in and out very briefly, can we make it consistent". Before the fix, text had more than one entrance animation.
 - Cost: every text change in the module was moved to one transition the same day.
 - Prevention: D-0019. `scripts/check-browser.mjs` checks that one arrival animation is in use, with no leftover slide or blink.
+
+## M-0006 A tap on text that was still arriving could land on the wrong control
+
+- Date: 2026-11-13. Team: lewis. Found by the build session's phone run of `scripts/check-browser.mjs`, on the build with steps 6 and 7.
+- What happened: D-0019 made every piece of text inflate into place, starting at 0.4 of its size. The molecule picker got the same entrance. While a piece is growing, its buttons are moving, so a tap aimed at one row of the picker can land on the row beside it. In the phone run of all 20 molecules, 3 taps on the picker opened the wrong molecule (NO2−, ClF3 and SO2 were asked for). The same entrance was already on the live site at commit a8f4cd9, where the phone run happened to pass.
+- Cost: no report from a student. A fast tap in the first half second after a step opens could have picked the wrong answer.
+- Prevention: a piece that is arriving takes no taps until it has stopped moving (`settle` in `src/modules/lewis/ui.ts`, and the rule in `docs/design/look-and-motion.md`). `scripts/check-browser.mjs` checks that a piece takes no taps while it arrives and takes them once it has, and every one of its picker taps checks that the molecule asked for is the one that opened.

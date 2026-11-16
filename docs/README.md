@@ -29,7 +29,7 @@ Every kind of knowledge about this repo has one home. Put a thing in its home an
 | [org.md](org.md) | The teams, who decides what, who reviews what, when to go up a level | lead |
 | [architecture.md](architecture.md) | The parts, what each may import, and the contracts between them | lead |
 | [chemistry/sources.md](chemistry/sources.md) | Where every chemistry rule and number comes from, the conventions, the known gaps | chem |
-| [learning/guided-steps.md](learning/guided-steps.md) | The five steps, the problem list, hints, the rules for words | learning |
+| [learning/guided-steps.md](learning/guided-steps.md) | The seven steps, the problem list, hints, the rules for words | learning |
 | [learning/wrong-answers.md](learning/wrong-answers.md) | What each wrong answer is taken for, and what the student is told | learning |
 | [design/look-and-motion.md](design/look-and-motion.md) | The palette, the type, the atoms' faces, what moves and when | design |
 | [platform/verify.md](platform/verify.md) | Every check, what it proves, and what each failure code means | platform |

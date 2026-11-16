@@ -21,6 +21,12 @@ export interface SceneCallbacks {
   tapBond(id: string): void
   tapEmpty(): void
   bond(a: string, b: string): void
+  /** A dipole arrow drawn from one atom to another. The arrow points at `to`. */
+  drawBond(from: string, to: string): void
+  /** The net dipole drawn on the lifted model: its direction on screen (x to the right, y up), each
+   *  bond from the middle atom as the viewer sees it at that moment (unit vectors, z toward the
+   *  viewer), and the drawn direction in the board's own 3D frame. */
+  drawNet(drawn: { x: number; y: number }, seen: { atomId: string; dir: V3 }[], world: V3): void
   place(el: El, at: P2 | null): void
   remove(id: string): void
   /** Something the hand should feel on a phone: an atom landing, a bond forming, a refused move. */
@@ -48,7 +54,29 @@ export interface SceneInput {
   point: { n: number; which: 'multiple' | 'lone' | 'all' } | null
   /** Bond angles to mark on the 3D model: the angle each is close to in the textbook arrangement, and the words to print. */
   angles: { near: number; text: string; under: boolean }[]
+  /** Bond dipoles to draw: an arrow beside each listed bond that points at its δ− atom (`out` 1:
+   *  the outer atom, −1: the middle atom), with δ+ and δ− beside the atoms. `net` also draws the
+   *  net dipole through the middle atom of the lifted model. `size` is the length of each bond's
+   *  arrow when they are added up. The three labels are the words to print. Null draws nothing. */
+  dipoles: { center: string; bonds: { atomId: string; out: -1 | 1; size: number }[]; net: boolean; plus: string; minus: string; netLabel: string } | null
+  /** What a student can draw on the board now. 'bond': a dipole arrow from one atom to another,
+   *  with a press, a drag and a release, or with a tap on each. 'net': the net dipole, dragged out
+   *  of the middle atom of the lifted model. `aim` goes up by one each time the model should turn
+   *  until the net dipole lies across the screen. `wrong` is the last arrow that was drawn wrong (a
+   *  bond's arrow by its two atoms, the net dipole by its direction in the board's 3D frame): it
+   *  stays on the board, in the color for mistakes, until the next arrow is started. `labels` is
+   *  what a screen reader says for each atom an arrow can start or end on. Null: nothing. */
+  draw: { kind: 'bond' | 'net'; center: string; aim: number; wrong: { from: string; to: string } | { dir: V3 } | null; labels: Record<string, string> } | null
 }
+
+interface ArrowView {
+  g: SVGGElement
+  /** Each part is drawn twice: a wide white copy underneath, so the arrow reads on any color. */
+  shafts: SVGLineElement[]
+  heads: SVGPathElement[]
+  crosses: SVGLineElement[]
+}
+const SVG_NS = 'http://www.w3.org/2000/svg'
 
 export interface Insets {
   top: number
@@ -185,7 +213,7 @@ export class Scene {
   private readonly rubber: THREE.Mesh
   private ghost: { el: El; mesh: THREE.Mesh; startX: number; startY: number; moved: boolean } | null = null
 
-  private input: SceneInput = { s: { atoms: [], bonds: [], seq: 1 }, editable: false, selection: null, view: 'flat', specimen: false, showCounts: false, showCharges: false, shells: new Map(), refused: null, point: null, angles: [] }
+  private input: SceneInput = { s: { atoms: [], bonds: [], seq: 1 }, editable: false, selection: null, view: 'flat', specimen: false, showCounts: false, showCharges: false, shells: new Map(), refused: null, point: null, angles: [], dipoles: null, draw: null }
   private insets: Insets = { top: 96, right: 16, bottom: 132, left: 16 }
   private halfW = 5.6
   private halfH = 3.5
@@ -203,13 +231,38 @@ export class Scene {
   private pointer: { at: THREE.Vector3; seen: number } | null = null
   private hoverId: string | null = null
   /** Bonds and electrons that just appeared: celebrated on the next frame, once positions are known. */
-  private pending: ({ kind: 'bond'; a: string; b: string } | { kind: 'electron'; id: string })[] = []
+  private pending: ({ kind: 'bond'; a: string; b: string } | { kind: 'dipole'; a: string; b: string } | { kind: 'electron'; id: string })[] = []
   private refusedSeen = -1
   /** Dotted arcs between two bonds on the 3D model, each with the textbook angle printed beside it. */
   private arcs: { beads: THREE.InstancedMesh; mat: THREE.MeshBasicMaterial; label: HTMLElement; pair: [string, string] | null; show: number }[] = []
   private readonly beadGeo = new THREE.SphereGeometry(1, 10, 8)
   /** Atoms waiting for their turn to hop after a step is finished. */
   private cheers: { id: string; at: number }[] = []
+  /** The arrows for bond dipoles and the net dipole, drawn over the board. */
+  private readonly dipoleSvg = document.createElementNS(SVG_NS, 'svg')
+  private bondArrows: ArrowView[] = []
+  private netArrow: ArrowView | null = null
+  private netTag: HTMLElement | null = null
+  private readonly deltaTags = new Map<string, HTMLElement>()
+  /** For tests: how many bond dipoles the board was asked to draw and how many arrows are on screen
+   *  (an arrow that points at the viewer is too short to draw), and the same for the net dipole. */
+  private dipolesShown = { wanted: 0, bonds: 0, net: false, netDrawn: false }
+  /** The arrow a student is drawing, and the last one that was drawn wrong. */
+  private drawArrow: ArrowView | null = null
+  private wrongArrow: ArrowView | null = null
+  /** While an arrow is being drawn: where the pointer is, in the board's own pixels, and the atom under it. */
+  private arrowTo: { x: number; y: number } | null = null
+  private arrowOver: string | null = null
+  /** The net dipole as the keyboard has turned it, in degrees counterclockwise from pointing right. Null while the keyboard is not drawing. */
+  private keyAim: number | null = null
+  /** Where the camera is turning to, so the net dipole lies across the screen. */
+  private aim: { az: number; pol: number } | null = null
+  private aimWanted = false
+  /** A wrong net dipole that is no longer shown: the student pulled the model out of shape after
+   *  drawing it, so the direction it was drawn in means something else now. */
+  private wrongGone: V3 | null = null
+  /** For tests: whether the arrow being drawn and the last wrong arrow are on screen, and which way a wrong net dipole points there (pixels, y down). */
+  private drawnShown: { drawing: boolean; wrong: boolean; wrongWay: { x: number; y: number } | null } = { drawing: false, wrong: false, wrongWay: null }
   private pointSeen = -1
   /** Rings still to draw around electron groups: when, and how to find the group at that moment (atoms may still be moving). */
   private groupRings: { at: number; where: () => { x: number; z: number; from: number; to: number } | null }[] = []
@@ -228,7 +281,7 @@ export class Scene {
   private quiet = 0
 
   // pointer
-  private press: { kind: 'atom' | 'dot' | 'bond' | 'empty' | 'orbit' | 'dom'; pointerId: number; id?: string; dom?: number; x: number; y: number; moved: boolean; grab?: P2 } | null = null
+  private press: { kind: 'atom' | 'dot' | 'bond' | 'empty' | 'orbit' | 'dom' | 'arrow'; pointerId: number; id?: string; dom?: number; x: number; y: number; moved: boolean; grab?: P2 } | null = null
   private pinned: string | null = null
   private dropTarget: string | null = null
   private coarse = false
@@ -346,6 +399,8 @@ export class Scene {
         view.badge.remove()
         view.charge.remove()
         view.hit.remove()
+        this.deltaTags.get(id)?.remove()
+        this.deltaTags.delete(id)
         this.atoms.delete(id)
       }
     }
@@ -410,14 +465,20 @@ export class Scene {
       view.charge.dataset.sign = fc > 0 ? 'plus' : 'minus'
       view.charge.hidden = fc === 0
       const bonds = bondsOf(s, atom.id).length
+      // while an arrow can be drawn, the atoms it can start or end on say so and take the keyboard
+      const drawLabel = input.draw && !input.specimen && (input.draw.kind === 'bond' || atom.id === input.draw.center) ? input.draw.labels[atom.id] : undefined
+      const selected = input.selection?.kind === 'atom' && input.selection.id === atom.id
       view.hit.setAttribute(
         'aria-label',
-        input.specimen
-          ? `${ELEMENTS[atom.el].name} with ${atom.lone} ${atom.lone === 1 ? 'dot' : 'dots'}`
-          : `${ELEMENTS[atom.el].name}: ${expanded ? count : `${count} of ${target}`} electrons, ${bonds} ${bonds === 1 ? 'bond' : 'bonds'}${fc ? `, formal charge ${fc > 0 ? '+' : '−'}${Math.abs(fc)}` : ''}`,
+        drawLabel ??
+          (input.specimen
+            ? `${ELEMENTS[atom.el].name} with ${atom.lone} ${atom.lone === 1 ? 'dot' : 'dots'}`
+            : `${ELEMENTS[atom.el].name}: ${expanded ? count : `${count} of ${target}`} electrons, ${bonds} ${bonds === 1 ? 'bond' : 'bonds'}${fc ? `, formal charge ${fc > 0 ? '+' : '−'}${Math.abs(fc)}` : ''}`),
       )
-      view.hit.disabled = !input.editable
-      view.hit.setAttribute('aria-pressed', String(input.selection?.kind === 'atom' && input.selection.id === atom.id))
+      view.hit.disabled = !input.editable && drawLabel === undefined
+      view.hit.setAttribute('aria-pressed', String(selected))
+      // on the lifted model there is no ring on the board under a selected atom, so the arrow's first atom is marked here
+      view.hit.classList.toggle('is-start', selected && drawLabel !== undefined && input.view === 'shape')
     }
 
     this.dotsDirty = true
@@ -454,6 +515,20 @@ export class Scene {
     }
     if (input.view === 'shape' && (before.view !== 'shape' || before.s !== s)) this.enterShape()
     if (input.view === 'flat') this.liftTarget = 0
+    // a bond's arrow that was just drawn right, or the net dipole: sparks, and the atoms hop
+    if (before.dipoles && input.dipoles && before.s === s && before.dipoles.center === input.dipoles.center) {
+      const center = input.dipoles.center
+      for (const b of input.dipoles.bonds) if (!before.dipoles.bonds.some((x) => x.atomId === b.atomId)) this.pending.push({ kind: 'dipole', a: center, b: b.atomId })
+      if (input.dipoles.net && !before.dipoles.net) this.pending.push({ kind: 'dipole', a: center, b: center })
+    }
+    // the net dipole is to be drawn: the model turns until it lies across the screen
+    if (input.draw?.kind === 'net') {
+      if (before.draw?.kind !== 'net' || before.draw.aim !== input.draw.aim) this.aimWanted = true
+    } else {
+      this.keyAim = null
+      this.aim = null
+      this.aimWanted = false
+    }
     if (!input.editable) {
       this.pinned = null
       this.dropTarget = null
@@ -618,7 +693,9 @@ export class Scene {
     const hit = document.createElement('button')
     hit.type = 'button'
     hit.className = 'mb-hit'
-    hit.addEventListener('click', () => this.cb.tapAtom(id, true))
+    hit.addEventListener('click', () => this.hitClick(id))
+    hit.addEventListener('keydown', (e) => this.hitKey(id, e))
+    hit.addEventListener('blur', () => (this.keyAim = null))
     this.overlay.append(hit, badge, charge)
     const p = this.positions.get(id) ?? { x: 0, y: 0 }
     // a new atom drops onto the board and lands with a bounce; the count step's samples just pop in
@@ -975,6 +1052,18 @@ export class Scene {
     this.liftRaw += Math.max(-speed * dt, Math.min(speed * dt, this.liftTarget - this.liftRaw))
     const lift = ease(this.liftRaw)
     if (this.liftRaw > 0) this.stepShape(dt)
+    if (this.aimWanted && this.liftRaw >= 1 && !this.glide) {
+      this.aimWanted = false
+      this.aim = this.sideView()
+    }
+    if (this.aim && !this.press) {
+      const k = this.reduced ? 1 : 1 - Math.exp(-5 * dt)
+      const turn = Math.atan2(Math.sin(this.aim.az - this.orbit.az), Math.cos(this.aim.az - this.orbit.az))
+      const tip = this.aim.pol - this.orbit.pol
+      this.orbit.az += turn * k
+      this.orbit.pol += tip * k
+      if (Math.abs(turn) < 0.01 && Math.abs(tip) < 0.01) this.aim = null
+    }
     this.placeCamera(lift)
 
     this.time += dt
@@ -1017,7 +1106,7 @@ export class Scene {
       // squash and stretch settle on a spring
       view.squashV += (-190 * view.squash - 14 * view.squashV) * dt
       view.squash = Math.max(-0.34, Math.min(0.4, view.squash + view.squashV * dt))
-      const hot = atom.id === this.hoverId || atom.id === this.dropTarget ? 1 : 0
+      const hot = atom.id === this.hoverId || atom.id === this.dropTarget || atom.id === this.arrowOver ? 1 : 0
       view.hover += (hot - view.hover) * (1 - Math.exp(-14 * dt))
       // resting atoms bob gently, each to its own rhythm; a refused move makes an atom shake its head
       const bob = still || pinned ? 0 : Math.sin(this.time * 1.5 + view.phase) * 0.03 * (0.6 + view.r) * (1 - lift)
@@ -1081,7 +1170,16 @@ export class Scene {
     // what just happened: a new bond gets sparks and a hop from both atoms, a new electron a small pop
     for (const fx of this.pending) {
       if (still) break
-      if (fx.kind === 'bond') {
+      if (fx.kind === 'dipole') {
+        const A = this.atoms.get(fx.a)
+        const B = this.atoms.get(fx.b)
+        if (!A || !B) continue
+        this.sparks.burst(A.pos.clone().lerp(B.pos, 0.5), 0xffd15c, 10)
+        for (const v of new Set([A, B])) {
+          v.squashV += 5
+          v.face.joy = 0.8
+        }
+      } else if (fx.kind === 'bond') {
         const f = this.bondFrame(fx.a, fx.b)
         if (!f) continue
         this.sparks.burst(f.mid, 0xffd15c, 14)
@@ -1097,7 +1195,7 @@ export class Scene {
         v.squashV += 3.5
       }
     }
-    if (this.pending.some((fx) => fx.kind === 'bond')) this.cb.feel?.('bond')
+    if (this.pending.some((fx) => fx.kind !== 'electron')) this.cb.feel?.('bond')
     if (this.cheers.length) {
       this.cheers = this.cheers.filter((c) => {
         if (c.at > this.time) return true
@@ -1132,7 +1230,8 @@ export class Scene {
     if (this.liftRaw >= 1 && !still) {
       this.untouched += dt
       // the turn eases in over a second
-      if (this.untouched > 2.5 && !this.press) this.orbit.az += dt * 0.16 * Math.min(1, this.untouched - 2.5)
+      // not while the net dipole is being drawn: the model has turned to show it from the side
+      if (this.untouched > 2.5 && !this.press && this.input.draw?.kind !== 'net') this.orbit.az += dt * 0.16 * Math.min(1, this.untouched - 2.5)
     } else this.untouched = 0
 
     this.updateSticks()
@@ -1141,6 +1240,7 @@ export class Scene {
     this.updateRings(lift)
     this.updateArcs(dt, lift)
     this.updateOverlay(lift)
+    this.updateDipoles(lift)
     this.renderer.render(this.scene, this.camera)
   }
 
@@ -1378,6 +1478,326 @@ export class Scene {
     }
   }
 
+  private makeArrow(kind: string): ArrowView {
+    const g = document.createElementNS(SVG_NS, 'g')
+    g.setAttribute('class', kind)
+    const part = <K extends 'line' | 'path'>(tag: K, cls: string) => {
+      const el = document.createElementNS(SVG_NS, tag)
+      el.setAttribute('class', cls)
+      g.appendChild(el)
+      return el
+    }
+    // the white copies first, so they sit underneath
+    const shafts = [part('line', 'is-under'), part('line', 'is-under')]
+    const crosses = [part('line', 'is-under')]
+    const heads = [part('path', 'is-under')]
+    shafts.push(part('line', 'is-ink'), part('line', 'is-ink'))
+    crosses.push(part('line', 'is-ink'))
+    heads.push(part('path', 'is-ink'))
+    this.dipoleSvg.appendChild(g)
+    return { g, shafts, heads, crosses }
+  }
+  /** Draws an arrow from one screen point to another: a shaft (in two pieces when `gap` cuts a
+   *  hole in it for an atom), a head at the far end, and a short cross near the start, the way
+   *  a dipole arrow is drawn on paper. */
+  private placeArrow(a: ArrowView, from: { x: number; y: number }, to: { x: number; y: number }, gap: { at: { x: number; y: number }; r: number } | null, head: number) {
+    const dx = to.x - from.x
+    const dy = to.y - from.y
+    const len = Math.hypot(dx, dy)
+    // A bond that points toward the viewer is short on screen. Its arrow gets a smaller head, and
+    // is left out only when there is no room for an arrow at all.
+    if (len < 11) {
+      a.g.style.display = 'none'
+      return false
+    }
+    head = Math.min(head, len / 2.6)
+    a.g.style.display = ''
+    const ux = dx / len
+    const uy = dy / len
+    const tip = { x: to.x - ux * head * 0.9, y: to.y - uy * head * 0.9 } // the shaft stops inside the head
+    const line = (el: SVGLineElement, x1: number, y1: number, x2: number, y2: number) => {
+      el.setAttribute('x1', x1.toFixed(1))
+      el.setAttribute('y1', y1.toFixed(1))
+      el.setAttribute('x2', x2.toFixed(1))
+      el.setAttribute('y2', y2.toFixed(1))
+    }
+    for (let k = 0; k < 2; k++) {
+      const first = a.shafts[k * 2]!
+      const second = a.shafts[k * 2 + 1]!
+      if (gap) {
+        // the piece before the atom and the piece after it
+        const along = (gap.at.x - from.x) * ux + (gap.at.y - from.y) * uy
+        const before = Math.max(0, along - gap.r)
+        const after = Math.min(len - head * 0.9, along + gap.r)
+        line(first, from.x, from.y, from.x + ux * before, from.y + uy * before)
+        line(second, from.x + ux * after, from.y + uy * after, tip.x, tip.y)
+        second.style.display = ''
+      } else {
+        line(first, from.x, from.y, tip.x, tip.y)
+        second.style.display = 'none'
+      }
+      const at = Math.min(len * 0.2, head * 1.6)
+      const cx = from.x + ux * at
+      const cy = from.y + uy * at
+      line(a.crosses[k]!, cx - uy * head * 0.62, cy + ux * head * 0.62, cx + uy * head * 0.62, cy - ux * head * 0.62)
+      const bx = to.x - ux * head * 1.25
+      const by = to.y - uy * head * 1.25
+      a.heads[k]!.setAttribute('d', `M${to.x.toFixed(1)} ${to.y.toFixed(1)}L${(bx - uy * head * 0.7).toFixed(1)} ${(by + ux * head * 0.7).toFixed(1)}L${(bx + uy * head * 0.7).toFixed(1)} ${(by - ux * head * 0.7).toFixed(1)}Z`)
+    }
+    return true
+  }
+
+  /** Bond dipoles as arrows beside their bonds, δ+ and δ− beside the atoms, and on the lifted
+   *  model the net dipole through the middle atom. The net arrow is the sum of the bond arrows as
+   *  the model has them now, so it swings when a student pulls an atom aside. */
+  private updateDipoles(lift: number) {
+    const d = this.input.specimen ? null : this.input.dipoles
+    const center = d ? this.atoms.get(d.center) : undefined
+    const bonds = d && center ? d.bonds : []
+    if (!this.dipoleSvg.isConnected) {
+      this.dipoleSvg.setAttribute('class', 'mb-dipoles')
+      this.dipoleSvg.setAttribute('aria-hidden', 'true')
+      this.overlay.appendChild(this.dipoleSvg)
+    }
+    while (this.bondArrows.length < bonds.length) this.bondArrows.push(this.makeArrow('mb-dipole'))
+    const signs = new Map<string, string>()
+    let shown = 0
+    this.bondArrows.forEach((arrow, i) => {
+      const b = bonds[i]
+      const other = b ? this.atoms.get(b.atomId) : undefined
+      if (!d || !b || !other || !center) {
+        arrow.g.style.display = 'none'
+        return
+      }
+      const { start, end } = this.besideBond(center, other)
+      const ok = b.out === 1 ? this.placeArrow(arrow, start, end, null, 9) : this.placeArrow(arrow, end, start, null, 9)
+      if (ok) shown++
+      signs.set(b.atomId, b.out === 1 ? d.minus : d.plus)
+      // the middle atom carries the other sign, unless its bonds disagree
+      const mine = b.out === 1 ? d.plus : d.minus
+      signs.set(d.center, signs.has(d.center) && signs.get(d.center) !== mine ? '' : mine)
+    })
+
+    // δ+ and δ− beside the atoms: outside an outer atom, and on the open side of the middle atom
+    for (const [id, tag] of this.deltaTags) {
+      if (!signs.get(id)) tag.style.opacity = '0'
+    }
+    if (d && center) {
+      const pc = this.toScreen(center.pos)
+      let mx = 0
+      let my = 0
+      for (const b of bonds) {
+        const other = this.atoms.get(b.atomId)
+        if (!other) continue
+        const po = this.toScreen(other.pos)
+        const len = Math.hypot(po.x - pc.x, po.y - pc.y) || 1
+        mx += (po.x - pc.x) / len
+        my += (po.y - pc.y) / len
+      }
+      for (const [id, text] of signs) {
+        const view = this.atoms.get(id)
+        if (!view || !text) continue
+        let tag = this.deltaTags.get(id)
+        if (!tag) {
+          tag = document.createElement('span')
+          tag.className = 'mb-delta'
+          tag.setAttribute('aria-hidden', 'true') // the panel says the same in words
+          this.overlay.appendChild(tag)
+          this.deltaTags.set(id, tag)
+        }
+        const c = this.toScreen(view.pos)
+        const r = this.pxRadius(view.pos, view.r)
+        let ox: number
+        let oy: number
+        if (id === d.center) {
+          // away from where most of the bonds go; up and to the left when they go every way
+          const m = Math.hypot(mx, my)
+          ox = m > 0.35 ? -mx / m : -0.7
+          oy = m > 0.35 ? -my / m : -0.7
+        } else {
+          const len = Math.hypot(c.x - pc.x, c.y - pc.y) || 1
+          ox = (c.x - pc.x) / len
+          oy = (c.y - pc.y) / len
+        }
+        tag.textContent = text
+        tag.dataset.sign = text === d.minus ? 'minus' : 'plus'
+        tag.style.transform = `translate(${(c.x + ox * (r + 15)).toFixed(1)}px, ${(c.y + oy * (r + 15)).toFixed(1)}px) translate(-50%, -50%)`
+        tag.style.opacity = '1'
+      }
+    }
+
+    // the net dipole, on the lifted model only: the flat drawing does not have the real angles
+    let net = false
+    let netWanted = false
+    if (d && d.net && center && lift > 0.97) {
+      const sum = this.netDir()
+      if (sum) {
+        netWanted = true
+        if (!this.netArrow) this.netArrow = this.makeArrow('mb-dipole is-net')
+        if (!this.netTag) {
+          this.netTag = document.createElement('span')
+          this.netTag.className = 'mb-delta is-net'
+          this.netTag.setAttribute('aria-hidden', 'true')
+          this.overlay.appendChild(this.netTag)
+        }
+        const from = this.toScreen(center.pos.clone().addScaledVector(sum, -(center.r + 0.4)))
+        const to = this.toScreen(center.pos.clone().addScaledVector(sum, center.r + 1.35))
+        const pc = this.toScreen(center.pos)
+        const rc = this.pxRadius(center.pos, center.r)
+        // When the net dipole points along one bond (one polar bond among nonpolar ones), an arrow
+        // through the middle atom would land on that bond's outer atom. It is drawn beside the
+        // bond, on the upper side, where the bond's own arrow is not.
+        const along = bonds.map((b) => this.atoms.get(b.atomId)).find((o) => o && o.pos.clone().sub(center.pos).normalize().dot(sum) > 0.9)
+        if (along) {
+          const len = Math.hypot(to.x - from.x, to.y - from.y) || 1
+          const ux = (to.x - from.x) / len
+          const uy = (to.y - from.y) / len
+          const side = ux >= 0 ? -1 : 1
+          const off = Math.max(rc, this.pxRadius(along.pos, along.r)) + 16
+          const shift = { x: -uy * side * off, y: ux * side * off }
+          from.x = pc.x + shift.x
+          from.y = pc.y + shift.y
+          to.x += shift.x
+          to.y += shift.y
+          net = this.placeArrow(this.netArrow, from, to, null, 13)
+        } else net = this.placeArrow(this.netArrow, from, to, { at: pc, r: rc + 4 }, 13)
+        if (net) {
+          const len = Math.hypot(to.x - from.x, to.y - from.y) || 1
+          this.netTag.textContent = d.netLabel
+          this.netTag.style.transform = `translate(${(to.x + ((to.x - from.x) / len) * 16).toFixed(1)}px, ${(to.y + ((to.y - from.y) / len) * 16).toFixed(1)}px) translate(-50%, -50%)`
+        }
+      }
+    }
+    if (this.netArrow && !net) this.netArrow.g.style.display = 'none'
+    if (this.netTag) this.netTag.style.opacity = net ? '1' : '0'
+    this.dipolesShown = { wanted: bonds.length, bonds: shown, net: netWanted, netDrawn: net }
+    this.updateDrawn(lift)
+  }
+
+  /** The two ends of an arrow beside a bond, from near the middle atom to near the outer atom. It
+   *  sits on the side of the bond that is lower on screen, where no face is. */
+  private besideBond(center: AtomView, other: AtomView): { start: { x: number; y: number }; end: { x: number; y: number } } {
+    const pc = this.toScreen(center.pos)
+    const po = this.toScreen(other.pos)
+    const rc = this.pxRadius(center.pos, center.r)
+    const ro = this.pxRadius(other.pos, other.r)
+    const dx = po.x - pc.x
+    const dy = po.y - pc.y
+    const len = Math.hypot(dx, dy) || 1
+    const ux = dx / len
+    const uy = dy / len
+    const side = ux >= 0 ? 1 : -1
+    const off = Math.min(rc, ro) * 0.62 + 7
+    const nx = -uy * side * off
+    const ny = ux * side * off
+    return { start: { x: pc.x + ux * rc * 0.3 + nx, y: pc.y + uy * rc * 0.3 + ny }, end: { x: po.x - ux * ro * 0.3 + nx, y: po.y - uy * ro * 0.3 + ny } }
+  }
+
+  /** The bond dipoles on the board added up as the model has them now, as a direction. Null when
+   *  they cancel or there are none. */
+  private netDir(): THREE.Vector3 | null {
+    const d = this.input.dipoles
+    const center = d ? this.atoms.get(d.center) : undefined
+    if (!d || !center) return null
+    const sum = new THREE.Vector3()
+    for (const b of d.bonds) {
+      const other = this.atoms.get(b.atomId)
+      if (other) sum.addScaledVector(other.pos.clone().sub(center.pos).normalize(), b.out * b.size)
+    }
+    const biggest = Math.max(1, ...d.bonds.map((b) => b.size))
+    return sum.length() > biggest * 0.12 ? sum.normalize() : null
+  }
+
+  /** The camera direction for drawing the net dipole: the turn around the vertical, nearest the
+   *  current one, that shows the net dipole from the side with no atom in front of another. A net
+   *  dipole that points up or down is seen from the side at any turn, unless the camera looks down
+   *  from above. */
+  private sideView(): { az: number; pol: number } | null {
+    const n = this.netDir()
+    const center = this.centerId ? this.atoms.get(this.centerId) : undefined
+    if (!n || !center) return null
+    const pol = Math.abs(n.y) > 0.6 ? Math.max(this.orbit.pol, 1.2) : this.orbit.pol
+    const points = [new THREE.Vector3(), ...[...this.atoms.values()].filter((v) => v !== center).map((v) => v.pos.clone().sub(center.pos))]
+    const views = Array.from({ length: 72 }, (_, k) => {
+      // the nearest turns first: none, 5° one way, 5° the other, 10° ...
+      const az = this.orbit.az + (Math.ceil(k / 2) * (k % 2 ? 1 : -1) * Math.PI * 2) / 72
+      const toCam = new THREE.Vector3(Math.sin(pol) * Math.sin(az), Math.cos(pol), Math.sin(pol) * Math.cos(az))
+      // drop the part of each atom's place that lies along the line of sight: what is left is its place on screen
+      const flat = points.map((q) => q.clone().addScaledVector(toCam, -q.dot(toCam)))
+      let gap = Infinity
+      for (let i = 0; i < flat.length; i++) for (let j = i + 1; j < flat.length; j++) gap = Math.min(gap, flat[i]!.distanceTo(flat[j]!))
+      return { az, along: Math.abs(toCam.dot(n)), gap }
+    })
+    // "from the side" is within about 17° of it; when no turn gets that close, the closest ones count
+    const least = Math.min(...views.map((v) => v.along))
+    const side = views.filter((v) => v.along <= Math.max(0.3, least + 0.05))
+    // atoms 0.9 apart on screen do not cover each other; when no turn gives that, the widest gap counts
+    const enough = Math.min(0.9, Math.max(...side.map((v) => v.gap)) - 0.05)
+    const best = side.find((v) => v.gap >= enough) ?? side[0]!
+    return { az: best.az, pol }
+  }
+
+  /** The arrow a student is drawing now, and the last arrow that was drawn wrong. */
+  private updateDrawn(lift: number) {
+    const d = this.input.specimen ? null : this.input.draw
+    const center = d ? this.atoms.get(d.center) : undefined
+    const press = this.press?.kind === 'arrow' && this.press.moved ? this.press : null
+    const from = press?.id ? this.atoms.get(press.id) : undefined
+    const net = d?.kind === 'net'
+    const start = from ?? (net && this.keyAim !== null ? center : undefined)
+
+    // the arrow under the pointer, or the one the arrow keys are turning
+    let drawing = false
+    if (d && start) {
+      if (!this.drawArrow) this.drawArrow = this.makeArrow('mb-dipole is-draw')
+      this.drawArrow.g.classList.toggle('is-net', net)
+      const c = this.toScreen(start.pos)
+      const r = this.pxRadius(start.pos, start.r)
+      let to: { x: number; y: number } | null = null
+      if (from && this.arrowTo) {
+        to = this.arrowTo
+        const over = this.arrowOver ? this.atoms.get(this.arrowOver) : undefined
+        if (over) {
+          // over an atom, the arrow stops at that atom's edge
+          const oc = this.toScreen(over.pos)
+          const reach = Math.hypot(oc.x - c.x, oc.y - c.y) || 1
+          const gap = this.pxRadius(over.pos, over.r) + 3
+          to = { x: oc.x - ((oc.x - c.x) / reach) * gap, y: oc.y - ((oc.y - c.y) / reach) * gap }
+        }
+      } else if (this.keyAim !== null) {
+        const a = (this.keyAim * Math.PI) / 180
+        to = { x: c.x + Math.cos(a) * (r + 78), y: c.y - Math.sin(a) * (r + 78) }
+      }
+      const len = to ? Math.hypot(to.x - c.x, to.y - c.y) : 0
+      if (to && len > r + 6) drawing = this.placeArrow(this.drawArrow, { x: c.x + ((to.x - c.x) / len) * (r + 3), y: c.y + ((to.y - c.y) / len) * (r + 3) }, to, null, net ? 13 : 9)
+    }
+    if (this.drawArrow && !drawing) this.drawArrow.g.style.display = 'none'
+
+    // the last wrong arrow stays where it was drawn until the next one is started
+    let wrong = false
+    let wrongWay: { x: number; y: number } | null = null
+    const w = d && !start && !(d.wrong && 'dir' in d.wrong && d.wrong.dir === this.wrongGone) ? d.wrong : null
+    if (d && w && center) {
+      if (!this.wrongArrow) this.wrongArrow = this.makeArrow('mb-dipole is-wrong')
+      this.wrongArrow.g.classList.toggle('is-net', 'dir' in w)
+      if ('dir' in w) {
+        const dir = v3(w.dir)
+        const a = this.toScreen(center.pos.clone().addScaledVector(dir, center.r + 0.08))
+        const b = this.toScreen(center.pos.clone().addScaledVector(dir, center.r + 1.35))
+        if (lift > 0.97) wrong = this.placeArrow(this.wrongArrow, a, b, null, 13)
+        if (wrong) wrongWay = { x: b.x - a.x, y: b.y - a.y }
+      } else {
+        const other = this.atoms.get(w.from === d.center ? w.to : w.from)
+        if (other) {
+          const { start: a, end: b } = this.besideBond(center, other)
+          wrong = w.to === other.id ? this.placeArrow(this.wrongArrow, a, b, null, 9) : this.placeArrow(this.wrongArrow, b, a, null, 9)
+        }
+      }
+    }
+    if (this.wrongArrow && !wrong) this.wrongArrow.g.style.display = 'none'
+    this.drawnShown = { drawing, wrong, wrongWay }
+  }
+
   /** The angle marks on the lifted model. An arc is drawn only while its two bonds really are at
    *  that angle, so it goes away while a student is pulling the model out of shape. */
   private updateArcs(dt: number, lift: number) {
@@ -1596,6 +2016,87 @@ export class Scene {
     return atomAt(slack) ?? dotHit(this.coarse ? 22 : 13)
   }
 
+  /** The atom under a point on screen, the one nearest the viewer when several overlap. */
+  private atomAt(clientX: number, clientY: number, skip?: string): string | null {
+    const rect = this.wrap.getBoundingClientRect()
+    const x = clientX - rect.left
+    const y = clientY - rect.top
+    const slack = this.coarse ? 12 : 5
+    let best: string | null = null
+    let bestDepth = Infinity
+    for (const view of this.atoms.values()) {
+      if (view.id === skip) continue
+      const c = this.toScreen(view.pos)
+      if (Math.hypot(c.x - x, c.y - y) > this.pxRadius(view.pos, view.r) + slack) continue
+      const depth = view.pos.distanceTo(this.camera.position)
+      if (depth < bestDepth) {
+        bestDepth = depth
+        best = view.id
+      }
+    }
+    return best
+  }
+  /** True while a point on screen is on this atom's ball. */
+  private onAtom(id: string, clientX: number, clientY: number, slack = 0): boolean {
+    const view = this.atoms.get(id)
+    if (!view) return false
+    const rect = this.wrap.getBoundingClientRect()
+    const c = this.toScreen(view.pos)
+    return Math.hypot(clientX - rect.left - c.x, clientY - rect.top - c.y) <= this.pxRadius(view.pos, view.r) + slack
+  }
+  /** The atom under the pointer that an arrow can start on now: any atom for a bond's arrow, the
+   *  middle atom of the lifted model for the net dipole. The net dipole starts anywhere on the
+   *  middle atom, also where an outer atom sits in front of it: no other atom can start that arrow. */
+  private arrowStart(clientX: number, clientY: number): string | null {
+    const d = this.input.specimen ? null : this.input.draw
+    if (!d) return null
+    if (d.kind === 'net') return this.liftRaw >= 0.97 && this.onAtom(d.center, clientX, clientY, this.coarse ? 12 : 5) ? d.center : null
+    return this.atomAt(clientX, clientY)
+  }
+  /** Reports a net dipole drawn out of the middle atom along a direction on screen (pixels, y down). */
+  private finishNet(vx: number, vy: number) {
+    const d = this.input.draw
+    const center = d ? this.atoms.get(d.center) : undefined
+    if (!d || d.kind !== 'net' || !center) return
+    const seen = bondsOf(this.input.s, d.center).flatMap((b) => {
+      const other = this.atoms.get(b.a === d.center ? b.b : b.a)
+      if (!other) return []
+      const v = other.pos.clone().sub(center.pos).normalize().transformDirection(this.camera.matrixWorldInverse)
+      return [{ atomId: other.id, dir: [v.x, v.y, v.z] as V3 }]
+    })
+    const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0)
+    const up = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 1)
+    const world = right.multiplyScalar(vx).addScaledVector(up, -vy).normalize()
+    this.cb.drawNet({ x: vx, y: -vy }, seen, [world.x, world.y, world.z])
+  }
+  /** Enter or Space on an atom's keyboard target. While the net dipole can be drawn, the middle
+   *  atom's target shows the arrow first and sets it on the next press. */
+  private hitClick(id: string) {
+    const d = this.input.draw
+    if (d?.kind !== 'net' || id !== d.center) {
+      this.cb.tapAtom(id, true)
+      return
+    }
+    // the atoms are still moving while the model lifts: no arrow can be judged yet
+    if (this.liftRaw < 0.97) return
+    this.untouched = 0
+    if (this.keyAim === null) this.keyAim = 90
+    else {
+      const a = (this.keyAim * Math.PI) / 180
+      this.keyAim = null
+      this.finishNet(Math.cos(a), -Math.sin(a))
+    }
+  }
+  /** The left and right arrow keys turn the net dipole arrow, 15° at a time. */
+  private hitKey(id: string, e: KeyboardEvent) {
+    const d = this.input.draw
+    const turn = e.key === 'ArrowLeft' ? 15 : e.key === 'ArrowRight' ? -15 : 0
+    if (d?.kind !== 'net' || id !== d.center || !turn || this.liftRaw < 0.97) return
+    e.preventDefault()
+    this.untouched = 0
+    this.keyAim = ((this.keyAim ?? 90) + turn + 360) % 360
+  }
+
   // ------------------------------------------------------------------ pointer
 
   private readonly onDown = (e: PointerEvent) => {
@@ -1605,11 +2106,19 @@ export class Scene {
     this.watch(e.clientX, e.clientY)
     const hit = this.pick(e.clientX, e.clientY)
     const base = { pointerId: e.pointerId, x: e.clientX, y: e.clientY, moved: false }
-    if (this.liftRaw > 0.5) {
+    // the student has taken the model in hand: it stops turning by itself
+    this.aim = null
+    const arrowFrom = this.arrowStart(e.clientX, e.clientY)
+    if (arrowFrom) {
+      this.press = { ...base, kind: 'arrow', id: arrowFrom }
+      this.keyAim = null
+    } else if (this.liftRaw > 0.5) {
       this.press = hit?.kind === 'lobe' ? { ...base, kind: 'dom', dom: hit.dom } : { ...base, kind: 'orbit' }
       if (hit?.kind === 'lobe') {
         this.glide = null
         this.doms[hit.dom]!.pinned = true
+        const wrong = this.input.draw?.wrong
+        if (wrong && 'dir' in wrong) this.wrongGone = wrong.dir
       }
     } else if (!this.input.editable || !hit) this.press = { ...base, kind: 'empty' }
     else if (hit.kind === 'atom') {
@@ -1620,6 +2129,7 @@ export class Scene {
     else if (hit.kind === 'bond') this.press = { ...base, kind: 'bond', id: hit.id }
     this.wrap.setPointerCapture(e.pointerId)
     this.wrap.classList.toggle('is-grabbing', this.press?.kind === 'atom' || this.press?.kind === 'dot' || this.press?.kind === 'dom')
+    this.wrap.classList.toggle('is-aim', this.press?.kind === 'arrow')
   }
 
   private readonly onMove = (e: PointerEvent) => {
@@ -1627,10 +2137,12 @@ export class Scene {
     this.watch(e.clientX, e.clientY)
     if (!p) {
       if (e.pointerType === 'mouse') {
-        const hit = this.pick(e.clientX, e.clientY)
+        const arrowFrom = this.arrowStart(e.clientX, e.clientY)
+        const hit = arrowFrom ? null : this.pick(e.clientX, e.clientY)
         const can = this.liftRaw > 0.5 ? hit !== null : this.input.editable && hit !== null
         this.wrap.classList.toggle('is-hot', can)
-        this.hoverId = can && hit?.kind === 'atom' ? hit.id : null
+        this.wrap.classList.toggle('is-aim', arrowFrom !== null)
+        this.hoverId = arrowFrom ?? (can && hit?.kind === 'atom' ? hit.id : null)
       }
       return
     }
@@ -1647,7 +2159,11 @@ export class Scene {
     if (!p.moved && Math.hypot(dx, dy) > (this.coarse ? 9 : 5)) p.moved = true
     if (!p.moved) return
 
-    if (p.kind === 'orbit') {
+    if (p.kind === 'arrow' && p.id) {
+      const rect = this.wrap.getBoundingClientRect()
+      this.arrowTo = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+      this.arrowOver = this.input.draw?.kind === 'bond' && !this.onAtom(p.id, e.clientX, e.clientY) ? this.atomAt(e.clientX, e.clientY, p.id) : null
+    } else if (p.kind === 'orbit') {
       this.orbit.az -= (e.movementX || 0) * 0.008
       this.orbit.pol = Math.max(0.3, Math.min(1.62, this.orbit.pol - (e.movementY || 0) * 0.008))
     } else if (p.kind === 'dom' && p.dom !== undefined) {
@@ -1689,6 +2205,29 @@ export class Scene {
     this.release(e)
     if (!p) return
     if (p.kind === 'dom' || p.kind === 'orbit') return
+    if (p.kind === 'arrow') {
+      const d = this.input.draw
+      if (!d || !p.id) return
+      if (d.kind === 'bond') {
+        // A tap starts or ends an arrow. A drag is an arrow from the atom it started on to the atom it
+        // was let go on. A finger that slid a little and never left the first atom is still a tap:
+        // an atom hidden behind that one is not what the student pointed at.
+        const tap = !p.moved || this.onAtom(p.id, e.clientX, e.clientY)
+        const over = tap ? null : this.atomAt(e.clientX, e.clientY, p.id)
+        if (tap) this.cb.tapAtom(p.id, false)
+        else if (over) this.cb.drawBond(p.id, over)
+        return
+      }
+      const center = this.atoms.get(d.center)
+      if (!center || !p.moved) return
+      const rect = this.wrap.getBoundingClientRect()
+      const c = this.toScreen(center.pos)
+      const vx = e.clientX - rect.left - c.x
+      const vy = e.clientY - rect.top - c.y
+      // an arrow has to reach out of the atom it starts on
+      if (Math.hypot(vx, vy) > this.pxRadius(center.pos, center.r) + 10) this.finishNet(vx, vy)
+      return
+    }
     if (!p.moved) {
       if (p.kind === 'atom' && p.id) this.cb.tapAtom(p.id, false)
       else if (p.kind === 'dot' && p.id) this.cb.tapAtom(p.id, false)
@@ -1727,8 +2266,10 @@ export class Scene {
     this.pinned = null
     this.dropTarget = null
     this.rubber.visible = false
+    this.arrowTo = null
+    this.arrowOver = null
     this.quiet = 0
-    this.wrap.classList.remove('is-grabbing')
+    this.wrap.classList.remove('is-grabbing', 'is-aim')
     if (this.wrap.hasPointerCapture(e.pointerId)) this.wrap.releasePointerCapture(e.pointerId)
   }
 
@@ -1759,7 +2300,7 @@ export class Scene {
       const c = this.toScreen(d.pos)
       return { key: d.key, x: rect.left + c.x, y: rect.top + c.y }
     })
-    return { atoms, bonds, lobes, dots, lift: this.liftRaw, ringed: this.ringed, board: { halfW: this.halfW, halfH: this.halfH } }
+    return { atoms, bonds, lobes, dots, lift: this.liftRaw, ringed: this.ringed, dipoles: this.dipolesShown, draw: { kind: this.input.draw?.kind ?? null, ...this.drawnShown }, board: { halfW: this.halfW, halfH: this.halfH } }
   }
   /** For tests: the angle in degrees between two bonded atoms as seen from the center, in the 3D model. */
   debugAngles(): number[] {

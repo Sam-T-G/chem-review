@@ -5,6 +5,7 @@ checks. None of it touches React, React Native or Three.js.
 
 ## Files
 - `assess.test.ts`, `layout.test.ts`, `problems.test.ts`, `solve.test.ts`, `structure.test.ts`, `vsepr.test.ts`: the engine. Team chem.
+- `polarity.test.ts`: bond and molecular polarity, sigma and pi bonds, hybridization, with the course slides' worked examples as the expected answers. Team chem.
 - `guide.test.ts`: the guide's step rules and wording, including the scan of every sentence. Team lewis, reviewed by learning.
 - `store.test.ts`: the step flow in the Lewis module's store. Team lewis.
 - `repo.test.ts`: the repo checks, against made-up repos in a temp folder. Team platform.

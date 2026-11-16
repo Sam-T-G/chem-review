@@ -5,19 +5,26 @@
 // to do, no citations on screen, no lines that describe the interface.
 import { assess, type Assessment, type Issue } from '../../chem/assess'
 import { ELEMENTS, canExpand, shellMax, shellTarget, shellsOf, type El } from '../../chem/elements'
+import { HYBRIDS, domainsOf, hybridFor, sigmaPi, type Hybrid } from '../../chem/orbitals'
+import { moleculePolarity, netAsSeen, type BondPolarity, type MoleculePolarity, type SeenBond } from '../../chem/polarity'
 import { atomsOf, chargeWord, neutralElectrons, speciesOf, totalElectrons, type Problem } from '../../chem/problems'
 import { bestStructures, solveStar } from '../../chem/solve'
 import { addElectron, atomById, bondsOf, removeElectron, share, shellCount, type Refusal, type Structure } from '../../chem/structure'
 import { ALL_SHAPES, MEASURED_ANGLE, centerDomains, classify, shapeCases, type ShapeInfo, type ShapeName } from '../../chem/vsepr'
 
-export type StepId = 'count' | 'place' | 'bond' | 'check' | 'shape'
+export type StepId = 'count' | 'place' | 'bond' | 'check' | 'shape' | 'polar' | 'orbitals'
+/** `next` is the label of the button that leads on from the step. The last step's button leads to the next molecule. */
 export const STEPS: { id: StepId; label: string; title: string; next: string }[] = [
   { id: 'count', label: 'Count', title: 'Count the valence electrons', next: 'Put the atoms on the board' },
   { id: 'place', label: 'Place', title: 'Put the atoms on the board', next: 'Bond the atoms' },
   { id: 'bond', label: 'Bond', title: 'Bond the atoms', next: 'Check each atom' },
   { id: 'check', label: 'Check', title: 'Check each atom', next: 'Find the shape' },
-  { id: 'shape', label: 'Shape', title: 'Find the shape', next: 'Next molecule' },
+  { id: 'shape', label: 'Shape', title: 'Find the shape', next: 'Find the polar bonds' },
+  { id: 'polar', label: 'Polar', title: 'Find the polar bonds', next: 'Find the sigma and pi bonds' },
+  { id: 'orbitals', label: 'Orbitals', title: 'Find the sigma and pi bonds', next: 'Next molecule' },
 ]
+/** The steps that work on the finished 3D model. */
+export const AFTER_SHAPE: StepId[] = ['polar', 'orbitals']
 
 export const lower = (el: El) => ELEMENTS[el].name.toLowerCase()
 export const cap = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
@@ -887,6 +894,400 @@ export function angleMarks(p: Problem | null, info: ShapeInfo, mixed = false): A
   return parts.map((part, i) => ({ near: parseFloat(part.replace(/^less than /, '')), text: measured ?? words[i]!, under: part.startsWith('less') }))
 }
 
+// ---------------------------------------------------------------- step 6: polar bonds and the net dipole
+//
+// The course's method (chapter 7 slides): subtract the two electronegativities, call the bond
+// nonpolar at 0.4 or less and polar above that, draw an arrow on each polar bond that points at
+// the more electronegative atom, then see whether the arrows cancel in the molecule's shape.
+
+/** The words printed on the board and beside the pictures in this step. */
+export const DIPOLE_WORDS = { plus: 'δ+', minus: 'δ−', net: 'net dipole', table: 'Electronegativity', bondKey: 'Bond dipole: the arrow points at δ−', netKey: 'Net dipole' }
+
+/** "C–O": a bond named by its two atoms, the middle atom first. */
+export const bondName = (a: El, b: El) => `${a}–${b}`
+/** A bond's answer: 'nonpolar', or the atom that is δ−. */
+export type BondAnswer = 'nonpolar' | El
+
+export function polarity(s: Structure): MoleculePolarity | null {
+  return moleculePolarity(s)
+}
+/** The label on the button for a bond that has no dipole. */
+export const NO_ARROW = 'Nonpolar, no arrow'
+/** The question for one kind of bond. A student answers by drawing the bond's dipole arrow on the
+ *  board, from one atom to the other, or by pressing the button for a nonpolar bond. `answers` are
+ *  the three things a student can say: no arrow, an arrow that points at `a`, an arrow that points at `b`. */
+export function bondQuestion(a: El, b: El): { ask: string; sub: string; draw: string; none: string; answers: BondAnswer[] } {
+  return {
+    ask: `Is the ${bondName(a, b)} bond polar?`,
+    sub: 'Subtract the smaller electronegativity from the larger. The difference is ΔEN: 0.4 or less is a nonpolar bond, and above 0.4 is a polar bond.',
+    draw: `For a polar bond, draw the dipole arrow on the board: drag from ${lower(a)} to ${lower(b)}, or from ${lower(b)} to ${lower(a)}. The arrow points at the atom where you let go.`,
+    none: NO_ARROW,
+    answers: ['nonpolar', a, b],
+  }
+}
+const bondTruth = (b: BondPolarity): BondAnswer => (b.kind === 'nonpolar' ? 'nonpolar' : b.negative!)
+const subtraction = (b: BondPolarity) => `ΔEN = ${b.high} − ${b.low} = ${b.delta}`
+
+/** The line shown once a bond's polarity is right. */
+export function bondRight(a: El, b: El, pol: BondPolarity): string {
+  if (pol.kind === 'nonpolar') {
+    return `Nonpolar. ${subtraction(pol)}, and at 0.4 or less the two atoms share the electrons almost evenly. A nonpolar bond has no dipole.`
+  }
+  return `Polar. ${subtraction(pol)}. ${cap(lower(pol.negative!))} pulls the shared electrons harder, so ${lower(pol.negative!)} is δ− and ${lower(pol.positive!)} is δ+.`
+}
+/** What to say about a wrong answer for one bond. `answer` is 'nonpolar' for the button, or the
+ *  atom the drawn arrow points at. The first miss names the rule that was missed, the second works
+ *  the subtraction, the third gives the answer. */
+export function bondCoach(a: El, b: El, pol: BondPolarity, answer: BondAnswer, tries: number): Coach {
+  const name = bondName(a, b)
+  if (tries >= 3) {
+    return { lead: bondRight(a, b, pol), why: '', ask: pol.kind === 'nonpolar' ? `Press “${NO_ARROW}”.` : `Draw the arrow from ${lower(pol.positive!)} to ${lower(pol.negative!)}.` }
+  }
+  const table = 'Find both electronegativities in the table and subtract.'
+  if (pol.kind === 'nonpolar') {
+    // an arrow on a bond that has no dipole, whichever atom it points at
+    const lead = 'Only a polar bond has a dipole arrow.'
+    return tries === 1
+      ? { lead, why: `A polar bond has a ΔEN above 0.4, and ${lower(a)} and ${lower(b)} are closer than that.`, ask: table }
+      : { lead, why: `For ${name}, ${subtraction(pol)}.`, ask: 'A difference of 0.4 or less is a nonpolar bond, and a nonpolar bond has no arrow.' }
+  }
+  if (answer === 'nonpolar') {
+    return tries === 1
+      ? { lead: 'A bond is nonpolar when ΔEN is 0.4 or less.', why: `For ${name}, ΔEN is larger than that.`, ask: table }
+      : { lead: 'A bond is nonpolar when ΔEN is 0.4 or less.', why: `For ${name}, ${subtraction(pol)}.`, ask: 'Draw the arrow so that it points at the atom with the larger electronegativity.' }
+  }
+  // an arrow that points at the δ+ atom: the rule first, the two numbers on the second miss
+  const lead = `That arrow points at ${lower(pol.positive!)}.`
+  return tries === 1
+    ? { lead, why: 'A dipole arrow points at the atom that pulls the shared electrons harder: the atom with the larger electronegativity.', ask: 'Compare the two atoms in the table, then draw the arrow again.' }
+    : { lead, why: `${cap(lower(pol.positive!))}'s electronegativity is ${pol.low} and ${lower(pol.negative!)}'s is ${pol.high}.`, ask: 'Draw the arrow so that it points at the atom with the larger electronegativity.' }
+}
+/** What the board says when an arrow is drawn between two atoms that are not the bond in question. */
+export function drawRefusal(a: El, b: El): string {
+  return `This question is about the ${bondName(a, b)} bond. Draw the arrow from ${lower(a)} to ${lower(b)}, or from ${lower(b)} to ${lower(a)}.`
+}
+/** What a screen reader says for an atom while a bond's arrow can be drawn: the first atom starts
+ *  the arrow, and the second is the atom the arrow points at. */
+export function arrowLabel(el: El, started: boolean): string {
+  return started ? `${ELEMENTS[el].name}. Press Enter to point the dipole arrow at ${lower(el)}.` : `${ELEMENTS[el].name}. Press Enter to start a dipole arrow at ${lower(el)}.`
+}
+export function bondAnswerRight(pol: BondPolarity, answer: BondAnswer): boolean {
+  return answer === bondTruth(pol)
+}
+
+/** Where the bonds of each shape point, for the sentence about dipoles that cancel. */
+const POINT: Partial<Record<ShapeName, string>> = {
+  linear: 'in opposite directions',
+  'trigonal planar': 'to the corners of a flat triangle',
+  tetrahedral: 'to the corners of a tetrahedron',
+  'trigonal bipyramidal': 'to the corners of a trigonal bipyramid',
+  octahedral: 'to the corners of an octahedron',
+  'square planar': 'to the corners of a square',
+}
+const isIon = (p: Problem | null) => !!p && p.charge !== 0
+/** The whole-molecule question. An ion is asked about its bond dipoles; a molecule is asked for the word. */
+export function netQuestion(p: Problem): { ask: string; sub: string; choices: { polar: boolean; label: string }[] } {
+  const sub = 'Each polar bond is an arrow that points at its δ− atom. The arrows cancel when the same atoms sit evenly around the middle atom.'
+  return isIon(p)
+    ? { ask: `Do the bond dipoles in ${p.name} cancel?`, sub, choices: [{ polar: false, label: 'They cancel' }, { polar: true, label: 'They do not cancel' }] }
+    : { ask: `Is ${p.name} polar or nonpolar?`, sub, choices: [{ polar: true, label: 'Polar' }, { polar: false, label: 'Nonpolar' }] }
+}
+/** "the 2 C–O dipoles", "the C–N dipole": the arrows of one kind of bond. */
+const dipolesOf = (k: MoleculePolarity['kinds'][number]) => (k.count === 1 ? `the ${bondName(k.center, k.terminal)} dipole` : `the ${k.count} ${bondName(k.center, k.terminal)} dipoles`)
+/** "the C–O bond", "the 2 C–H bonds": the bonds of one kind. */
+const theBonds = (k: MoleculePolarity['kinds'][number]) => (k.count === 1 ? `the ${bondName(k.center, k.terminal)} bond` : `the ${k.count} ${bondName(k.center, k.terminal)} bonds`)
+/** "is" for one bond, "are" for more. */
+const isAre = (kinds: MoleculePolarity['kinds']) => (kinds.length === 1 && kinds[0]!.count === 1 ? 'is' : 'are')
+
+/** Why the bond dipoles cancel or do not, in one or two sentences. `name` is the molecule in a sentence ("water", "the nitrite ion"). */
+function netReason(m: MoleculePolarity, info: ShapeInfo | null): string {
+  const polar = m.kinds.filter((k) => k.polarity.kind !== 'nonpolar')
+  const flat = m.kinds.filter((k) => k.polarity.kind === 'nonpolar')
+  if (m.why === 'no-polar-bonds') {
+    const k = m.kinds[0]!
+    return m.kinds.length === 1
+      ? `ΔEN for ${bondName(k.center, k.terminal)} is ${k.polarity.delta}, which is a nonpolar bond, so there are no bond dipoles to add up.`
+      : 'None of the bonds is polar, so there are no bond dipoles to add up.'
+  }
+  if (m.why === 'charges') return 'The atoms are the same, so ΔEN is 0, but the formal charges are not the same. The electrons sit closer to the atoms with the negative formal charge, and in this shape those dipoles do not cancel.'
+  if (m.why === 'cancel') {
+    const where = info ? POINT[info.shape] : undefined
+    return `${cap(dipolesOf(polar[0]!))} are the same size and point ${where ?? 'evenly around the middle atom'}, so they cancel.`
+  }
+  if (m.why === 'shape') {
+    const k = polar[0]!
+    const shape = info ? `The shape is ${info.shape}, so ${dipolesOf(k)}` : `${cap(dipolesOf(k))}`
+    return m.bonds.length === 1 ? `${cap(dipolesOf(k))} is the only one, so nothing cancels it.` : `${shape} do not cancel. They add up to a net dipole.`
+  }
+  // unlike bonds
+  if (polar.length === 1 && flat.length >= 1) {
+    return `${cap(theBonds(polar[0]!))} ${isAre(polar)} polar and ${list(flat.map(theBonds))} ${isAre(flat)} nonpolar, so nothing cancels ${dipolesOf(polar[0]!)}.`
+  }
+  return 'The bond dipoles are not all the same size, so they do not cancel.'
+}
+/** "Water is polar." / "The bond dipoles in the nitrite ion do not cancel." */
+function netVerdict(p: Problem | null, m: MoleculePolarity): string {
+  if (!p) return m.polar ? 'This molecule is polar.' : 'This molecule is nonpolar.'
+  if (isIon(p)) return m.polar ? `The bond dipoles in ${p.name} do not cancel.` : `The bond dipoles in ${p.name} cancel.`
+  return `${cap(p.name)} is ${m.polar ? 'polar' : 'nonpolar'}.`
+}
+/** What the panel says once the whole-molecule answer is in: the plain line for a right answer,
+ *  a coach for a wrong one. Either way the answer is given, because the model then shows it. */
+export function netFeedback(p: Problem, m: MoleculePolarity, info: ShapeInfo | null, saidPolar: boolean): { right: boolean; text: string; coach: Coach | null } {
+  const reason = netReason(m, info)
+  const verdict = netVerdict(p, m)
+  if (saidPolar === m.polar) return { right: true, text: `${verdict} ${reason}`, coach: null }
+  let lead: string
+  const polarKinds = m.kinds.filter((k) => k.polarity.kind !== 'nonpolar')
+  if (m.why === 'cancel') lead = `${cap(theBonds(polarKinds[0]!))} ${isAre(polarKinds.slice(0, 1))} polar, and the dipoles still cancel.`
+  else if (m.why === 'no-polar-bonds') lead = `${cap(p.name)} has no polar bonds.`
+  else if (m.why === 'shape') lead = 'Bond dipoles cancel only when the bonds are spread evenly around the middle atom.'
+  else lead = 'Bond dipoles cancel only when they are the same size.'
+  const coach: Coach = { lead, why: reason, ask: verdict }
+  return { right: false, text: coachText(coach), coach }
+}
+// ---- the net dipole, drawn
+//
+// Once a molecule is known to be polar, the student draws its net dipole on the 3D model: a press
+// on the middle atom and a drag the way the bond arrows add up. Only the direction is judged, the
+// way a viewer sees it (src/chem/polarity.ts, netAsSeen).
+
+/** A drawn net dipole within this many degrees of the real one is right. */
+export const NET_WITHIN = 35
+/** A drawn direction can be judged only while at least this share of the net dipole lies across the screen. */
+export const NET_ACROSS = 0.45
+/** A drawn arrow within this many degrees of a bond's line follows that bond. */
+const ALONG_BOND = 18
+
+/** What a wrong net dipole is taken for: it points against the bond arrows, it follows one bond
+ *  where several bond arrows add up, or neither. */
+export type NetIdea = 'against' | 'one-bond' | 'other'
+export type NetVerdict = { kind: 'right' } | { kind: 'wrong'; idea: NetIdea } | { kind: 'side' }
+
+const degreesBetween = (ax: number, ay: number, bx: number, by: number) => {
+  const cos = (ax * bx + ay * by) / (Math.hypot(ax, ay) * Math.hypot(bx, by) || 1)
+  return (Math.acos(Math.max(-1, Math.min(1, cos))) * 180) / Math.PI
+}
+/** Judges a net dipole drawn on screen (x to the right, y up) against the bond dipoles as the
+ *  viewer sees them. 'side' means the net dipole points at the viewer or away, so no direction on
+ *  screen can be right. Null when there is no net dipole or nothing was drawn. */
+export function judgeNetArrow(m: MoleculePolarity, seen: SeenBond[], drawn: { x: number; y: number }): NetVerdict | null {
+  const net = netAsSeen(m, seen)
+  if (!net || Math.hypot(drawn.x, drawn.y) < 1e-6) return null
+  if (net.across < NET_ACROSS) return { kind: 'side' }
+  const off = degreesBetween(drawn.x, drawn.y, net.x, net.y)
+  if (off <= NET_WITHIN) return { kind: 'right' }
+  if (off >= 180 - NET_WITHIN) return { kind: 'wrong', idea: 'against' }
+  const arrows = m.bonds.filter((b) => b.out !== 0)
+  const alongOne =
+    arrows.length > 1 &&
+    arrows.some((b) => {
+      const dir = seen.find((x) => x.atomId === b.atomId)?.dir
+      if (!dir || Math.hypot(dir[0], dir[1]) < 0.3) return false
+      const a = degreesBetween(drawn.x, drawn.y, dir[0], dir[1])
+      return a <= ALONG_BOND || a >= 180 - ALONG_BOND
+    })
+  return { kind: 'wrong', idea: alongOne ? 'one-bond' : 'other' }
+}
+
+export function netArrowQuestion(p: Problem): { ask: string; draw: string } {
+  return {
+    ask: `Which way does the net dipole of ${p.name} point?`,
+    draw: `Draw the net dipole on the 3D model: press on ${lower(p.center)} and drag the way the bond arrows add up.`,
+  }
+}
+/** Where the net dipole points, by the atoms it runs between: "from carbon toward oxygen". Bonds
+ *  that are all alike add up to an arrow along the line through the middle atom and the middle of
+ *  the outer atoms. Null for a molecule this cannot be said about in one phrase. */
+export function netPoints(m: MoleculePolarity): string | null {
+  const arrows = m.bonds.filter((b) => b.out !== 0)
+  const first = arrows[0]
+  if (!m.net || !first) return null
+  const c = lower(m.center.el)
+  let outer: string
+  if (arrows.length === 1) outer = lower(first.el)
+  else if (m.why === 'shape') outer = arrows.every((b) => b.el === first.el) ? `the middle of the ${arrows.length} ${lower(first.el)} atoms` : `the middle of the ${arrows.length} outer atoms`
+  else return null
+  return first.out === 1 ? `from ${c} toward ${outer}` : `from ${outer} toward ${c}`
+}
+/** The line shown once the drawn net dipole is right, and the answer a third miss is given. */
+export function netArrowRight(m: MoleculePolarity): string {
+  const where = netPoints(m)
+  const polar = m.kinds.filter((k) => k.polarity.kind !== 'nonpolar')
+  if (!where || polar.length !== 1) return 'The net dipole is the bond dipoles added together.'
+  const k = polar[0]!
+  return k.count === 1 ? `${cap(dipolesOf(k))} is the only bond dipole, so the net dipole points the same way: ${where}.` : `${cap(dipolesOf(k))} add up to a net dipole that points ${where}.`
+}
+/** What to say about a net dipole drawn the wrong way. The first miss names what the arrow does,
+ *  the second says how the arrows of this molecule add up, the third gives the direction. */
+export function netArrowCoach(m: MoleculePolarity, idea: NetIdea, tries: number): Coach {
+  if (tries >= 3) return { lead: netArrowRight(m), why: '', ask: 'Draw that arrow.' }
+  const polar = m.kinds.filter((k) => k.polarity.kind !== 'nonpolar')
+  const k = polar[0]
+  const n = m.bonds.filter((b) => b.out !== 0).length
+  const again = 'Draw the net dipole again.'
+  let lead = 'The net dipole does not point that way.'
+  let why = 'The net dipole is the bond arrows added together: move each arrow so that it starts where the one before ends, and the net dipole runs from the first start to the last tip.'
+  if (idea === 'against' && n === 1 && k) {
+    // one bond arrow: say "arrow", and name it
+    lead = `That arrow points against the ${bondName(k.center, k.terminal)} arrow.`
+    why = `The ${bondName(k.center, k.terminal)} arrow is the only bond arrow, so the net dipole points the same way as the ${bondName(k.center, k.terminal)} arrow.`
+  } else if (idea === 'against') {
+    lead = 'That arrow points against the bond arrows.'
+    why = 'The net dipole is the bond arrows added together, so it points toward the δ− side, the same as they do.'
+  } else if (idea === 'one-bond' && k) {
+    lead = `That arrow follows 1 ${bondName(k.center, k.terminal)} bond.`
+    why = `The net dipole is ${n === 2 ? 'both' : `all ${n}`} bond arrows added together, so the other ${n === 2 ? 'arrow moves' : 'arrows move'} it off that bond.`
+  }
+  if (tries === 1 || !k) return { lead, why, ask: again }
+  // the second miss: how the arrows of this molecule add up, without saying which way along the line
+  if (n === 1) return { lead, why: `${cap(theBonds(k))} is the only polar bond, so the net dipole runs along the ${bondName(k.center, k.terminal)} bond.`, ask: 'Decide which way along that bond the arrow points, then draw again.' }
+  if (m.why === 'shape' && polar.length === 1) {
+    return { lead, why: `${cap(dipolesOf(k))} are the same size, so the net dipole runs along the line through ${lower(k.center)} and the middle of the ${n} ${lower(k.terminal)} atoms.`, ask: 'Decide which way along that line the arrows point, then draw again.' }
+  }
+  return { lead, why, ask: again }
+}
+/** What a screen reader says for the middle atom while the net dipole can be drawn. */
+export function netArrowLabel(el: El): string {
+  return `${ELEMENTS[el].name}. Press the left or right arrow key to turn the net dipole arrow, then press Enter.`
+}
+/** Shown when the net dipole was drawn while it pointed at the viewer or away. */
+export const NET_SIDE = 'The net dipole pointed toward you or away from you, so the model turned. Draw the arrow again.'
+
+/** One line for the readout: "Polar", "Nonpolar", or for an ion whether its bond dipoles cancel.
+ *  `charged` says the board holds an ion, for free build, where there is no problem to ask. */
+export function polarityWord(p: Problem | null, m: MoleculePolarity, charged = isIon(p)): string {
+  if (charged) return m.polar ? 'The bond dipoles do not cancel' : 'The bond dipoles cancel'
+  if (m.depends) return 'Depends on where the unlike atoms sit'
+  return m.polar ? 'Polar' : 'Nonpolar'
+}
+/** Free build: the same reasoning as the guided step, for whatever is on the board. */
+export function polarityNote(m: MoleculePolarity, info: ShapeInfo | null): string {
+  return m.depends ? 'The outer atoms are not all the same, and with five or six groups the answer depends on which corners they take.' : netReason(m, info)
+}
+
+// ---------------------------------------------------------------- step 7: sigma and pi bonds, hybridization
+//
+// Chapter 8 slides: the first bond between two atoms is a sigma bond and the rest are pi bonds;
+// hybridization follows the number of electron groups (2 sp, 3 sp2, 4 sp3, then sp3d and sp3d2).
+
+/** A hybridization as it is written: sp², sp³d. */
+export function hybridLabel(h: Hybrid): string {
+  return { sp: 'sp', sp2: 'sp²', sp3: 'sp³', sp3d: 'sp³d', sp3d2: 'sp³d²' }[h]
+}
+export { HYBRIDS, type Hybrid }
+
+export interface BondCounts {
+  sigma: number
+  pi: number
+  single: number
+  double: number
+  triple: number
+}
+export function bondCounts(s: Structure): BondCounts {
+  const { sigma, pi } = sigmaPi(s)
+  const of = (order: number) => s.bonds.filter((b) => b.order === order).length
+  return { sigma, pi, single: of(1), double: of(2), triple: of(3) }
+}
+/** "2 double bonds", "1 single bond and 1 triple bond": the bonds on the board by kind. */
+function bondsByKind(c: BondCounts): string {
+  const parts = [
+    c.single ? plural(c.single, 'single bond') : '',
+    c.double ? plural(c.double, 'double bond') : '',
+    c.triple ? plural(c.triple, 'triple bond') : '',
+  ].filter(Boolean)
+  return list(parts)
+}
+/** "each double bond is 1 sigma and 1 pi": what the multiple bonds on the board are made of. */
+function madeOf(c: BondCounts): string {
+  const parts = [
+    c.single ? (c.single === 1 ? 'the single bond is 1 sigma' : 'each single bond is 1 sigma') : '',
+    c.double ? (c.double === 1 ? 'the double bond is 1 sigma and 1 pi' : 'each double bond is 1 sigma and 1 pi') : '',
+    c.triple ? (c.triple === 1 ? 'the triple bond is 1 sigma and 2 pi' : 'each triple bond is 1 sigma and 2 pi') : '',
+  ].filter(Boolean)
+  return list(parts)
+}
+export function sigmaPiRight(c: BondCounts): string {
+  return `${plural(c.sigma, 'sigma bond')} and ${c.pi === 0 ? 'no pi bonds' : plural(c.pi, 'pi bond')}: ${madeOf(c)}.`
+}
+/** What to say about a wrong count of sigma and pi bonds. */
+export function sigmaPiCoach(p: Problem, c: BondCounts, sigma: number, pi: number, tries: number): Coach {
+  const name = cap(p.name)
+  if (tries >= 3) return { lead: `${name} has ${sigmaPiRight(c)}`, why: '', ask: '' }
+  const lines = c.sigma + c.pi
+  const multiples = c.double + c.triple
+  let idea: Coach
+  if (sigma !== c.sigma && sigma === lines && c.pi > 0) {
+    idea = { lead: `${sigma} counts every line as a sigma bond.`, why: 'Only the first bond between two atoms is a sigma bond. A second or third bond between the same two atoms is a pi bond.', ask: 'Count 1 sigma bond for each pair of bonded atoms.' }
+  } else if (sigma !== c.sigma) {
+    idea = { lead: `${name} doesn't have ${plural(sigma, 'sigma bond')}.`, why: 'Every pair of bonded atoms has exactly 1 sigma bond between them.', ask: `Count the atoms bonded to ${lower(p.center)}.` }
+  } else if (pi === 0 && c.pi > 0) {
+    idea = { lead: 'A double or triple bond has pi bonds in it.', why: `${name} has ${bondsByKind(c)}.`, ask: 'Count 1 pi bond for a double bond and 2 for a triple bond.' }
+  } else if (c.triple > 0 && pi === multiples) {
+    idea = { lead: `${pi} counts 1 pi bond for each double or triple bond.`, why: 'A triple bond has 2 pi bonds: its first bond is the sigma bond and the other 2 are pi bonds.', ask: 'Count the pi bonds again.' }
+  } else if (c.pi === 0) {
+    idea = { lead: `${name} has no pi bonds.`, why: 'A pi bond is the second or third bond between two atoms, and every bond here is a single bond.', ask: 'Set the pi bonds to 0.' }
+  } else {
+    idea = { lead: `${name} doesn't have ${plural(pi, 'pi bond')}.`, why: 'A pi bond is the second or third bond between two atoms.', ask: 'Count 1 pi bond for a double bond and 2 for a triple bond.' }
+  }
+  if (tries === 2) return { lead: idea.lead, why: `${name} has ${bondsByKind(c)}, and ${madeOf(c)}.`, ask: 'Add up the sigma bonds, then the pi bonds.' }
+  return idea
+}
+
+export function sigmaPiQuestion(p: Problem): { ask: string; sub: string; sigma: string; pi: string; check: string } {
+  return {
+    ask: `How many sigma bonds and pi bonds does ${p.name} have?`,
+    sub: 'The first bond between two atoms is a sigma bond. A second or third bond between the same two atoms is a pi bond.',
+    sigma: 'Sigma bonds',
+    pi: 'Pi bonds',
+    check: 'Check my counts',
+  }
+}
+export function hybridQuestion(center: El): string {
+  return `What is the hybridization of ${lower(center)}?`
+}
+/** The last line of the last step. */
+export function finishedLine(p: Problem): string {
+  return `That is everything for ${p.name}: its Lewis structure, shape, polarity and bonding.`
+}
+
+export function hybridRight(center: El, h: Hybrid, f: GroupFacts): string {
+  return `${hybridLabel(h)}: ${lower(center)} has ${plural(f.groups, 'electron group')}.`
+}
+/** What to say about a wrong hybridization. Every miss says how many groups the picked one goes with. */
+export function hybridCoach(center: El, f: GroupFacts, pick: Hybrid, tries: number): Coach {
+  const c = lower(center)
+  const right = hybridFor(f.groups)
+  if (tries >= 3 && right) return { lead: hybridRight(center, right, f), why: '', ask: '' }
+  const goes = `${hybridLabel(pick)} goes with ${plural(domainsOf(pick), 'electron group')}.`
+  const has = `${cap(c)} has ${plural(f.bonded, 'bonded atom')} and ${pairsText(f.lonePairs)}`
+  if (domainsOf(pick) === f.bonded && f.lonePairs > 0) {
+    return { lead: goes, why: `${has}, and each lone pair is a group too.`, ask: 'Count the bonded atoms and the lone pairs, then pick again.' }
+  }
+  if (domainsOf(pick) === f.bondPairs + f.lonePairs && f.bondPairs !== f.bonded) {
+    return { lead: goes, why: 'A double or triple bond is 1 group: the pi bonds in it are not hybridized.', ask: `Count each bond on ${c} once, then pick again.` }
+  }
+  return tries === 1
+    ? { lead: goes, why: `${cap(c)} has a different number of groups.`, ask: `Count the electron groups around ${c}, then pick again.` }
+    : { lead: goes, why: `${has}: ${plural(f.groups, 'group')}.`, ask: 'Each group is one hybrid orbital: 2 groups is sp, 3 is sp², 4 is sp³, 5 is sp³d and 6 is sp³d².' }
+}
+
+/** Everything the app has worked out about a finished molecule, as rows of a table. */
+export function profile(p: Problem | null, s: Structure): { label: string; value: string }[] {
+  const info = shapeInfoFor(s)
+  const f = groupFacts(s)
+  const m = moleculePolarity(s)
+  if (!info || !f) return []
+  const top = assess(s).topology
+  const center = top.kind === 'star' ? atomById(s, top.center) : undefined
+  const h = hybridFor(f.groups)
+  const c = bondCounts(s)
+  // free build has no problem to say whether this is an ion, so the charge on the board decides
+  const rows = [{ label: 'Polarity', value: m ? polarityWord(p, m, p ? p.charge !== 0 : assess(s).charge !== 0) : '' }, { label: 'Sigma and pi bonds', value: `${c.sigma} sigma, ${c.pi} pi` }]
+  if (h && center && !info.diatomic) rows.push({ label: `Hybridization of ${lower(center.el)}`, value: hybridLabel(h) })
+  return rows.filter((r) => r.value)
+}
+
 // ---------------------------------------------------------------- refusals and hints
 
 export function refusalText(s: Structure, why: Refusal, atomId?: string): string {
@@ -907,8 +1308,9 @@ export function refusalText(s: Structure, why: Refusal, atomId?: string): string
   return 'A bond needs two different atoms.'
 }
 
-/** Hints for a step, weakest first. The panel shows as many as the student has asked for. */
-export function hintsFor(step: StepId, p: Problem, s: Structure, totalNext = false): string[] {
+/** Hints for a step, weakest first. The panel shows as many as the student has asked for.
+ *  `totalNext`: the count step is at its total. `netArrow`: step 6 is at the drawn net dipole. */
+export function hintsFor(step: StepId, p: Problem, s: Structure, totalNext = false, netArrow = false): string[] {
   const c = lower(p.center)
   // every atom's count is right and the total is the open question
   if (step === 'count' && totalNext) return [totalMethod(p), totalParts(p)]
@@ -930,6 +1332,24 @@ export function hintsFor(step: StepId, p: Problem, s: Structure, totalNext = fal
   if (step === 'check') {
     const g = checkGuidance(p, s)
     return g ? [g] : []
+  }
+  if (step === 'polar' && netArrow) {
+    return [
+      'Each bond arrow points at its δ− atom. Bond arrows that point in opposite directions cancel.',
+      'Move each bond arrow so that it starts where the one before ends. The net dipole runs from the first start to the last tip.',
+    ]
+  }
+  if (step === 'polar') {
+    return [
+      'Find both atoms of the bond in the electronegativity table. Subtract the smaller number from the larger.',
+      'A ΔEN of 0.4 or less is a nonpolar bond. Above 0.4 the bond is polar, and the atom with the larger electronegativity is δ−.',
+    ]
+  }
+  if (step === 'orbitals') {
+    return [
+      'A single bond is 1 sigma bond. A double bond is 1 sigma and 1 pi. A triple bond is 1 sigma and 2 pi.',
+      'Hybridization follows the number of electron groups: 2 groups is sp, 3 is sp², 4 is sp³, 5 is sp³d and 6 is sp³d².',
+    ]
   }
   const f = groupFacts(s)
   if (!f) return []

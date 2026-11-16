@@ -4,7 +4,7 @@ A general chemistry practice app. One codebase for web, iOS and Android: it runs
 
 **Live demo:** https://sam-t-g.github.io/chem-review/
 
-The app is a shell (home screen, navigation, saved progress) that hosts modules. The first module, **Lewis structures and shapes**, has a student work one molecule in five steps on a 3D board: count the valence electrons, place the atoms, bond them, check every atom, then see the molecule's shape. It has 20 guided molecules and a free build mode with 18 atoms.
+The app is a shell (home screen, navigation, saved progress) that hosts modules. The first module, **Lewis structures and shapes**, has a student work one molecule in seven steps on a 3D board: count the valence electrons, place the atoms, bond them, check every atom, see the molecule's shape, find its polar bonds and whether their dipoles cancel, then count its sigma and pi bonds and name the middle atom's hybridization. It has 20 guided molecules and a free build mode with 18 atoms.
 
 ## Run it
 

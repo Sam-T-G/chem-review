@@ -2,6 +2,19 @@
 
 Dated entries, newest first. Each says what was run, on which build, by whom, and what it did not cover. Add an entry when you verify something a reader would otherwise have to take on trust. A claim with no entry here has not been checked.
 
+## 2026-11-16: steps 6 and 7 with the dipoles drawn (build session, team lewis)
+
+Run in the main checkout, on the working tree that was committed on top of 49d0d69 the same day.
+
+- `pnpm verify` exits 0: typecheck, lint, 397 unit tests in 10 files, `check-repo: ok`, and the production web build.
+- Browser, real input (headless Chromium with a software renderer), against that build served on port 5210. Every dipole arrow in these runs is drawn with real mouse or touch events, and the script works out where each arrow should point from the atoms' places on screen and the slides' electronegativities, never from the app:
+  - All 20 molecules solved start to finish through step 7 at 1360 x 840 with a mouse (670 checks) and at 390 x 844 with touch (670 checks), 0 failed. Each polar bond's arrow and each of the 9 net dipoles is drawn.
+  - The extras pass at both sizes (233 checks with a mouse, 184 with touch). New in them: an arrow drawn the wrong way round on C–O, an arrow drawn on the nonpolar C–H bond, a bond's arrow drawn on the flat drawing, a net dipole drawn the opposite way (the board redraws it within 12° of where it was drawn), a net dipole drawn while it points at the viewer (no try counted, a message, and the model turns back), and at desktop size the bond arrow and the net dipole from the keyboard on formaldehyde.
+  - Home screen, opening the module, the way back and saved progress pass at both sizes (50 checks each).
+- A second session read the new code and reported ten findings. `HANDOFF.md` lists them. All ten were acted on before these runs. The fixes themselves have had no second read.
+- Not checked: a real phone or tablet (W-003), Safari's engine (W-012), frame rate, and whether 35° is the right tolerance for a student's hand. The check for turning the model drags on the empty corner of the board, which worked with a mouse and with touch in Chromium. It was not tried in another browser.
+- Not checked here: the live site. The deploy came after this entry was written.
+
 ## 2026-11-13: the team structure (lead session)
 
 Run before landing, on the branch `lead/team-structure` on top of commit a8f4cd9, in its own worktree with its own install. The landed commit holds the same files.
@@ -22,7 +35,7 @@ Moved here from the README as the build session wrote it for commit a8f4cd9. A l
 - `pnpm verify`: typecheck, 284 unit tests, production web build. `pnpm lint` is clean, and `expo-doctor` passes 20 of 20 checks.
 - **Unit tests** cover the bonding rules, the reference structure for 31 species, the checker, the shape table, the repulsion model (every shape settles into the textbook arrangement), the flat layout, the step flow in the store, and the guide's wording (including a scan of every sentence for banned phrasing). One test solves all 20 problems using only the hints the app gives, and another checks that every hinted move is one the board accepts. Every claim a wrong-answer card makes is checked against every problem it can appear in.
 - **Browser, real input (Chromium), against the GitHub Pages build served from `/chem-review`:** home screen, opening the module, methane solved start to finish, the back button and saved progress pass at 1360 x 840 with a mouse and at 390 x 844 with touch (32 checks each).
-- **Browser, the rest:** `[TBD]` on this commit. The run of all 20 molecules at both sizes, and the wrong-answer, hint, refused-move, undo, keyboard and free-build checks, were last complete before the text transitions were added (desktop wrong-answer checks: 133 of 134, where the one failure was a check that read the wrong line and has since been fixed). They are being rerun against the live site; this line gets the numbers when they finish.
+- **Browser, the rest, run against the live site on 2026-11-13** (https://sam-t-g.github.io/chem-review/, which serves this commit; `MB_URL` set to that address for `scripts/check-browser.mjs`): all 20 molecules solved start to finish at 1360 x 840 with a mouse and at 390 x 844 with touch (274 checks each); the wrong-answer, hint, refused-move, undo, keyboard and free-build checks (134 on desktop, 128 on phone); and the home-screen checks again at both sizes (32 each). Every check passed. This closes W-019.
 - **Safari's engine (2026-11-12, before the changes listed under iOS below):** the module loads and draws correctly in Playwright's WebKit. The real-input checks have not been run there.
 - **iOS (2026-11-12, before the new faces, the wrong-answer cards and the text transitions):** the app runs in the iPhone 17 Pro simulator (iOS 27) through Expo Go. The home screen is native UI (the four atoms, the fonts and the card all draw), and the Lewis module loads inside it with the 3D board drawing. Nothing was tapped or dragged in the simulator, so touch on iOS is not checked.
 - **Looked at, not measured:** the motion. Screenshots at both sizes were reviewed for every guided molecule's flat and 3D view, the count step, a wrong answer with a hint, the picker and free build. The text transitions and the rings on the board were reviewed as frames frozen at set moments, never at full speed. No frame rate was measured, and the browser checks run on a software renderer, so they say nothing about speed on a real phone.

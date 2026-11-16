@@ -3,10 +3,22 @@ import { describe, expect, it } from 'vitest'
 import { ELEMENTS, EL_ORDER, shellsOf, type El } from '../src/chem/elements'
 import { PROBLEMS, speciesOf, type Problem } from '../src/chem/problems'
 import { addAtom, addElectron, removeElectron, share, type Structure } from '../src/chem/structure'
+import { HYBRIDS, domainsOf, hybridFor } from '../src/chem/orbitals'
+import { bondPolarity } from '../src/chem/polarity'
+import { idealDirs, type V3 } from '../src/chem/repulsion'
 import { ALL_SHAPES, classify, shapeCases } from '../src/chem/vsepr'
 import {
+  DIPOLE_WORDS,
+  NET_SIDE,
+  NET_WITHIN,
   STEPS,
+  arrowLabel,
+  bondAnswerRight,
+  bondCoach,
+  bondCounts,
   bondInstruction,
+  bondQuestion,
+  bondRight,
   bondStatus,
   boardStepDone,
   checkCoach,
@@ -14,22 +26,44 @@ import {
   checkRows,
   coachText,
   countCoach,
+  drawRefusal,
+  finishedLine,
   finishedNotes,
   formalChargeSum,
   groupFacts,
   groupsCoach,
   groupsRight,
   hintsFor,
+  hybridCoach,
+  hybridLabel,
+  hybridQuestion,
+  hybridRight,
   inventory,
+  judgeNetArrow,
+  lower,
   middleFeedback,
   middleNeeded,
+  netArrowCoach,
+  netArrowLabel,
+  netArrowQuestion,
+  netArrowRight,
+  netFeedback,
+  netPoints,
+  netQuestion,
   nextMove,
+  polarity,
+  polarityNote,
+  polarityWord,
+  profile,
   refusalText,
   shapeChoices,
   shapeFeedback,
   shapeInfoFor,
   shapeReadout,
   shellsWords,
+  sigmaPiCoach,
+  sigmaPiQuestion,
+  sigmaPiRight,
   angleMarks,
   mixedOuter,
   titleOf,
@@ -727,6 +761,410 @@ describe('step 5: the shape', () => {
   })
 })
 
+describe('step 6: polar bonds and the net dipole', () => {
+  const co = bondPolarity('C', 'O')
+  const ch = bondPolarity('C', 'H')
+  const net = (id: string, saidPolar: boolean) => {
+    const s = solveLikeAStudent(id)
+    return netFeedback(P(id), polarity(s)!, shapeInfoFor(s), saidPolar)
+  }
+
+  it('asks about one kind of bond: an arrow drawn on the board, or the button for no arrow', () => {
+    expect(bondQuestion('C', 'O')).toEqual({
+      ask: 'Is the C–O bond polar?',
+      sub: 'Subtract the smaller electronegativity from the larger. The difference is ΔEN: 0.4 or less is a nonpolar bond, and above 0.4 is a polar bond.',
+      draw: 'For a polar bond, draw the dipole arrow on the board: drag from carbon to oxygen, or from oxygen to carbon. The arrow points at the atom where you let go.',
+      none: 'Nonpolar, no arrow',
+      // no arrow, an arrow that points at carbon, an arrow that points at oxygen
+      answers: ['nonpolar', 'C', 'O'],
+    })
+    expect(bondAnswerRight(co, 'O')).toBe(true)
+    expect(bondAnswerRight(co, 'C')).toBe(false)
+    expect(bondAnswerRight(co, 'nonpolar')).toBe(false)
+    // C–H: carbon pulls a little harder, and the bond still counts as nonpolar
+    expect(bondAnswerRight(ch, 'nonpolar')).toBe(true)
+    expect(bondAnswerRight(ch, 'C')).toBe(false)
+  })
+  it('a right answer shows the subtraction the way the slides write it', () => {
+    expect(bondRight('C', 'O', co)).toBe('Polar. ΔEN = 3.5 − 2.5 = 1.0. Oxygen pulls the shared electrons harder, so oxygen is δ− and carbon is δ+.')
+    expect(bondRight('C', 'H', ch)).toBe('Nonpolar. ΔEN = 2.5 − 2.1 = 0.4, and at 0.4 or less the two atoms share the electrons almost evenly. A nonpolar bond has no dipole.')
+    expect(bondRight('N', 'H', bondPolarity('N', 'H'))).toMatch(/^Polar\. ΔEN = 3\.0 − 2\.1 = 0\.9\. Nitrogen pulls .* nitrogen is δ− and hydrogen is δ\+\.$/)
+  })
+  it('a wrong answer for a bond: the rule first, then the subtraction, then the answer', () => {
+    // an arrow drawn toward the atom that pulls less: the rule, then the two numbers
+    expect(bondCoach('C', 'O', co, 'C', 1)).toEqual({
+      lead: 'That arrow points at carbon.',
+      why: 'A dipole arrow points at the atom that pulls the shared electrons harder: the atom with the larger electronegativity.',
+      ask: 'Compare the two atoms in the table, then draw the arrow again.',
+    })
+    expect(bondCoach('C', 'O', co, 'C', 2)).toEqual({
+      lead: 'That arrow points at carbon.',
+      why: "Carbon's electronegativity is 2.5 and oxygen's is 3.5.",
+      ask: 'Draw the arrow so that it points at the atom with the larger electronegativity.',
+    })
+    // a polar bond called nonpolar
+    expect(bondCoach('C', 'O', co, 'nonpolar', 1)).toEqual({ lead: 'A bond is nonpolar when ΔEN is 0.4 or less.', why: 'For C–O, ΔEN is larger than that.', ask: 'Find both electronegativities in the table and subtract.' })
+    expect(bondCoach('C', 'O', co, 'nonpolar', 2)).toEqual({ lead: 'A bond is nonpolar when ΔEN is 0.4 or less.', why: 'For C–O, ΔEN = 3.5 − 2.5 = 1.0.', ask: 'Draw the arrow so that it points at the atom with the larger electronegativity.' })
+    // an arrow drawn on a nonpolar bond, whichever atom it points at
+    expect(bondCoach('C', 'H', ch, 'C', 1)).toEqual({ lead: 'Only a polar bond has a dipole arrow.', why: 'A polar bond has a ΔEN above 0.4, and carbon and hydrogen are closer than that.', ask: 'Find both electronegativities in the table and subtract.' })
+    expect(bondCoach('C', 'H', ch, 'H', 2)).toEqual({ lead: 'Only a polar bond has a dipole arrow.', why: 'For C–H, ΔEN = 2.5 − 2.1 = 0.4.', ask: 'A difference of 0.4 or less is a nonpolar bond, and a nonpolar bond has no arrow.' })
+    // the third miss gives the answer, and says what to do with it
+    expect(bondCoach('C', 'O', co, 'C', 3)).toEqual({ lead: bondRight('C', 'O', co), why: '', ask: 'Draw the arrow from carbon to oxygen.' })
+    expect(bondCoach('C', 'H', ch, 'C', 3)).toEqual({ lead: bondRight('C', 'H', ch), why: '', ask: 'Press “Nonpolar, no arrow”.' })
+  })
+  it('a first miss for a bond gives the rule and no number, and no miss before the third names the δ− atom', () => {
+    for (const p of PROBLEMS) {
+      for (const k of polarity(solveLikeAStudent(p.id))!.kinds) {
+        const pol = k.polarity
+        const wrongs = bondQuestion(k.center, k.terminal).answers.filter((answer) => !bondAnswerRight(pol, answer))
+        expect(wrongs, `${p.id} ${k.terminal}`).toHaveLength(2)
+        for (const wrong of wrongs) {
+          // the first miss: no electronegativity, no ΔEN worked out
+          const first = coachText(bondCoach(k.center, k.terminal, pol, wrong, 1))
+          expect(first, `${p.id}: ${first}`).not.toContain(pol.high)
+          expect(first, `${p.id}: ${first}`).not.toContain(pol.low)
+          expect(first, `${p.id}: ${first}`).not.toMatch(/ΔEN = /)
+          if (pol.kind === 'nonpolar') continue
+          // a polar bond: the atom that is δ− is not named as the answer before the third miss
+          const neg = lower(pol.negative!)
+          for (const tries of [1, 2]) expect(coachText(bondCoach(k.center, k.terminal, pol, wrong, tries)), p.id).not.toMatch(new RegExp(`${neg} is δ−|points? at ${neg}|to ${neg}\\.`))
+        }
+        if (pol.kind !== 'nonpolar') expect(bondCoach(k.center, k.terminal, pol, pol.positive!, 3).ask, p.id).toBe(`Draw the arrow from ${lower(pol.positive!)} to ${lower(pol.negative!)}.`)
+      }
+    }
+  })
+  it('an arrow drawn between the wrong atoms is refused with the bond the question is about', () => {
+    expect(drawRefusal('C', 'H')).toBe('This question is about the C–H bond. Draw the arrow from carbon to hydrogen, or from hydrogen to carbon.')
+  })
+  it('tells a screen reader what Enter does on each atom while an arrow can be drawn', () => {
+    expect(arrowLabel('C', false)).toBe('Carbon. Press Enter to start a dipole arrow at carbon.')
+    expect(arrowLabel('O', true)).toBe('Oxygen. Press Enter to point the dipole arrow at oxygen.')
+    expect(netArrowLabel('O')).toBe('Oxygen. Press the left or right arrow key to turn the net dipole arrow, then press Enter.')
+  })
+  it('asks a molecule for the word and an ion about its bond dipoles', () => {
+    expect(netQuestion(P('H2O'))).toMatchObject({ ask: 'Is water polar or nonpolar?', choices: [{ polar: true, label: 'Polar' }, { polar: false, label: 'Nonpolar' }] })
+    expect(netQuestion(P('CO3 2-'))).toMatchObject({ ask: 'Do the bond dipoles in the carbonate ion cancel?', choices: [{ polar: false, label: 'They cancel' }, { polar: true, label: 'They do not cancel' }] })
+  })
+  it('a right answer says why, the way the slides reason', () => {
+    expect(net('CO2', false)).toEqual({ right: true, text: 'Carbon dioxide is nonpolar. The 2 C–O dipoles are the same size and point in opposite directions, so they cancel.', coach: null })
+    expect(net('H2O', true).text).toBe('Water is polar. The shape is bent, so the 2 O–H dipoles do not cancel. They add up to a net dipole.')
+    expect(net('NH3', true).text).toBe('Ammonia is polar. The shape is trigonal pyramidal, so the 3 N–H dipoles do not cancel. They add up to a net dipole.')
+    expect(net('CH4', false).text).toBe('Methane is nonpolar. ΔEN for C–H is 0.4, which is a nonpolar bond, so there are no bond dipoles to add up.')
+    expect(net('CH2O', true).text).toBe('Formaldehyde is polar. The C–O bond is polar and the 2 C–H bonds are nonpolar, so nothing cancels the C–O dipole.')
+    expect(net('HCN', true).text).toBe('Hydrogen cyanide is polar. The C–N bond is polar and the C–H bond is nonpolar, so nothing cancels the C–N dipole.')
+    expect(net('SF6', false).text).toBe('Sulfur hexafluoride is nonpolar. The 6 S–F dipoles are the same size and point to the corners of an octahedron, so they cancel.')
+    expect(net('XeF4', false).text).toBe('Xenon tetrafluoride is nonpolar. The 4 Xe–F dipoles are the same size and point to the corners of a square, so they cancel.')
+    expect(net('CO3 2-', false).text).toBe('The bond dipoles in the carbonate ion cancel. The 3 C–O dipoles are the same size and point to the corners of a flat triangle, so they cancel.')
+    expect(net('NO2-', true).text).toBe('The bond dipoles in the nitrite ion do not cancel. The shape is bent, so the 2 N–O dipoles do not cancel. They add up to a net dipole.')
+  })
+  it('a wrong answer names the rule that was missed and gives the answer', () => {
+    // polar bonds taken for a polar molecule
+    expect(net('CO2', true).coach).toEqual({
+      lead: 'The 2 C–O bonds are polar, and the dipoles still cancel.',
+      why: 'The 2 C–O dipoles are the same size and point in opposite directions, so they cancel.',
+      ask: 'Carbon dioxide is nonpolar.',
+    })
+    // a drawing that looks even taken for dipoles that cancel
+    expect(net('H2O', false).coach).toEqual({
+      lead: 'Bond dipoles cancel only when the bonds are spread evenly around the middle atom.',
+      why: 'The shape is bent, so the 2 O–H dipoles do not cancel. They add up to a net dipole.',
+      ask: 'Water is polar.',
+    })
+    expect(net('CH4', true).coach).toMatchObject({ lead: 'Methane has no polar bonds.', ask: 'Methane is nonpolar.' })
+    expect(net('CH2O', false).coach).toMatchObject({ lead: 'Bond dipoles cancel only when they are the same size.', ask: 'Formaldehyde is polar.' })
+    expect(net('NH4+', true).coach).toMatchObject({ lead: 'The 4 N–H bonds are polar, and the dipoles still cancel.', ask: 'The bond dipoles in the ammonium ion cancel.' })
+  })
+  it('gets every guided problem right, whichever answer is picked', () => {
+    // which molecules are polar, and which ions have dipoles that do not cancel: textbook facts, not read from the code
+    const polar = new Set(['NH3', 'H2O', 'CH2O', 'HCN', 'SF4', 'ClF3', 'BrF5', 'SO2', 'NO2-'])
+    for (const p of PROBLEMS) {
+      for (const said of [true, false]) {
+        const r = net(p.id, said)
+        expect(r.right, `${p.id} ${said}`).toBe(said === polar.has(p.id))
+        const verdict = p.charge !== 0 ? `The bond dipoles in ${p.name} ${polar.has(p.id) ? 'do not cancel' : 'cancel'}.` : `${p.name.charAt(0).toUpperCase()}${p.name.slice(1)} is ${polar.has(p.id) ? 'polar' : 'nonpolar'}.`
+        if (r.right) expect(r.text.startsWith(verdict), `${p.id}: ${r.text}`).toBe(true)
+        else expect(r.coach!.ask, p.id).toBe(verdict)
+        expect(r.text, p.id).not.toMatch(/undefined|evenly around the middle atom, so they cancel/)
+      }
+      // each kind of bond: exactly one of the three answers is right
+      const m = polarity(solveLikeAStudent(p.id))!
+      for (const k of m.kinds) {
+        const right = bondQuestion(k.center, k.terminal).answers.filter((answer) => bondAnswerRight(k.polarity, answer))
+        expect(right, `${p.id} ${k.terminal}`).toHaveLength(1)
+      }
+    }
+  })
+  it('gives the readout one word for a molecule and a plain statement for an ion', () => {
+    const word = (id: string) => polarityWord(P(id), polarity(solveLikeAStudent(id))!)
+    expect(word('H2O')).toBe('Polar')
+    expect(word('CO2')).toBe('Nonpolar')
+    expect(word('CO3 2-')).toBe('The bond dipoles cancel')
+    expect(word('NO2-')).toBe('The bond dipoles do not cancel')
+    expect(DIPOLE_WORDS).toMatchObject({ plus: 'δ+', minus: 'δ−', net: 'net dipole' })
+  })
+})
+
+describe('step 6: the net dipole, drawn on the model', () => {
+  const rad = (deg: number) => (deg * Math.PI) / 180
+  // The molecule as a viewer sees it: x to the right, y up, z toward the viewer. `place` gives the
+  // direction from the middle atom to the k-th atom of an element.
+  const view = (id: string, place: (el: El, k: number) => V3) => {
+    const m = polarity(solveLikeAStudent(id))!
+    const count = new Map<El, number>()
+    const seen = m.bonds.map((b) => {
+      const k = count.get(b.el) ?? 0
+      count.set(b.el, k + 1)
+      return { atomId: b.atomId, dir: place(b.el, k) }
+    })
+    return { m, seen }
+  }
+  // water with the hydrogens below oxygen, 104.5° apart: the net dipole points straight up
+  const water = view('H2O', (_el, k) => [(k === 0 ? -1 : 1) * Math.sin(rad(52.25)), -Math.cos(rad(52.25)), 0])
+  // formaldehyde with oxygen to the right of carbon: the net dipole points right
+  const ch2o = view('CH2O', (el, k) => (el === 'O' ? [1, 0, 0] : [-0.5, k === 0 ? 0.866 : -0.866, 0]))
+  const at = (deg: number) => ({ x: Math.cos(rad(deg)), y: Math.sin(rad(deg)) })
+
+  it('asks which way the net dipole points, and says how to draw it', () => {
+    expect(netArrowQuestion(P('H2O'))).toEqual({
+      ask: 'Which way does the net dipole of water point?',
+      draw: 'Draw the net dipole on the 3D model: press on oxygen and drag the way the bond arrows add up.',
+    })
+    expect(netArrowQuestion(P('NO2-')).ask).toBe('Which way does the net dipole of the nitrite ion point?')
+  })
+  it('takes an arrow within 35° of the net dipole as right', () => {
+    expect(NET_WITHIN).toBe(35)
+    expect(judgeNetArrow(water.m, water.seen, at(90))).toEqual({ kind: 'right' })
+    expect(judgeNetArrow(water.m, water.seen, at(60))).toEqual({ kind: 'right' })
+    expect(judgeNetArrow(water.m, water.seen, at(124))).toEqual({ kind: 'right' })
+    expect(judgeNetArrow(water.m, water.seen, at(126))).toMatchObject({ kind: 'wrong' })
+    // only the direction counts, not how long the arrow is
+    expect(judgeNetArrow(water.m, water.seen, { x: 0, y: 240 })).toEqual({ kind: 'right' })
+    expect(judgeNetArrow(ch2o.m, ch2o.seen, at(-20))).toEqual({ kind: 'right' })
+  })
+  it('names what a wrong arrow does', () => {
+    // from oxygen down toward the hydrogens: against the two O–H arrows
+    expect(judgeNetArrow(water.m, water.seen, at(270))).toEqual({ kind: 'wrong', idea: 'against' })
+    // along one O–H bond, toward that hydrogen or away from it
+    expect(judgeNetArrow(water.m, water.seen, at(-37.75))).toEqual({ kind: 'wrong', idea: 'one-bond' })
+    expect(judgeNetArrow(water.m, water.seen, at(142.25))).toEqual({ kind: 'wrong', idea: 'one-bond' })
+    // sideways
+    expect(judgeNetArrow(water.m, water.seen, at(10))).toEqual({ kind: 'wrong', idea: 'other' })
+    // formaldehyde has one bond arrow, so an arrow toward a hydrogen is not "one of several"
+    expect(judgeNetArrow(ch2o.m, ch2o.seen, at(120))).toEqual({ kind: 'wrong', idea: 'other' })
+    expect(judgeNetArrow(ch2o.m, ch2o.seen, at(180))).toEqual({ kind: 'wrong', idea: 'against' })
+  })
+  it('does not judge an arrow while the net dipole points at the viewer', () => {
+    // water seen from the hydrogens' side: the net dipole points straight away
+    const endOn = view('H2O', (_el, k) => [(k === 0 ? -1 : 1) * Math.sin(rad(52.25)), 0, Math.cos(rad(52.25))])
+    expect(judgeNetArrow(endOn.m, endOn.seen, at(90))).toEqual({ kind: 'side' })
+    // tipped 60° out of the screen, half of it is left to see: that is enough
+    const tipped = view('H2O', (_el, k) => [(k === 0 ? -1 : 1) * Math.sin(rad(52.25)), -Math.cos(rad(52.25)) * 0.5, -Math.cos(rad(52.25)) * 0.866])
+    expect(judgeNetArrow(tipped.m, tipped.seen, at(90))).toEqual({ kind: 'right' })
+    expect(NET_SIDE).toBe('The net dipole pointed toward you or away from you, so the model turned. Draw the arrow again.')
+  })
+  it('has nothing to judge without a net dipole or without an arrow', () => {
+    const co2 = view('CO2', (_el, k) => [k === 0 ? -1 : 1, 0, 0])
+    expect(judgeNetArrow(co2.m, co2.seen, at(0))).toBeNull()
+    expect(judgeNetArrow(water.m, water.seen, { x: 0, y: 0 })).toBeNull()
+  })
+  it('says where the net dipole of each polar guided molecule points', () => {
+    // textbook directions: toward the more electronegative end of the molecule
+    const where: Record<string, string> = {
+      NH3: 'from the middle of the 3 hydrogen atoms toward nitrogen',
+      H2O: 'from the middle of the 2 hydrogen atoms toward oxygen',
+      CH2O: 'from carbon toward oxygen',
+      HCN: 'from carbon toward nitrogen',
+      'NO2-': 'from nitrogen toward the middle of the 2 oxygen atoms',
+      SF4: 'from sulfur toward the middle of the 4 fluorine atoms',
+      ClF3: 'from chlorine toward the middle of the 3 fluorine atoms',
+      BrF5: 'from bromine toward the middle of the 5 fluorine atoms',
+      SO2: 'from sulfur toward the middle of the 2 oxygen atoms',
+    }
+    for (const p of PROBLEMS) {
+      const m = polarity(solveLikeAStudent(p.id))!
+      expect(netPoints(m), p.id).toBe(where[p.id] ?? null)
+      expect(m.polar, p.id).toBe(p.id in where)
+    }
+  })
+  it('what it says about the direction is true in the textbook arrangement, for every polar problem', () => {
+    for (const p of PROBLEMS) {
+      const m = polarity(solveLikeAStudent(p.id))!
+      if (!m.net) continue
+      // the bonded atoms sit in the first seats of the textbook arrangement, in the order of m.bonds
+      const seats = m.bonds.length === 1 ? ([[1, 0, 0]] as V3[]) : idealDirs(m.bonds.length, m.lonePairs)!
+      const arrows = m.bonds.map((b, i) => ({ b, seat: seats[i]! })).filter((x) => x.b.out !== 0)
+      const phrase = netPoints(m)!
+      const middle = /the middle of the (\d+) (\w+) atoms/.exec(phrase)
+      // the place the phrase names: the middle of the outer atoms, or the one outer atom with a bond arrow
+      const named: V3 = [0, 0, 0]
+      if (middle) {
+        expect(Number(middle[1]), p.id).toBe(arrows.length)
+        expect(arrows.every((x) => lower(x.b.el) === middle[2]), p.id).toBe(true)
+        for (const x of arrows) for (let k = 0; k < 3; k++) named[k]! += x.seat[k]! / arrows.length
+      } else {
+        expect(arrows, p.id).toHaveLength(1)
+        expect(phrase, p.id).toContain(lower(arrows[0]!.b.el))
+        for (let k = 0; k < 3; k++) named[k] = arrows[0]!.seat[k]!
+      }
+      const length = Math.hypot(named[0], named[1], named[2])
+      expect(length, p.id).toBeGreaterThan(0.05)
+      // "from the middle atom toward X" runs along +X, "from X toward the middle atom" along −X
+      const sign = phrase.startsWith(`from ${lower(m.center.el)} toward`) ? 1 : -1
+      const along = (sign * (m.net[0] * named[0] + m.net[1] * named[1] + m.net[2] * named[2])) / length
+      expect(along, `${p.id}: ${phrase}`).toBeGreaterThan(0.999)
+    }
+  })
+  it('a right arrow gets the direction in words', () => {
+    expect(netArrowRight(water.m)).toBe('The 2 O–H dipoles add up to a net dipole that points from the middle of the 2 hydrogen atoms toward oxygen.')
+    expect(netArrowRight(ch2o.m)).toBe('The C–O dipole is the only bond dipole, so the net dipole points the same way: from carbon toward oxygen.')
+    expect(netArrowRight(polarity(solveLikeAStudent('SF4'))!)).toBe('The 4 S–F dipoles add up to a net dipole that points from sulfur toward the middle of the 4 fluorine atoms.')
+    // carbon dioxide has no net dipole, so there is no direction to give
+    expect(netPoints(polarity(solveLikeAStudent('CO2'))!)).toBeNull()
+  })
+  it('a wrong arrow: what it does, then how the arrows of this molecule add up, then the direction', () => {
+    expect(netArrowCoach(water.m, 'against', 1)).toEqual({
+      lead: 'That arrow points against the bond arrows.',
+      why: 'The net dipole is the bond arrows added together, so it points toward the δ− side, the same as they do.',
+      ask: 'Draw the net dipole again.',
+    })
+    expect(netArrowCoach(water.m, 'one-bond', 1)).toEqual({
+      lead: 'That arrow follows 1 O–H bond.',
+      why: 'The net dipole is both bond arrows added together, so the other arrow moves it off that bond.',
+      ask: 'Draw the net dipole again.',
+    })
+    expect(netArrowCoach(polarity(solveLikeAStudent('NH3'))!, 'one-bond', 1).why).toBe('The net dipole is all 3 bond arrows added together, so the other arrows move it off that bond.')
+    expect(netArrowCoach(water.m, 'other', 1)).toEqual({
+      lead: 'The net dipole does not point that way.',
+      why: 'The net dipole is the bond arrows added together: move each arrow so that it starts where the one before ends, and the net dipole runs from the first start to the last tip.',
+      ask: 'Draw the net dipole again.',
+    })
+    // the second miss gives the line the net dipole runs along, and leaves the way along it to the student
+    expect(netArrowCoach(water.m, 'other', 2)).toEqual({
+      lead: 'The net dipole does not point that way.',
+      why: 'The 2 O–H dipoles are the same size, so the net dipole runs along the line through oxygen and the middle of the 2 hydrogen atoms.',
+      ask: 'Decide which way along that line the arrows point, then draw again.',
+    })
+    expect(netArrowCoach(ch2o.m, 'other', 2)).toEqual({
+      lead: 'The net dipole does not point that way.',
+      why: 'The C–O bond is the only polar bond, so the net dipole runs along the C–O bond.',
+      ask: 'Decide which way along that bond the arrow points, then draw again.',
+    })
+    expect(netArrowCoach(water.m, 'against', 3)).toEqual({ lead: netArrowRight(water.m), why: '', ask: 'Draw that arrow.' })
+    // formaldehyde has one bond arrow, so the card says "arrow" and names it
+    expect(netArrowCoach(ch2o.m, 'against', 1)).toEqual({
+      lead: 'That arrow points against the C–O arrow.',
+      why: 'The C–O arrow is the only bond arrow, so the net dipole points the same way as the C–O arrow.',
+      ask: 'Draw the net dipole again.',
+    })
+    for (const id of ['CH2O', 'HCN']) for (const tries of [1, 2]) expect(coachText(netArrowCoach(polarity(solveLikeAStudent(id))!, 'against', tries)), id).not.toMatch(/bond arrows|as they do/)
+  })
+  it('no first or second miss gives the direction away, for any polar problem', () => {
+    for (const p of PROBLEMS) {
+      const m = polarity(solveLikeAStudent(p.id))!
+      if (!m.net) continue
+      for (const idea of ['against', 'one-bond', 'other'] as const) {
+        for (const tries of [1, 2]) expect(coachText(netArrowCoach(m, idea, tries)), p.id).not.toContain(netPoints(m)!)
+        expect(netArrowCoach(m, idea, 3).lead, p.id).toContain(netPoints(m)!)
+      }
+    }
+  })
+  it('gives hints about adding the arrows once the net dipole is asked for', () => {
+    const s = solveLikeAStudent('H2O')
+    expect(hintsFor('polar', P('H2O'), s, false, true)).toEqual([
+      'Each bond arrow points at its δ− atom. Bond arrows that point in opposite directions cancel.',
+      'Move each bond arrow so that it starts where the one before ends. The net dipole runs from the first start to the last tip.',
+    ])
+    expect(hintsFor('polar', P('H2O'), s)[0]).toMatch(/^Find both atoms of the bond/)
+  })
+})
+
+describe('step 7: sigma and pi bonds, hybridization', () => {
+  const co2 = solveLikeAStudent('CO2')
+  const ch4 = solveLikeAStudent('CH4')
+  const hcn = solveLikeAStudent('HCN')
+
+  it('counts the bonds by kind and says what each is made of', () => {
+    expect(bondCounts(co2)).toEqual({ sigma: 2, pi: 2, single: 0, double: 2, triple: 0 })
+    expect(sigmaPiRight(bondCounts(co2))).toBe('2 sigma bonds and 2 pi bonds: each double bond is 1 sigma and 1 pi.')
+    expect(sigmaPiRight(bondCounts(ch4))).toBe('4 sigma bonds and no pi bonds: each single bond is 1 sigma.')
+    expect(sigmaPiRight(bondCounts(hcn))).toBe('2 sigma bonds and 2 pi bonds: the single bond is 1 sigma and the triple bond is 1 sigma and 2 pi.')
+    expect(sigmaPiQuestion(P('CO2'))).toMatchObject({ ask: 'How many sigma bonds and pi bonds does carbon dioxide have?', sigma: 'Sigma bonds', pi: 'Pi bonds' })
+  })
+  it('a wrong count of sigma and pi bonds names the usual mix-ups', () => {
+    const c = bondCounts(co2)
+    // every line counted as a sigma bond
+    expect(sigmaPiCoach(P('CO2'), c, 4, 0, 1)).toEqual({
+      lead: '4 counts every line as a sigma bond.',
+      why: 'Only the first bond between two atoms is a sigma bond. A second or third bond between the same two atoms is a pi bond.',
+      ask: 'Count 1 sigma bond for each pair of bonded atoms.',
+    })
+    // the pi bonds left out
+    expect(sigmaPiCoach(P('CO2'), c, 2, 0, 1)).toEqual({ lead: 'A double or triple bond has pi bonds in it.', why: 'Carbon dioxide has 2 double bonds.', ask: 'Count 1 pi bond for a double bond and 2 for a triple bond.' })
+    // one pi bond counted for a triple bond
+    expect(sigmaPiCoach(P('HCN'), bondCounts(hcn), 2, 1, 1)).toMatchObject({ lead: '1 counts 1 pi bond for each double or triple bond.', why: 'A triple bond has 2 pi bonds: its first bond is the sigma bond and the other 2 are pi bonds.' })
+    // pi bonds where every bond is single
+    expect(sigmaPiCoach(P('CH4'), bondCounts(ch4), 4, 1, 1)).toMatchObject({ lead: 'Methane has no pi bonds.', ask: 'Set the pi bonds to 0.' })
+    expect(sigmaPiCoach(P('CH4'), bondCounts(ch4), 5, 0, 1)).toEqual({ lead: "Methane doesn't have 5 sigma bonds.", why: 'Every pair of bonded atoms has exactly 1 sigma bond between them.', ask: 'Count the atoms bonded to carbon.' })
+    // the second miss lists the bonds; the third gives the counts
+    expect(sigmaPiCoach(P('CO2'), c, 4, 0, 2)).toEqual({ lead: '4 counts every line as a sigma bond.', why: 'Carbon dioxide has 2 double bonds, and each double bond is 1 sigma and 1 pi.', ask: 'Add up the sigma bonds, then the pi bonds.' })
+    expect(sigmaPiCoach(P('CO2'), c, 4, 0, 3)).toEqual({ lead: 'Carbon dioxide has 2 sigma bonds and 2 pi bonds: each double bond is 1 sigma and 1 pi.', why: '', ask: '' })
+  })
+  it('writes hybridizations with raised numbers and asks about the middle atom', () => {
+    expect(HYBRIDS.map(hybridLabel)).toEqual(['sp', 'sp²', 'sp³', 'sp³d', 'sp³d²'])
+    expect(hybridQuestion('C')).toBe('What is the hybridization of carbon?')
+    expect(hybridRight('C', 'sp3', groupFacts(ch4)!)).toBe('sp³: carbon has 4 electron groups.')
+  })
+  it('a wrong hybridization says how many groups it goes with, and what was miscounted', () => {
+    const water = groupFacts(solveLikeAStudent('H2O'))!
+    // lone pairs left out
+    expect(hybridCoach('O', water, 'sp', 1)).toEqual({
+      lead: 'sp goes with 2 electron groups.',
+      why: 'Oxygen has 2 bonded atoms and 2 lone pairs, and each lone pair is a group too.',
+      ask: 'Count the bonded atoms and the lone pairs, then pick again.',
+    })
+    // each shared pair counted
+    expect(hybridCoach('C', groupFacts(co2)!, 'sp3', 1)).toEqual({ lead: 'sp³ goes with 4 electron groups.', why: 'A double or triple bond is 1 group: the pi bonds in it are not hybridized.', ask: 'Count each bond on carbon once, then pick again.' })
+    expect(hybridCoach('C', groupFacts(ch4)!, 'sp2', 1)).toEqual({ lead: 'sp² goes with 3 electron groups.', why: 'Carbon has a different number of groups.', ask: 'Count the electron groups around carbon, then pick again.' })
+    expect(hybridCoach('C', groupFacts(ch4)!, 'sp2', 2)).toMatchObject({ why: 'Carbon has 4 bonded atoms and no lone pairs: 4 groups.' })
+    expect(hybridCoach('C', groupFacts(ch4)!, 'sp2', 3)).toEqual({ lead: 'sp³: carbon has 4 electron groups.', why: '', ask: '' })
+  })
+  it('what a wrong hybridization is told is true, for every problem and every wrong pick', () => {
+    for (const p of PROBLEMS) {
+      const f = groupFacts(solveLikeAStudent(p.id))!
+      const right = hybridFor(f.groups)!
+      for (const h of HYBRIDS) {
+        if (h === right) continue
+        const c = hybridCoach(p.center, f, h, 1)
+        expect(c.lead, p.id).toBe(`${hybridLabel(h)} goes with ${domainsOf(h)} electron groups.`)
+        if (/each lone pair is a group too/.test(c.why)) expect([domainsOf(h), f.lonePairs > 0], p.id).toEqual([f.bonded, true])
+        if (/not hybridized/.test(c.why)) expect(domainsOf(h), p.id).toBe(f.bondPairs + f.lonePairs)
+        // no first miss gives the right hybridization away
+        expect(coachText(c), p.id).not.toContain(`${hybridLabel(right)}:`)
+      }
+      expect(hybridCoach(p.center, f, HYBRIDS.find((h) => h !== right)!, 3).lead, p.id).toBe(hybridRight(p.center, right, f))
+    }
+  })
+  it('sums up a finished molecule', () => {
+    expect(profile(P('CO2'), co2)).toEqual([
+      { label: 'Polarity', value: 'Nonpolar' },
+      { label: 'Sigma and pi bonds', value: '2 sigma, 2 pi' },
+      { label: 'Hybridization of carbon', value: 'sp' },
+    ])
+    expect(profile(P('H2O'), solveLikeAStudent('H2O'))).toEqual([
+      { label: 'Polarity', value: 'Polar' },
+      { label: 'Sigma and pi bonds', value: '2 sigma, 0 pi' },
+      { label: 'Hybridization of oxygen', value: 'sp³' },
+    ])
+    expect(profile(P('SO4 2-'), solveLikeAStudent('SO4 2-'))[0]).toEqual({ label: 'Polarity', value: 'The bond dipoles cancel' })
+    // free build has no problem to go by: the charge on the board says whether it is an ion
+    expect(profile(null, solveLikeAStudent('SO4 2-'))[0]).toEqual({ label: 'Polarity', value: 'The bond dipoles cancel' })
+    expect(profile(null, solveLikeAStudent('H2O'))[0]).toEqual({ label: 'Polarity', value: 'Polar' })
+    // one bond between two atoms: no hybridization row
+    expect(profile(null, star(['H', 'F'], [1]).s)).toEqual([{ label: 'Polarity', value: 'Polar' }, { label: 'Sigma and pi bonds', value: '1 sigma, 0 pi' }])
+    expect(finishedLine(P('H2O'))).toBe('That is everything for water: its Lewis structure, shape, polarity and bonding.')
+  })
+})
+
 describe('refusals and hints', () => {
   it('says which shell is full', () => {
     const b = star(['O', 'H'], [1])
@@ -801,7 +1239,35 @@ describe('every sentence the guide can show', () => {
       for (const name of ALL_SHAPES) out.push(shapeFeedback(p.center, info, name).text, ...parts(shapeFeedback(p.center, info, name).coach))
       const r = shapeReadout(p, p.center, info)
       out.push(r.groups, r.arrangement, r.shape, r.angle, r.why ?? '')
+      // steps 6 and 7: the questions, every right line, and every explanation of every wrong answer
+      const m = polarity(done)!
+      for (const k of m.kinds) {
+        const q = bondQuestion(k.center, k.terminal)
+        out.push(q.ask, q.sub, q.draw, bondRight(k.center, k.terminal, k.polarity), drawRefusal(k.center, k.terminal))
+        for (const answer of q.answers) if (!bondAnswerRight(k.polarity, answer)) for (let tries = 1; tries <= 3; tries++) out.push(...parts(bondCoach(k.center, k.terminal, k.polarity, answer, tries)))
+      }
+      // the drawn net dipole of a polar molecule
+      if (m.net) {
+        const nq = netArrowQuestion(p)
+        out.push(nq.ask, nq.draw, netArrowRight(m), ...hintsFor('polar', p, done, false, true))
+        for (const idea of ['against', 'one-bond', 'other'] as const) for (let tries = 1; tries <= 3; tries++) out.push(...parts(netArrowCoach(m, idea, tries)))
+      }
+      for (const [el] of p.formula) out.push(arrowLabel(el, false), arrowLabel(el, true), netArrowLabel(el))
+      out.push(netQuestion(p).ask, netQuestion(p).sub, polarityNote(m, info))
+      for (const said of [true, false]) out.push(netFeedback(p, m, info, said).text, ...parts(netFeedback(p, m, info, said).coach))
+      const counts = bondCounts(done)
+      const sq = sigmaPiQuestion(p)
+      out.push(sq.ask, sq.sub, sq.sigma, sq.pi, sq.check, sigmaPiRight(counts), hybridQuestion(p.center), finishedLine(p))
+      for (const [sigma, pi] of [[counts.sigma + counts.pi, 0], [counts.sigma, counts.pi + 1], [counts.sigma + 1, counts.pi], [counts.sigma, 0], [counts.sigma, counts.double + counts.triple]] as const) {
+        if (sigma === counts.sigma && pi === counts.pi) continue
+        for (let tries = 1; tries <= 3; tries++) out.push(...parts(sigmaPiCoach(p, counts, sigma, pi, tries)))
+      }
+      for (const h of HYBRIDS) {
+        if (h === hybridFor(f.groups)) out.push(hybridRight(p.center, h, f))
+        else for (let tries = 1; tries <= 3; tries++) out.push(...parts(hybridCoach(p.center, f, h, tries)))
+      }
     }
+    out.push(DIPOLE_WORDS.table, DIPOLE_WORDS.bondKey, DIPOLE_WORDS.netKey, NET_SIDE)
     return [...new Set(out.filter(Boolean))]
   }
   const lines = allCopy()

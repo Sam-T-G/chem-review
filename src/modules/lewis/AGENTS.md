@@ -1,6 +1,6 @@
 # src/modules/lewis/: the Lewis structures and shapes module (team lewis)
 
-A student works one molecule in five steps on a 3D board, or builds freely. Web tech (Three.js, HTML, CSS) inside
+A student works one molecule in seven steps on a 3D board, or builds freely. Web tech (Three.js, HTML, CSS) inside
 one DOM component.
 
 ## Files
@@ -24,13 +24,13 @@ one DOM component.
 ## Rules
 - L1 Every sentence a student reads lives in `guide.ts` and follows the voice rules (R6 in the root `AGENTS.md`). `tests/guide.test.ts` scans every line.
 - L2 A hint must be a move the board accepts. `nextMove()` tries the move before suggesting it. Keep that.
-- L3 When a student's answer is wrong, the card names the mistake behind it and says how the answer is worked out before giving any number. Never give the answer before the last try (the shape name is the one exception). Every claim a card makes has a test against every problem it can appear in. [D-0012, D-0017, D-0018]
+- L3 When a student's answer is wrong, the card names the mistake behind it and says how the answer is worked out before giving any number. Never give the answer before the last try (the two exceptions are the shape name and step 6's polar-or-nonpolar question, where the first pick is final). Every claim a card makes has a test against every problem it can appear in. [D-0012, D-0017, D-0018, D-0021]
 - L4 Chemistry lives in `src/chem/`. `store.ts` only decides when a move is allowed and what to say when it is refused.
 - L5 Colors, radii and font names come from `src/theme/tokens.ts` only. [D-0015]
 - L6 Follow "Rules for motion" in `docs/design/look-and-motion.md`: reduced motion, `--now`, `ONE_SHOT`, `data-k`, and one way in and out for text (`PIECES`). [D-0010, D-0019]
 - L7 Keep `data-key`, `data-act`, `data-tray` and the `.mb-*` class names. The browser checks find things by them. [D-0013]
 - L8 Angle labels come from the shape table or the two measured angles, never from the 3D model. [D-0008]
-- L9 The step split, the problem list, the drag gesture and the card's three parts are provisional. Work inside them can go on. Ask Sam before changing them. [D-0007, D-0017]
+- L9 The step split, the problem list, the drag gesture and the card's three parts are provisional. Work inside them can go on. Ask Sam before changing them. Steps 6 and 7 are provisional too, and so is how the dipoles are drawn. [D-0007, D-0017, D-0021, D-0023]
 
 ## Check your work
 - `pnpm exec vitest run guide store` while you work.

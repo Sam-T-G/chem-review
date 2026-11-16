@@ -11,6 +11,8 @@ from React, the DOM, Three.js, modules or screens.
 - `assess.ts`: what is still wrong with a drawing, in the order a student should fix it.
 - `vsepr.ts`: counts the electron groups around the center atom and names the shape.
 - `repulsion.ts`: the 3D model, with electron groups pushing apart on a sphere.
+- `polarity.ts`: bond polarity from the course's electronegativity table, and whether the bond dipoles cancel in the shape.
+- `orbitals.ts`: counts sigma and pi bonds, and gives the hybridization for a number of electron groups.
 - `layout2d.ts`: where things sit in the flat drawing. Geometry only.
 - `problems.ts`: the guided problems in teaching order. Learning design reviews changes to it.
 
@@ -29,7 +31,7 @@ from React, the DOM, Three.js, modules or screens.
 - C8 Modules depend on what these files export. Renaming or removing an export means changing every caller in the same change and naming that module's team as reviewer.
 
 ## Check your work
-- `pnpm exec vitest run assess layout problems solve structure vsepr`: the six engine test files, a few seconds.
+- `pnpm exec vitest run assess layout polarity problems solve structure vsepr`: the seven engine test files, a few seconds.
 - `pnpm verify` before you call it done.
 
 ## Update when you change this

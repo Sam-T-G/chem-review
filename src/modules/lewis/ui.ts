@@ -3,35 +3,53 @@
 import { assess } from '../../chem/assess'
 import { ELEMENTS, shellsOf, type El } from '../../chem/elements'
 import { GROUPS, PROBLEMS, chargeLabel, chargeWord, formulaHtml, formulaText, speciesOf, totalElectrons, type Problem } from '../../chem/problems'
+import { courseEN } from '../../chem/polarity'
 import { atomById, electronsOnBoard, sharedElectrons, shellCount, type Structure } from '../../chem/structure'
 import { shapeOf, type ShapeInfo, type ShapeName } from '../../chem/vsepr'
 import {
+  DIPOLE_WORDS,
+  HYBRIDS,
   STEPS,
   angleMarks,
+  arrowLabel,
   bondInstruction,
+  bondQuestion,
   bondStatus,
   cap,
   checkCoach,
   checkRows,
   elementsOf,
+  finishedLine,
   finishedNotes,
   formalChargeSum,
+  groupFacts,
+  hybridLabel,
+  hybridQuestion,
   inventory,
   lower,
   middleChoices,
   middleNeeded,
   mixedOuter,
+  netArrowLabel,
+  netArrowQuestion,
+  netQuestion,
   nextMove,
   placedCount,
+  polarity,
+  polarityNote,
+  profile,
   shapeChoices,
   shapeInfoFor,
   shapeReadout,
   shellsWords,
+  sigmaPiQuestion,
   titleOf,
   totalSum,
   totalTally,
+  type BondAnswer,
   type CheckRow,
   type Coach,
+  type Hybrid,
   type TallyReveal,
   type StepId,
 } from './guide'
@@ -41,7 +59,8 @@ import { Scene, type SceneInput } from './scene'
 import * as store from './store'
 import type { State } from './store'
 
-const esc = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+// A bond's name ("S–F") must not break across two lines at its dash, so a word joiner follows the dash.
+const esc = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/–(?=[A-Z])/g, '–\u2060')
 
 const ICON = {
   check: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 10.5l3.6 3.6 7.4-8"/></svg>',
@@ -176,7 +195,7 @@ function rail(s: State): string {
       <span class="mb-rail-dot">${done && !current ? ICON.check : i + 1}</span><span class="mb-rail-label">${step.label}</span>
     </button></li>`
   }).join('')
-  return `<ol class="mb-rail" aria-label="Steps" style="--p:${Math.min(open, STEPS.length - 1) / (STEPS.length - 1)}">${items}</ol>`
+  return `<ol class="mb-rail" aria-label="Steps" style="--n:${STEPS.length};--p:${Math.min(open, STEPS.length - 1) / (STEPS.length - 1)}">${items}</ol>`
 }
 
 /** Main-group columns of the periodic table, periods 1 to 5, with this problem's atoms marked. */
@@ -296,16 +315,92 @@ function stepCheck(s: State, p: Problem): string {
     ${notes.map((n) => `<p class="mb-note">${esc(n)}</p>`).join('')}`
 }
 
-function readout(p: Problem | null, center: El, info: ShapeInfo, mixed: boolean): string {
+/** The table of what is known about the molecule. `more` adds rows under the shape's three (polarity, bonds, hybridization). */
+function readout(p: Problem | null, center: El, info: ShapeInfo, mixed: boolean, more: { label: string; value: string }[] = [], tryIt = true): string {
   const r = shapeReadout(p, center, info, mixed)
   return `<dl class="mb-readout">
       <div><dt>Shape</dt><dd class="is-big">${esc(cap(r.shape))}</dd></div>
       <div><dt>Electron groups</dt><dd>${esc(r.groups)}</dd></div>
       <div><dt>Bond angle</dt><dd>${esc(r.angle)}</dd></div>
+      ${more.map((row) => `<div><dt>${esc(row.label)}</dt><dd>${esc(row.value)}</dd></div>`).join('')}
     </dl>
     ${r.why ? `<p class="mb-note">${esc(r.why)}</p>` : ''}
-    <p class="mb-body mb-try">Drag an atom or a lone pair, then let go. The other groups move out of the way.</p>`
+    ${tryIt ? '<p class="mb-body mb-try">Drag an atom or a lone pair, then let go. The other groups move out of the way.</p>' : ''}`
 }
+
+/** The atoms of the bonds in question with the course table's electronegativity under each. */
+function enStrip(els: El[]): string {
+  return `<figure class="mb-en" data-k="en" data-kv=""><figcaption>${esc(DIPOLE_WORDS.table)}</figcaption><ul>${els
+    .map((el) => `<li>${ball(el, 'is-small')}<span>${esc(cap(lower(el)))}</span><b>${courseEN(el)}</b></li>`)
+    .join('')}</ul></figure>`
+}
+/** A small dipole arrow, beside the line that says how to draw one. */
+const DRAW_ICON = '<svg class="mb-draw-icon" viewBox="0 0 34 16" aria-hidden="true"><path d="M3 8h24M8 3.5v9"/><path class="is-head" d="M31.5 8l-8-4.6v9.2z"/></svg>'
+/** What the arrows on the board are. */
+function dipoleKey(net: boolean): string {
+  return `<ul class="mb-key" data-k="dipole-key" data-kv="${net}"><li><i class="is-bond"></i>${esc(DIPOLE_WORDS.bondKey)}</li>${net ? `<li><i class="is-net"></i>${esc(DIPOLE_WORDS.netKey)}</li>` : ''}</ul>`
+}
+
+function stepPolar(s: State, p: Problem): string {
+  const m = polarity(s.s)
+  if (!m) return `<p class="mb-body">Finish the Lewis structure first.</p>`
+  const asked = store.bondAsked(s)
+  let html = enStrip([...new Set([m.center.el, ...m.kinds.map((k) => k.terminal)])])
+  // each kind of bond folds down to its answer once it is right, so the answers stay in view
+  for (const k of m.kinds) {
+    const a = s.polar.bonds[k.terminal]
+    if (a?.right) html += fb(a.text, 'good')
+    else if (k.terminal === asked) {
+      // a polar bond is answered on the board, by drawing its arrow; a nonpolar bond with the button
+      const q = bondQuestion(k.center, k.terminal)
+      const none = `<button class="mb-choice" data-act="bond-polar" data-el="${k.terminal}" data-answer="nonpolar" data-key="pol-${k.terminal}-nonpolar" data-state="${a?.pick === 'nonpolar' ? 'wrong' : 'idle'}">${esc(q.none)}</button>`
+      html += `<p class="mb-q">${esc(q.ask)}</p><p class="mb-body mb-sub">${esc(q.sub)}</p><p class="mb-body mb-draw">${DRAW_ICON}<span>${esc(q.draw)}</span></p><div class="mb-choices">${none}</div>${coach(a?.coach)}`
+    }
+  }
+  if (asked !== null) return html
+  const net = s.polar.net
+  const shown = m.bonds.some((b) => b.out !== 0)
+  if (net.pick === null) {
+    const q = netQuestion(p)
+    const chips = q.choices.map((c) => `<button class="mb-choice" data-act="net-polar" data-polar="${c.polar}" data-key="net-${c.polar ? 'polar' : 'nonpolar'}" data-state="idle">${esc(c.label)}</button>`).join('')
+    return `${html}${shown ? dipoleKey(false) : ''}<p class="mb-q">${esc(q.ask)}</p><p class="mb-body mb-sub">${esc(q.sub)}</p><div class="mb-choices">${chips}</div>`
+  }
+  html += net.right ? fb(net.text, 'good') : coach(net.coach)
+  if (!m.polar) return `${html}${shown ? dipoleKey(false) : ''}`
+  // a polar molecule: the student draws the net dipole on the 3D model
+  const arrow = s.polar.arrow
+  if (arrow.right) return `${html}${fb(arrow.text, 'good')}${dipoleKey(true)}`
+  const q = netArrowQuestion(p)
+  return `${html}${dipoleKey(false)}<p class="mb-q">${esc(q.ask)}</p><p class="mb-body mb-draw is-net">${DRAW_ICON}<span>${esc(q.draw)}</span></p>${coach(arrow.coach)}`
+}
+
+function stepOrbitals(s: State, p: Problem): string {
+  const o = s.orbitals
+  const info = shapeInfoFor(s.s)
+  const f = groupFacts(s.s)
+  if (!info || !f) return `<p class="mb-body">Finish the Lewis structure first.</p>`
+  const q = sigmaPiQuestion(p)
+  if (!o.counts.right) {
+    const row = (kind: 'sigma' | 'pi', label: string, n: number) => `<div class="mb-row" data-k="row-${kind}" data-kv="${o.counts.tries}" data-state="idle">
+        <span class="mb-row-name">${esc(label)}</span>
+        <div class="mb-stepper" role="group" aria-label="${esc(label)}">
+          <button data-act="bond-count" data-kind="${kind}" data-d="-1" data-key="dec-${kind}" aria-label="One fewer" ${n <= 0 ? 'disabled' : ''}>−</button>
+          <output aria-live="polite" data-k="count-${kind}">${n}</output>
+          <button data-act="bond-count" data-kind="${kind}" data-d="1" data-key="inc-${kind}" aria-label="One more" ${n >= 9 ? 'disabled' : ''}>+</button>
+        </div>
+      </div>`
+    return `<p class="mb-q">${esc(q.ask)}</p><p class="mb-body mb-sub">${esc(q.sub)}</p>
+      <div class="mb-rows" data-k="rows" data-kv="">${row('sigma', q.sigma, o.sigma)}${row('pi', q.pi, o.pi)}</div>
+      <button class="mb-btn mb-btn-soft" data-act="bonds-check" data-key="bonds-check">${esc(q.check)}</button>
+      ${coach(o.counts.coach)}`
+  }
+  if (!o.hybrid.right) {
+    const chips = HYBRIDS.map((h) => `<button class="mb-choice is-num" data-act="hybrid" data-h="${h}" data-key="hyb-${h}" data-state="${o.hybrid.pick === h ? 'wrong' : 'idle'}">${esc(hybridLabel(h))}</button>`).join('')
+    return `${fb(o.counts.text, 'good')}<p class="mb-q">${esc(hybridQuestion(p.center))}</p><div class="mb-choices">${chips}</div>${coach(o.hybrid.coach)}`
+  }
+  return `${fb(o.counts.text, 'good')}${fb(o.hybrid.text, 'good')}${readout(p, p.center, info, mixedOuter(s.s), profile(p, s.s), false)}${fb(finishedLine(p), 'good')}`
+}
+
 
 function stepShape(s: State, p: Problem): string {
   const info = shapeInfoFor(s.s)
@@ -343,7 +438,7 @@ function freePanel(s: State): string {
   const note = a.complete && center && held > 8 ? `<p class="mb-note">${cap(lower(center.el))} has ${held} electrons around it. Atoms from period 3 onward can hold more than 8.</p>` : ''
   const shapeBlock =
     s.view === 'shape' && info && center
-      ? readout(null, center.el, info, mixedOuter(s.s))
+      ? `${readout(null, center.el, info, mixedOuter(s.s), profile(null, s.s))}${polarity(s.s) && !info.diatomic ? `<p class="mb-note">${esc(polarityNote(polarity(s.s)!, info))}</p>` : ''}`
       : `<button class="mb-btn mb-btn-soft" data-act="view" data-view="shape" data-key="see-shape" ${info ? '' : 'disabled'}>See the 3D shape</button>
          ${
            a.complete && !info && s.s.atoms.length > 1
@@ -364,9 +459,10 @@ function panel(s: State): string {
   }
   const p = store.problemOf(s)
   const step = STEPS.find((x) => x.id === s.step)!
-  const body = s.step === 'count' ? stepCount(s, p) : s.step === 'place' ? stepPlace(s, p) : s.step === 'bond' ? stepBond(s, p) : s.step === 'check' ? stepCheck(s, p) : stepShape(s, p)
+  const screens: Record<StepId, (s: State, p: Problem) => string> = { count: stepCount, place: stepPlace, bond: stepBond, check: stepCheck, shape: stepShape, polar: stepPolar, orbitals: stepOrbitals }
+  const body = screens[s.step](s, p)
   const done = store.stepDone(s.step, s)
-  const last = s.step === 'shape'
+  const last = s.step === STEPS[STEPS.length - 1]!.id
   const nextLabel = last ? (s.problem < PROBLEMS.length - 1 ? `<span>Next molecule: ${formulaHtml(PROBLEMS[s.problem + 1]!)}</span>` : 'Open free build') : step.next
   const left = store.hintsLeft(s)
   return `${header(s)}${rail(s)}
@@ -379,6 +475,34 @@ function panel(s: State): string {
       <button class="mb-btn mb-btn-quiet" data-act="hint" data-key="hint" ${left > 0 && !done ? '' : 'disabled'}>${ICON.hint}<span>Hint</span></button>
       <button class="mb-btn mb-btn-main" data-act="next" data-key="next" ${done ? '' : 'disabled'}>${nextLabel}</button>
     </footer>`
+}
+
+/** True in the two guided steps that are about dipoles and bonding, where the board shows arrows in place of angle marks. */
+const showsDipoles = (s: State) => s.mode === 'guided' && (s.step === 'polar' || s.step === 'orbitals')
+/** The bond dipoles the board draws in those steps: each bond's arrow appears once that bond is
+ *  answered right, and the net dipole once the student has drawn it the right way. Free build gives
+ *  polarity as a row of its table and draws no arrows. */
+function dipolesFor(s: State, st: Structure): SceneInput['dipoles'] {
+  const m = showsDipoles(s) ? polarity(st) : null
+  if (!m) return null
+  const bonds = m.bonds.filter((b) => b.out !== 0 && s.polar.bonds[b.el]?.right).map((b) => ({ atomId: b.atomId, out: b.out as -1 | 1, size: b.size }))
+  return { center: m.center.id, bonds, net: m.polar && s.polar.arrow.right, plus: DIPOLE_WORDS.plus, minus: DIPOLE_WORDS.minus, netLabel: DIPOLE_WORDS.net }
+}
+/** What a student can draw on the board now, the last arrow that was drawn wrong, and what a
+ *  screen reader says for each atom an arrow can start or end on. */
+function drawFor(s: State, st: Structure): SceneInput['draw'] {
+  const kind = store.drawing(s)
+  const m = kind ? polarity(st) : null
+  if (!kind || !m) return null
+  const labels: Record<string, string> = {}
+  if (kind === 'net') {
+    labels[m.center.id] = netArrowLabel(m.center.el)
+    return { kind, center: m.center.id, aim: s.polar.aim, wrong: s.polar.arrow.drawn ? { dir: s.polar.arrow.drawn } : null, labels }
+  }
+  const started = s.selection?.kind === 'atom' ? s.selection.id : null
+  for (const a of st.atoms) labels[a.id] = arrowLabel(a.el, started !== null && started !== a.id)
+  const asked = store.bondAsked(s)
+  return { kind, center: m.center.id, aim: s.polar.aim, wrong: (asked && s.polar.bonds[asked]?.drawn) || null, labels }
 }
 
 /** The groups the board should ring after a wrong group count, while that question is still open. */
@@ -457,7 +581,7 @@ function dock(s: State): string {
     </div>`
   // Guided: the switch appears once the shape has been revealed. Free build: only while the 3D
   // shape is showing (the panel's "See the 3D shape" button opens it), so the tray keeps its room.
-  const canShape = s.mode === 'guided' ? s.step === 'shape' && s.shape.pick !== null : s.view === 'shape'
+  const canShape = s.mode === 'guided' ? store.onModel(s) : s.view === 'shape'
   const views = canShape
     ? `<div class="mb-views" role="tablist" aria-label="View">
         <button role="tab" aria-selected="${s.view === 'flat'}" data-act="view" data-view="flat" data-key="view-flat">Flat drawing</button>
@@ -619,6 +743,8 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
       tapBond: (id) => store.tapBond(id),
       tapEmpty: () => store.clearSelection(),
       bond: (a, b) => store.bond(a, b),
+      drawBond: (from, to) => store.drawBondArrow(from, to),
+      drawNet: (drawn, seen, world) => store.drawNetArrow(drawn, seen, world),
       place: (el, at) => store.place(el, at),
       remove: (id) => store.remove(id),
       feel: (kind) => opts.onFeel?.(kind),
@@ -738,11 +864,27 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
       .slice(0, 8)
     if (gone.length) deflate(el, gone, view)
     // the new pieces wait a beat while the old ones go
-    el.style.setProperty('--wait', gone.length ? '0.17s' : '0s')
+    el.style.setProperty('--wait', gone.length ? '0.14s' : '0s')
     outermost(news.filter((c) => all || !before.has(c.key))).forEach(({ node }, i) => {
       node.classList.add('is-new')
       node.style.setProperty('--i', String(Math.min(i, 7)))
+      settle(node)
     })
+  }
+  /** A piece that is still growing into place has buttons that are moving, and a tap aimed at
+   *  one of them can land on its neighbor. So a piece takes no taps until its entrance has ended. */
+  const settle = (node: HTMLElement) => {
+    if (calm) return
+    node.style.pointerEvents = 'none'
+    const done = (e?: Event) => {
+      if (e && e.target !== node) return // an animation of something inside it
+      node.style.pointerEvents = ''
+      node.removeEventListener('animationend', done)
+      window.clearTimeout(timer)
+    }
+    node.addEventListener('animationend', done)
+    // in case the entrance never runs (the piece is hidden, or the styles have not loaded)
+    const timer = window.setTimeout(done, 1200)
   }
   /** Where each thing that can slide is: a piece by what it shows, a counter row by its name. */
   const places = (el: HTMLElement, pieces: string) => {
@@ -783,6 +925,8 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
     const sc = el.querySelector('.mb-scroll')
     if (sc) sc.scrollTop = scroll
     if (pieces) bubbles(el, pieces, olds, view, swap)
+    // the molecule picker inflates as a whole, so it waits the same way
+    if (name === 'panel') for (const list of el.querySelectorAll<HTMLElement>('.mb-picker:not(.is-same)')) settle(list)
     if (pieces && was) slide(el, pieces, was, el.style.getPropertyValue('--wait') === '0s' ? 0 : 70)
     if (active) {
       const again = el.querySelector<HTMLElement>(`[data-key="${active}"]`)
@@ -857,7 +1001,7 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
       if (regions.panel.querySelector('.mb-readout')) scroller?.scrollTo({ top: 0, behavior: 'smooth' }) // the shape result reads from its first line
       else if (fresh) fresh.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) // a new explanation is read from its first line
       else {
-        const parts = regions.panel.querySelectorAll('.mb-step > :is(.mb-fb, .mb-choices, .mb-total, .mb-hints, .mb-note, .mb-btn)')
+        const parts = regions.panel.querySelectorAll('.mb-step > :is(.mb-fb, .mb-choices, .mb-total, .mb-hints, .mb-note, .mb-btn, .mb-draw)')
         parts[parts.length - 1]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
       }
     }
@@ -880,9 +1024,19 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
       shells: new Map((report?.atoms ?? []).map((a) => [a.id, { count: a.count, target: a.target, status: a.status }])),
       refused: s.refused,
       point: ringGroups(s),
-      angles: shown ? angleMarks(s.mode === 'guided' ? store.problemOf(s) : null, shown, mixedOuter(st)) : [],
+      dipoles: dipolesFor(s, st),
+      draw: drawFor(s, st),
+      // the net dipole runs along the same line as an angle's label, so the two are never drawn together
+      angles: shown && !showsDipoles(s) ? angleMarks(s.mode === 'guided' ? store.problemOf(s) : null, shown, mixedOuter(st)) : [],
     }
+    const onAtom = document.activeElement instanceof HTMLButtonElement && document.activeElement.classList.contains('mb-hit') ? document.activeElement : null
     scene.sync(input)
+    if (onAtom?.disabled) {
+      // The atom that had the keyboard's focus is switched off (the last arrow was just drawn). Move
+      // to the step's main button when it is ready, otherwise to the step itself, as the panel does.
+      const main = regions.panel.querySelector<HTMLElement>('.mb-btn-main:not([disabled])')
+      ;(main ?? regions.panel.querySelector<HTMLElement>('.mb-step'))?.focus({ preventScroll: true })
+    }
 
     if (s.toast && s.toast.n !== toastSeen) {
       toastSeen = s.toast.n
@@ -945,6 +1099,23 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
         break
       case 'groups':
         store.answerGroups(Number(t.dataset.n))
+        break
+      case 'bond-polar':
+        store.answerBond(t.dataset.el as El, t.dataset.answer as BondAnswer)
+        break
+      case 'net-polar':
+        store.answerNet(t.dataset.polar === 'true')
+        break
+      case 'bond-count': {
+        const kind = t.dataset.kind as 'sigma' | 'pi'
+        store.setBondCount(kind, s.orbitals[kind] + Number(t.dataset.d))
+        break
+      }
+      case 'bonds-check':
+        store.checkBondCounts()
+        break
+      case 'hybrid':
+        store.pickHybrid(t.dataset.h as Hybrid)
         break
       case 'shape':
         store.pickShape(t.dataset.name as ShapeName)

@@ -18,7 +18,7 @@ They run against the production build, so build and serve it first.
 pnpm web:build && pnpm web:serve              # serves dist/ on http://localhost:5210, in another terminal
 node scripts/check-browser.mjs desktop        # every guided problem, start to finish, real mouse input
 node scripts/check-browser.mjs phone          # the same at 390 x 844, real touch input
-node scripts/check-browser.mjs desktop extras # wrong answers, hints, refused moves, undo, keyboard, free build
+node scripts/check-browser.mjs desktop extras # wrong answers and wrong arrows, hints, refused moves, undo, keyboard, free build
 node scripts/check-browser.mjs phone extras
 node scripts/check-browser.mjs desktop shell  # home screen, opening the module, the way back, saved progress
 node scripts/check-browser.mjs phone shell

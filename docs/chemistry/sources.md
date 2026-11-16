@@ -9,6 +9,8 @@ Every rule and number the app shows, with its source. No citations go on screen:
 - **Lewis structure rules** follow OpenStax Chemistry 2e, sections 7.3 and 7.4: count valence electrons (add for anions, subtract for cations), least electronegative atom in the middle, hydrogen never in the middle, octets where possible, formal charge to pick between drawings, and the three kinds of exception (odd-electron, electron-deficient, hypervalent).
 - **Shapes** follow section 7.6: the five electron-group arrangements, their ideal angles, the names for arrangements with lone pairs, lone pairs in equatorial seats of a trigonal bipyramid, and two lone pairs on opposite sides of an octahedron. The group count follows the same section: a single, double or triple bond is one group, and a shape is named for where the atoms are.
 - **Measured angles** are shown for two molecules only, both printed in section 7.6: water 104.5° and ammonia 106.8°.
+- **Bond polarity and molecular polarity** follow Sam's Chem 1A lecture slides for chapter 7 (summer 2026, on Interactive General Chemistry, Macmillan Learning; D-0021). The slides are on Sam's machine and not in the repo. From them: ΔEN is the larger electronegativity minus the smaller; 0 to 0.4 is a nonpolar bond, above 0.4 up to 2.0 is polar covalent, above 2.0 is ionic; the less electronegative atom is δ+ and the more electronegative is δ−; a bond dipole is an arrow that points at the more electronegative atom, and a nonpolar bond gets none; bond dipoles can cancel in a linear, trigonal planar, tetrahedral, trigonal bipyramidal, octahedral or square planar shape when all the outer atoms are the same. The slides' worked examples are the expected answers in `tests/polarity.test.ts`: HCl (3.0 − 2.1 = 0.9, polar), CO2 (3.5 − 2.5 = 1.0, the dipoles cancel), H2O (3.5 − 2.1 = 1.4, polar), NH3 (0.9, polar), CH2F2 (C–F 1.5 polar, C–H 0.4 nonpolar, a polar molecule), SF6 (nonpolar), nitrate (the dipoles cancel) and ozone (ΔEN is 0, and the formal charges still make it polar).
+- **Sigma and pi bonds, and hybridization** follow the chapter 8 slides: the first bond between two atoms is always a sigma bond, and a second or third is a pi bond; 2 electron domains is sp, 3 is sp2, 4 is sp3; a double bond is still one domain, because its pi bond is not hybridized. The slides name sp3d and sp3d2 as the other types without giving their domain counts. The app uses them for 5 and 6 domains, as OpenStax Chemistry 2e, section 8.2, does (PCl5 and SF4 are sp3d, SF6 is sp3d2).
 
 ## Conventions
 
@@ -17,6 +19,15 @@ Every rule and number the app shows, with its source. No citations go on screen:
 Formal charge decides between drawings, and an atom from period 3 onward may take more than 8 electrons to make the formal charges smaller. So sulfur dioxide is drawn with two double bonds, sulfate with two, phosphate with one. A drawing that keeps sulfur at 8 with charges of +1 and −1 is sent back with a hint.
 
 The textbook's text shows expanded shells only where the electron count forces them (PCl5, SF6, IF5, XeF4). If a course wants sulfur kept at 8, the change is `DEFAULT_CONVENTION` in `src/chem/solve.ts` to `'octet'`, and dropping the three problems in the "Expanded octets with double bonds" group. That is Sam's decision.
+
+### Two electronegativity tables (D-0021)
+
+The app holds two sets of electronegativities, and each has one job.
+
+- The Pauling values in `src/chem/elements.data.json` decide which of two atoms is more electronegative when the middle atom is picked. No number from that table is printed.
+- The slides' rounded table (`COURSE_EN` in `src/chem/polarity.ts`) is the one a student subtracts with in step 6, so the numbers on screen match the ones the course works by hand: H 2.1, Be 1.5, B 2.0, C 2.5, N 3.0, O 3.5, F 4.0, Al 1.5, Si 1.8, P 2.1, S 2.5, Cl 3.0, As 2.0, Se 2.4, Br 2.8, Kr 3.0, I 2.5, Xe 2.6.
+
+A test checks that each rounded value is within 0.2 of the Pauling value, and that the two tables agree on which atom is δ− for every bond in the guided problems. One bond lands on a different side of the cutoff: N–O is 0.5 with the rounded table (polar) and 0.40 with the Pauling values (nonpolar). The app follows the rounded table.
 
 ### The 3D model's angles (D-0008)
 
@@ -27,4 +38,7 @@ The 3D view marks one bond angle with a dotted arc and a label (two for shapes w
 ## Known gaps
 
 - In the model's seesaw (SF4) the two middle bonds settle about 125° apart, wider than 120° where the textbook says narrower. The "less than 120°" arc is not drawn for that pair, and the panel still gives both angles in words. Fixing it means retuning the three strengths against the 13-shape test (W-006).
+- A net dipole that a student draws is judged against the same sum, taken with each bond's direction as the viewer sees it (`netAsSeen` in `src/chem/polarity.ts`). Perspective is ignored. The directions the tests expect (water's from the hydrogens toward oxygen, sulfur dioxide's from sulfur toward the oxygens, formaldehyde's from carbon toward oxygen) are worked by hand from the slides' rule that each arrow points at the more electronegative atom.
+- The net dipole is the sum of the bond dipoles in the textbook arrangement, each as long as its ΔEN. Lone pairs add nothing of their own and bond lengths are ignored, as on the slides. That gets polar or nonpolar right for all twenty guided molecules (`tests/polarity.test.ts` lists them), but the arrow's length is not a measured dipole moment, and the app prints no number for it.
+- With five or six electron groups and outer atoms that are not all the same (PCl3F2), polar or nonpolar depends on which corners the atoms take. Free build says so and gives no answer.
 - Molecules with more than one middle atom (ethane, hydrogen peroxide) can be built in free build but have no reference answer and no 3D shape. Odd-electron molecules (NO, NO2) have no reference answer. There are no typed-in formulas (W-007).

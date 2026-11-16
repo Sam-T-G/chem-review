@@ -46,4 +46,7 @@ An accepted record is never rewritten. Only its "Status" and "Superseded by" lin
 | [D-0018](0018-explain-how-a-total-is-built.md) | A wrong electron count is answered with how the count is worked out, before any number | accepted | Sam | learning, lewis |
 | [D-0019](0019-text-changes-one-way-without-blinking.md) | Text on screen arrives and leaves in one consistent way, without blinking | accepted | Sam | design, lewis |
 | [D-0020](0020-live-demo-on-github-pages.md) | The work is committed, pushed, and published at a live GitHub link | accepted | Sam | lead, platform |
+| [D-0021](0021-polarity-and-orbitals-as-two-more-steps.md) | Polarity and bonding are two more steps on each guided molecule, worked the way Sam's course slides work them | provisional | Lead (the build session), reading Sam's request below | learning, lewis, chem |
+| [D-0022](0022-students-draw-the-dipole.md) | In the polar segment a student draws a line and is assessed on where the dipole points | accepted | Sam | learning, lewis |
+| [D-0023](0023-dipole-arrows-drawn-on-the-board.md) | A student drags each bond's dipole arrow from one atom to the other, then drags the net dipole out of the middle atom | provisional | The build session, reading D-0022 | learning, lewis, chem |
 <!-- index:end -->

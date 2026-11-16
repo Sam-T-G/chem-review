@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import type { El } from '../src/chem/elements'
+import type { SeenBond } from '../src/chem/polarity'
 import { PROBLEMS } from '../src/chem/problems'
+import type { V3 } from '../src/chem/repulsion'
+import { polarity } from '../src/modules/lewis/guide'
 import * as store from '../src/modules/lewis/store'
 
 const idx = (id: string) => PROBLEMS.findIndex((p) => p.id === id)
@@ -12,6 +16,74 @@ function finishCount() {
   store.checkCounts()
   store.typeTotal(p.formula.reduce((n, [el, k]) => n + valence[el]! * k, 0) - p.charge)
   store.checkTotal()
+}
+
+/** The finished molecule on the board as a viewer sees it: x to the right, y up, z toward the
+ *  viewer. `place` gives the direction from the middle atom to the k-th atom of an element. */
+function seenAs(place: (el: El, k: number) => V3): SeenBond[] {
+  const m = polarity(store.getState().s)!
+  const count = new Map<El, number>()
+  return m.bonds.map((b) => {
+    const k = count.get(b.el) ?? 0
+    count.set(b.el, k + 1)
+    return { atomId: b.atomId, dir: place(b.el, k) }
+  })
+}
+const rad = (degrees: number) => (degrees * Math.PI) / 180
+// Water with the hydrogens below oxygen, 104.5° apart. Each O–H arrow points at oxygen, so the two
+// add up to an arrow that points straight up.
+const WATER = (_el: El, k: number): V3 => [(k === 0 ? -1 : 1) * Math.sin(rad(52.25)), -Math.cos(rad(52.25)), 0]
+const UP = { x: 0, y: 1 }
+// The same water seen from below the hydrogens: the net dipole points straight away from the viewer.
+const WATER_END_ON = (_el: El, k: number): V3 => [(k === 0 ? -1 : 1) * Math.sin(rad(52.25)), 0, Math.cos(rad(52.25))]
+// Formaldehyde with oxygen to the right of carbon: its one bond arrow, C to O, points right.
+const FORMALDEHYDE = (el: El, k: number): V3 => (el === 'O' ? [1, 0, 0] : [-0.5, k === 0 ? 0.866 : -0.866, 0])
+const RIGHT = { x: 1, y: 0 }
+const turned = (v: { x: number; y: number }, degrees: number) => ({ x: v.x * Math.cos(rad(degrees)) - v.y * Math.sin(rad(degrees)), y: v.x * Math.sin(rad(degrees)) + v.y * Math.cos(rad(degrees)) })
+const WORLD: V3 = [1, 0, 0]
+
+/** Work a problem through the store's own actions up to the start of the given step, answering everything right. */
+function toStep(id: string, step: 'shape' | 'polar' | 'orbitals') {
+  store.selectProblem(idx(id))
+  const p = store.problemOf()
+  finishCount()
+  store.next()
+  store.pickMiddle(p.center)
+  const c = store.place(p.center, null)!
+  const outer = p.formula.flatMap(([el, k]) => new Array<typeof el>(el === p.center ? k - 1 : k).fill(el)).map((el) => store.place(el, null)!)
+  store.next()
+  for (const o of outer) store.bond(o, c)
+  store.next()
+  // CO2 and CH2O need second bonds: bond each outer atom again until the check step is done
+  for (let guard = 0; guard < 8 && !store.stepDone('check'); guard++) {
+    const short = outer.find((o) => {
+      const before = store.getState().s
+      store.bond(o, c)
+      if (store.stepDone('check') || store.getState().s !== before) return true
+      return false
+    })
+    if (!short) break
+  }
+  if (!store.stepDone('check')) throw new Error(`${id}: the check step is not finished`)
+  store.next()
+  const st = store.getState()
+  const groups = st.s.bonds.length + Math.floor((st.s.atoms.find((a) => a.id === c)!.lone ?? 0) / 2)
+  store.answerGroups(groups)
+  store.pickShape(p.shape)
+  if (step === 'shape') return
+  store.next()
+  if (step === 'polar') return
+  for (const guess of ['nonpolar', ...p.formula.map(([el]) => el)] as const) {
+    for (let k = 0; k < 4 && store.bondAsked(); k++) store.answerBond(store.bondAsked()!, guess)
+  }
+  while (store.bondAsked()) {
+    const asked = store.bondAsked()!
+    for (const guess of ['nonpolar', p.center, asked] as const) store.answerBond(asked, guess)
+  }
+  store.answerNet(true)
+  // a polar molecule's net dipole is drawn before the step is done, and each test that needs one draws it
+  if (store.drawing() === 'net') throw new Error(`${id}: the net dipole has to be drawn before step 7`)
+  store.next()
 }
 
 beforeEach(() => {
@@ -98,11 +170,209 @@ describe('guided steps', () => {
     expect(s.shape.pickFeedback).toBeNull()
     expect(s.shape.pickCoach).toMatchObject({ lead: 'Square planar is how the 4 bonds look in a flat drawing, 90° apart.', ask: 'The shape is tetrahedral.' })
     expect(s.view).toBe('shape')
-    expect(s.solved).toContain('CH4')
+    // the shape is not the end any more: polarity and bonding come first
+    expect(s.solved).not.toContain('CH4')
     store.next()
-    expect(store.getState().problem).toBe(1)
+    expect(store.getState()).toMatchObject({ step: 'polar', view: 'shape' })
+    expect(store.editable()).toBe(false)
+  })
+
+  it('step 6: each kind of bond is answered until right, then one final answer for the molecule', () => {
+    toStep('CO2', 'polar')
+    expect(store.bondAsked()).toBe('O')
+    store.answerNet(false) // too early: the bond comes first
+    expect(store.getState().polar.net.pick).toBeNull()
+    store.answerBond('O', 'C') // δ− on the wrong atom
+    expect(store.getState().polar.bonds.O).toMatchObject({ right: false, tries: 1, pick: 'C', coach: { lead: 'That arrow points at carbon.' } })
+    store.answerBond('O', 'nonpolar')
+    expect(store.getState().polar.bonds.O).toMatchObject({ right: false, tries: 2 })
+    store.answerBond('O', 'O')
+    expect(store.getState().polar.bonds.O).toMatchObject({ right: true, coach: null, text: 'Polar. ΔEN = 3.5 − 2.5 = 1.0. Oxygen pulls the shared electrons harder, so oxygen is δ− and carbon is δ+.' })
+    expect(store.bondAsked()).toBeNull()
+    expect(store.stepDone('polar')).toBe(false)
+    store.answerNet(true) // wrong: the dipoles cancel
+    const net = store.getState().polar.net
+    expect(net).toMatchObject({ pick: true, right: false, coach: { ask: 'Carbon dioxide is nonpolar.' } })
+    store.answerNet(false) // the first answer was final
+    expect(store.getState().polar.net).toBe(net)
+    // the dipoles cancel, so there is no net dipole to draw
+    expect(store.drawing()).toBeNull()
+    expect(store.stepDone('polar')).toBe(true)
+  })
+
+  it('step 6: a bond is answered by drawing its arrow from one atom to the other', () => {
+    toStep('CO2', 'polar')
+    const st = store.getState()
+    const c = st.s.atoms.find((a) => a.el === 'C')!.id
+    const [o1, o2] = st.s.atoms.filter((a) => a.el === 'O').map((a) => a.id) as [string, string]
+    expect(store.drawing()).toBe('bond')
+    // between the two oxygens there is no bond: refused, and no try is counted
+    store.drawBondArrow(o1, o2)
+    expect(store.getState().polar.bonds.O).toBeUndefined()
+    expect(store.getState().toast).toMatchObject({ tone: 'warn', text: 'This question is about the C–O bond. Draw the arrow from carbon to oxygen, or from oxygen to carbon.' })
+    expect(store.getState().refused!.ids).toEqual([o1, o2])
+    // from oxygen to carbon: the arrow points at carbon, the δ+ atom
+    store.drawBondArrow(o1, c)
+    expect(store.getState().polar.bonds.O).toMatchObject({ right: false, tries: 1, pick: 'C', drawn: { from: o1, to: c }, coach: { lead: 'That arrow points at carbon.', ask: 'Compare the two atoms in the table, then draw the arrow again.' } })
+    expect(store.getState().refused!.ids).toEqual([o1, c])
+    // the button for a nonpolar bond is wrong too, and leaves no arrow behind
+    store.answerBond('O', 'nonpolar')
+    expect(store.getState().polar.bonds.O).toMatchObject({ right: false, tries: 2, pick: 'nonpolar', drawn: null })
+    // from carbon to the other oxygen: one right arrow answers both C–O bonds
+    store.drawBondArrow(c, o2)
+    expect(store.getState().polar.bonds.O).toMatchObject({ right: true, pick: 'O', drawn: null, coach: null })
+    expect(store.bondAsked()).toBeNull()
+    expect(store.drawing()).toBeNull()
+    store.drawBondArrow(c, o1) // nothing is asked now
+    expect(store.getState().polar.bonds.O!.tries).toBe(2)
+  })
+
+  it('step 6: without a drag, an arrow takes a tap on each atom, or Enter on each', () => {
+    toStep('CO2', 'polar')
+    const st = store.getState()
+    const c = st.s.atoms.find((a) => a.el === 'C')!.id
+    const o = st.s.atoms.find((a) => a.el === 'O')!.id
+    expect(store.editable()).toBe(false)
+    store.tapAtom(c, true)
+    expect(store.getState().selection).toEqual({ kind: 'atom', id: c })
+    store.tapAtom(c, true) // the same atom again takes the start back
+    expect(store.getState().selection).toBeNull()
+    store.tapAtom(c)
+    store.tapAtom(o)
+    expect(store.getState().selection).toBeNull()
+    expect(store.getState().polar.bonds.O).toMatchObject({ right: true, pick: 'O' })
+    // with no arrow to draw, a tap on the finished model does nothing
+    store.tapAtom(c)
+    expect(store.getState().selection).toBeNull()
+  })
+
+  it('step 6: the net dipole of a polar molecule is drawn, and only its direction is judged', () => {
+    toStep('H2O', 'polar')
+    const st = store.getState()
+    const o = st.s.atoms.find((a) => a.el === 'O')!.id
+    const h = st.s.atoms.find((a) => a.el === 'H')!.id
+    store.drawBondArrow(h, o)
+    expect(store.getState().polar.bonds.H).toMatchObject({ right: true, pick: 'O' })
+    const seen = seenAs(WATER)
+    const net = UP
+    store.drawNetArrow(net, seen, WORLD) // too early: polar or nonpolar comes first
+    expect(store.getState().polar.arrow.tries).toBe(0)
+    expect(store.netArrowAsked()).toBe(false)
+    store.moreHint()
+    store.setView('flat')
+    store.answerNet(true)
+    // the question opens on the 3D model, with hints of its own
+    expect(store.getState()).toMatchObject({ view: 'shape', hints: 0 })
+    expect(store.netArrowAsked()).toBe(true)
+    expect(store.drawing()).toBe('net')
+    expect(store.stepDone('polar')).toBe(false)
+    store.moreHint()
+    expect(store.currentHints()).toEqual(['Each bond arrow points at its δ− atom. Bond arrows that point in opposite directions cancel.'])
+    // drawn the opposite way
+    store.drawNetArrow(turned(net, 180), seen, [0, 1, 0])
+    expect(store.getState().polar.arrow).toMatchObject({ right: false, tries: 1, drawn: [0, 1, 0], coach: { lead: 'That arrow points against the bond arrows.' } })
+    expect(store.getState().refused!.ids).toEqual([o])
+    // drawn while the net dipole points away from the viewer: the model turns, and the try does not count
+    store.drawNetArrow(net, seenAs(WATER_END_ON), WORLD)
+    expect(store.getState().polar).toMatchObject({ aim: 1, arrow: { tries: 1 } })
+    expect(store.getState().toast!.text).toBe('The net dipole pointed toward you or away from you, so the model turned. Draw the arrow again.')
+    // 60° off is wrong, 30° off is right
+    store.drawNetArrow(turned(net, 60), seen, WORLD)
+    expect(store.getState().polar.arrow).toMatchObject({ right: false, tries: 2 })
+    store.moreHint()
+    expect(store.currentHints()).toHaveLength(2)
+    store.drawNetArrow(turned(net, 30), seen, WORLD)
+    expect(store.getState().polar.arrow).toMatchObject({ right: true, tries: 2, drawn: null, coach: null, text: 'The 2 O–H dipoles add up to a net dipole that points from the middle of the 2 hydrogen atoms toward oxygen.' })
+    // the hints about adding the arrows close with the question, and the hints about a bond do not take their place
+    expect(store.currentHints()).toEqual([])
+    expect(store.drawing()).toBeNull()
+    expect(store.stepDone('polar')).toBe(true)
+    store.next()
+    expect(store.getState().step).toBe('orbitals')
+  })
+
+  it('step 6: the net dipole is drawn on the 3D model only', () => {
+    toStep('H2O', 'polar')
+    const st = store.getState()
+    store.drawBondArrow(st.s.atoms.find((a) => a.el === 'H')!.id, st.s.atoms.find((a) => a.el === 'O')!.id)
+    store.answerNet(false) // wrong, and final: water is polar, so its net dipole is still asked for
+    expect(store.getState().polar.net).toMatchObject({ right: false, coach: { ask: 'Water is polar.' } })
+    expect(store.drawing()).toBe('net')
+    store.setView('flat')
+    expect(store.netArrowAsked()).toBe(true)
+    expect(store.drawing()).toBeNull()
+    store.drawNetArrow(UP, seenAs(WATER), WORLD)
+    expect(store.getState().polar.arrow.right).toBe(false)
+    store.setView('shape')
+    store.drawNetArrow(UP, seenAs(WATER), WORLD)
+    expect(store.getState().polar.arrow.right).toBe(true)
+  })
+
+  it('step 6: formaldehyde has two kinds of bond, asked one after the other', () => {
+    toStep('CH2O', 'polar')
+    expect(store.bondAsked()).toBe('H')
+    store.answerBond('O', 'O') // not this bond's turn
+    expect(store.getState().polar.bonds.O).toBeUndefined()
+    // an arrow along the C–O bond is refused while the C–H bond is the question
+    const st = store.getState()
+    const c = st.s.atoms.find((a) => a.el === 'C')!.id
+    const o = st.s.atoms.find((a) => a.el === 'O')!.id
+    store.drawBondArrow(c, o)
+    expect(store.getState().polar.bonds.O).toBeUndefined()
+    expect(store.getState().toast!.text).toBe('This question is about the C–H bond. Draw the arrow from carbon to hydrogen, or from hydrogen to carbon.')
+    // an arrow on the C–H bond says the bond is polar, and it is not
+    store.drawBondArrow(st.s.atoms.find((a) => a.el === 'H')!.id, c)
+    expect(store.getState().polar.bonds.H).toMatchObject({ right: false, tries: 1, pick: 'C', coach: { lead: 'Only a polar bond has a dipole arrow.' } })
+    store.answerBond('H', 'nonpolar')
+    expect(store.bondAsked()).toBe('O')
+    store.drawBondArrow(c, o)
+    expect(store.getState().polar.bonds.O).toMatchObject({ right: true })
+    store.answerNet(true)
+    expect(store.getState().polar.net).toMatchObject({ right: true, coach: null })
+    // formaldehyde is polar: its net dipole is drawn before the step is done
+    expect(store.stepDone('polar')).toBe(false)
+    store.drawNetArrow(turned(RIGHT, 180), seenAs(FORMALDEHYDE), WORLD) // from oxygen toward carbon
+    expect(store.getState().polar.arrow).toMatchObject({ right: false, tries: 1, coach: { lead: 'That arrow points against the C–O arrow.' } })
+    store.drawNetArrow(RIGHT, seenAs(FORMALDEHYDE), WORLD)
+    expect(store.getState().polar.arrow).toMatchObject({ right: true, text: 'The C–O dipole is the only bond dipole, so the net dipole points the same way: from carbon toward oxygen.' })
+    expect(store.stepDone('polar')).toBe(true)
+  })
+
+  it('step 7: sigma and pi counts, then the hybridization, which finishes the molecule', () => {
+    toStep('CO2', 'orbitals')
+    expect(store.getState()).toMatchObject({ step: 'orbitals', view: 'shape' })
+    store.pickHybrid('sp') // too early: the counts come first
+    expect(store.getState().orbitals.hybrid.pick).toBeNull()
+    for (let i = 0; i < 4; i++) store.setBondCount('sigma', store.getState().orbitals.sigma + 1)
+    store.checkBondCounts()
+    expect(store.getState().orbitals.counts).toMatchObject({ right: false, tries: 1, coach: { lead: '4 counts every line as a sigma bond.' } })
+    store.setBondCount('sigma', 2)
+    store.setBondCount('pi', 2)
+    store.checkBondCounts()
+    expect(store.getState().orbitals.counts).toMatchObject({ right: true, text: '2 sigma bonds and 2 pi bonds: each double bond is 1 sigma and 1 pi.' })
+    store.setBondCount('pi', 5) // locked
+    expect(store.getState().orbitals.pi).toBe(2)
+    store.pickHybrid('sp3')
+    expect(store.getState().orbitals.hybrid).toMatchObject({ right: false, tries: 1, coach: { lead: 'sp³ goes with 4 electron groups.' } })
+    expect(store.getState().solved).not.toContain('CO2')
+    store.pickHybrid('sp')
+    expect(store.getState().orbitals.hybrid).toMatchObject({ right: true, text: 'sp: carbon has 2 electron groups.' })
+    expect(store.getState().solved).toContain('CO2')
+    expect(store.stepDone('orbitals')).toBe(true)
+    store.next()
+    expect(store.getState().problem).toBe(idx('CO2') + 1)
     expect(store.getState().step).toBe('count')
     expect(store.getState().s.atoms).toHaveLength(0)
+  })
+
+  it('a change to the board throws away the answers about the finished structure', () => {
+    toStep('CO2', 'orbitals')
+    store.goStep('check')
+    const bond = store.getState().s.bonds[0]!
+    store.unbond(bond.id)
+    expect(store.getState().shape.pick).toBeNull()
+    expect(store.getState().polar).toEqual({ bonds: {}, net: { right: false, tries: 0, text: null, coach: null, pick: null }, arrow: { right: false, tries: 0, text: null, coach: null, drawn: null }, aim: 0 })
+    expect(store.unlocked()).toBeLessThan(5)
   })
 
   it('hints in the count step are about the atoms first, then about the total', () => {

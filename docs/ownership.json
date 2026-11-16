@@ -10,7 +10,7 @@
       "name": "Chemistry engine",
       "does": "The rules of Lewis structures and VSEPR as plain TypeScript, each with a test written from the textbook.",
       "docs": ["docs/chemistry/sources.md"],
-      "check": "pnpm exec vitest run assess layout problems solve structure vsepr"
+      "check": "pnpm exec vitest run assess layout polarity problems solve structure vsepr"
     },
     "lewis": {
       "name": "Lewis module",
@@ -75,6 +75,7 @@
     { "path": "scripts/gen-elements.mjs", "team": "chem" },
     { "path": "tests/assess.test.ts", "team": "chem" },
     { "path": "tests/layout.test.ts", "team": "chem" },
+    { "path": "tests/polarity.test.ts", "team": "chem" },
     { "path": "tests/problems.test.ts", "team": "chem" },
     { "path": "tests/solve.test.ts", "team": "chem" },
     { "path": "tests/structure.test.ts", "team": "chem" },

@@ -74,6 +74,8 @@
 .mb .mb-canvas-wrap.is-hot { cursor: grab; }
 .mb .mb-canvas-wrap.is-grabbing { cursor: grabbing; }
 .mb[data-view='shape'] .mb-canvas-wrap { cursor: grab; }
+/* over an atom a dipole arrow can start on, and while one is being drawn (after the rule above, so it wins on the 3D model too) */
+.mb .mb-canvas-wrap.is-aim, .mb[data-view='shape'] .mb-canvas-wrap.is-aim { cursor: crosshair; }
 .mb .mb-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .mb .mb-nogl { margin: 48px 24px; font-weight: 700; }
 .mb .mb-overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; overflow: clip; }
@@ -82,6 +84,8 @@
 .mb .mb-hit { position: absolute; left: 0; top: 0; padding: 0; border: 0; border-radius: 50%; background: none; pointer-events: none; }
 .mb .mb-hit-bond { width: 28px; height: 28px; }
 .mb .mb-hit:focus-visible { outline-offset: 5px; }
+/* the atom a dipole arrow starts on, picked with a tap or the keyboard on the 3D model */
+.mb .mb-hit.is-start { box-shadow: 0 0 0 3px #fff, 0 0 0 6.5px var(--grape-deep); }
 
 /* electron count beside each atom */
 .mb .mb-count {
@@ -114,6 +118,30 @@
   box-shadow: 0 0 0 1.5px #c6d4ff;
   transition: opacity 0.2s;
 }
+/* Bond dipoles on the board: an arrow beside each polar bond that points at the δ− atom, with a
+   short cross near its start, and δ+ and δ− beside the atoms. The net dipole is the thicker blue
+   arrow through the middle atom of the 3D model. Each arrow has a white copy underneath. */
+.mb .mb-dipoles { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; fill: none; stroke: none; }
+.mb .mb-dipole .is-under { stroke: #fff; stroke-width: 7.5; fill: #fff; stroke-linecap: round; stroke-linejoin: round; opacity: 0.92; }
+.mb .mb-dipole .is-ink { stroke: var(--grape-deep); stroke-width: 3.2; fill: var(--grape-deep); stroke-linecap: round; stroke-linejoin: round; }
+.mb .mb-dipole.is-net .is-under { stroke-width: 10; }
+.mb .mb-dipole.is-net .is-ink { stroke: var(--blue-deep); fill: var(--blue-deep); stroke-width: 5; }
+/* An arrow a student is drawing follows the pointer. The last arrow that was drawn wrong stays on
+   the board in the color for mistakes until the next one is started. */
+.mb .mb-dipole.is-draw:not(.is-net) .is-ink { stroke-width: 4.2; }
+.mb .mb-dipole.is-draw:not(.is-net) .is-under { stroke-width: 9; }
+.mb .mb-dipole.is-wrong .is-ink { stroke: var(--straw-deep); fill: var(--straw-deep); }
+.mb .mb-dipole.is-wrong .is-under { stroke: var(--straw-soft); fill: var(--straw-soft); opacity: 1; }
+.mb .mb-delta {
+  position: absolute; left: 0; top: 0;
+  padding: 1px 7px 2px; border-radius: 999px;
+  background: var(--paper); color: var(--grape-deep);
+  box-shadow: 0 0 0 1.5px var(--paper-lip), 0 4px 8px -5px rgba(74, 58, 140, 0.55);
+  font-family: var(--display); font-size: 15px; font-weight: 600; line-height: 1.25; white-space: nowrap;
+  opacity: 0; transition: opacity 0.25s;
+}
+.mb .mb-delta[data-sign='minus'] { background: var(--grape-deep); color: #fff; box-shadow: 0 0 0 1.5px var(--grape-lip), 0 4px 8px -5px rgba(74, 58, 140, 0.55); }
+.mb .mb-delta.is-net { background: var(--blue-soft); color: var(--blue-deep); box-shadow: 0 0 0 1.5px #c6d4ff; font-size: 13.5px; }
 /* a bond angle printed beside its arc on the 3D model */
 .mb .mb-angle {
   position: absolute; left: 0; top: 0;
@@ -343,8 +371,8 @@
    small bubbles burst out of it (mb-drop). --wait holds the new pieces back while old ones go. */
 .mb .is-new {
   transform-origin: 12% 50%;
-  animation: mb-inflate 0.44s var(--spring) both;
-  animation-delay: calc(var(--wait, 0s) + var(--i, 0) * 38ms);
+  animation: mb-inflate 0.38s var(--spring) both;
+  animation-delay: calc(var(--wait, 0s) + var(--i, 0) * 30ms);
 }
 .mb .mb-tile.is-new, .mb .mb-dock .is-new { transform-origin: 50% 70%; }
 @keyframes mb-inflate {
@@ -461,12 +489,13 @@
 /* the five steps as stops on a line; the line fills as steps are finished */
 .mb .mb-rail {
   position: relative; flex: none;
-  display: grid; grid-template-columns: repeat(5, 1fr);
-  list-style: none; margin: 16px 14px 0; padding: 0 0 12px;
+  display: grid; grid-template-columns: repeat(var(--n, 5), 1fr);
+  list-style: none; margin: 16px 10px 0; padding: 0 0 12px;
 }
-.mb .mb-rail::before, .mb .mb-rail::after { content: ''; position: absolute; left: 10%; top: 18px; height: 6px; border-radius: 6px; }
-.mb .mb-rail::before { right: 10%; background: var(--tint-2); }
-.mb .mb-rail::after { width: calc(80% * var(--p, 0)); background: var(--mint-lip); transition: width 0.5s var(--ease); }
+/* the track runs from the middle of the first stop to the middle of the last */
+.mb .mb-rail::before, .mb .mb-rail::after { content: ''; position: absolute; left: calc(50% / var(--n, 5)); top: 18px; height: 6px; border-radius: 6px; }
+.mb .mb-rail::before { right: calc(50% / var(--n, 5)); background: var(--tint-2); }
+.mb .mb-rail::after { width: calc((100% - 100% / var(--n, 5)) * var(--p, 0)); background: var(--mint-lip); transition: width 0.5s var(--ease); }
 .mb .mb-rail-step {
   position: relative; z-index: 1;
   display: grid; justify-items: center; gap: 6px;
@@ -483,7 +512,7 @@
   transition: background 0.2s, color 0.2s, scale 0.3s var(--spring);
 }
 .mb .mb-rail-dot svg { width: 17px; height: 17px; stroke-width: 3; }
-.mb .mb-rail-label { font-family: var(--display); font-size: 14px; font-weight: 500; }
+.mb .mb-rail-label { font-family: var(--display); font-size: 13.5px; font-weight: 500; white-space: nowrap; }
 .mb .mb-rail-step[data-done='true'] .mb-rail-dot { background: var(--mint-soft); color: var(--mint-deep); box-shadow: inset 0 0 0 2px var(--mint-lip), 0 3px 0 var(--mint-lip); }
 .mb .mb-rail-step[aria-current='step'] { color: var(--ink); }
 .mb .mb-rail-step[aria-current='step'] .mb-rail-label { font-weight: 600; }
@@ -506,6 +535,14 @@
 .mb .mb-q { margin: 0 0 10px; font-family: var(--display); font-size: 18.5px; font-weight: 500; line-height: 1.35; max-width: 40ch; }
 .mb .mb-fb + .mb-q, .mb .mb-readout + .mb-q { margin-top: 20px; }
 .mb .mb-try { margin-top: 14px; }
+/* how to draw a dipole arrow on the board, with a small arrow in front */
+.mb .mb-draw { display: flex; align-items: flex-start; gap: 10px; padding: 9px 12px 10px; border-radius: var(--r-m); background: var(--tint); box-shadow: inset 0 0 0 1.5px var(--tint2); max-width: none; }
+.mb .mb-draw span { max-width: 44ch; }
+.mb .mb-draw-icon { flex: none; width: 34px; height: 16px; margin-top: 4px; fill: none; stroke: var(--grape-deep); stroke-width: 2.6; stroke-linecap: round; }
+.mb .mb-draw-icon .is-head { fill: var(--grape-deep); stroke-linejoin: round; stroke-width: 1.5; }
+.mb .mb-draw.is-net { background: var(--blue-soft); box-shadow: inset 0 0 0 1.5px var(--sky-blue); }
+.mb .mb-draw.is-net .mb-draw-icon { stroke: var(--blue-deep); }
+.mb .mb-draw.is-net .mb-draw-icon .is-head { fill: var(--blue-deep); }
 
 .mb .mb-fb {
   display: flex; gap: 9px; align-items: flex-start;
@@ -655,6 +692,19 @@
 .mb .mb-pt figcaption { margin-top: 6px; font-size: 12.5px; font-weight: 700; color: #5c4a12; }
 
 /* shape readout */
+/* the atoms of the bond in question, each with its electronegativity from the course's table */
+.mb .mb-en { margin: 0 0 14px; padding: 9px 14px 11px; border-radius: var(--r-m); background: var(--butter-soft); box-shadow: inset 0 0 0 1.5px var(--butter-line); }
+.mb .mb-en figcaption { margin-bottom: 7px; font-size: 13px; font-weight: 800; color: #5c4a12; }
+.mb .mb-en ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.mb .mb-en li { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; }
+.mb .mb-en li b { font-family: var(--display); font-size: 21px; font-weight: 600; font-variant-numeric: tabular-nums; }
+/* what the arrows on the board are */
+.mb .mb-key { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13.5px; font-weight: 800; color: var(--ink-2); }
+.mb .mb-key li { display: flex; align-items: center; gap: 8px; }
+.mb .mb-key i { flex: none; position: relative; width: 26px; height: 3.2px; border-radius: 2px; background: var(--grape-deep); }
+.mb .mb-key i::after { content: ''; position: absolute; right: -2px; top: 50%; translate: 0 -50%; border: 5px solid transparent; border-left: 8px solid var(--grape-deep); border-right: 0; }
+.mb .mb-key i.is-net { height: 5px; background: var(--blue-deep); }
+.mb .mb-key i.is-net::after { border-left-color: var(--blue-deep); border-width: 6.5px; border-left-width: 10px; }
 .mb .mb-readout { margin: 0 0 12px; display: grid; gap: 7px; }
 .mb .mb-readout div { display: grid; grid-template-columns: 116px 1fr; align-items: baseline; gap: 8px; padding: 8px 14px; border-radius: var(--r-m); background: var(--tint); }
 .mb .mb-readout dt { font-size: 13px; font-weight: 800; color: var(--ink-2); }
@@ -755,11 +805,11 @@
   .mb .mb-name { margin: 0; font-size: 14.5px; }
   .mb .mb-crew { display: none; }
   .mb .mb-head .mb-change { align-self: center; padding: 0 12px; font-size: 14px; }
-  .mb .mb-rail { margin: 8px 10px 0; padding-bottom: 6px; }
+  .mb .mb-rail { margin: 8px 4px 0; padding-bottom: 6px; }
   .mb .mb-rail::before, .mb .mb-rail::after { top: 15px; height: 5px; }
   .mb .mb-rail-step { gap: 4px; }
   .mb .mb-rail-dot { width: 28px; height: 28px; font-size: 14px; }
-  .mb .mb-rail-label { font-size: 13px; }
+  .mb .mb-rail-label { font-size: 12px; }
   .mb .mb-scroll { padding: 10px 20px 10px; }
   .mb .mb-title { font-size: 22px; margin: 2px 0 8px; }
   .mb .mb-body { margin-bottom: 12px; }
