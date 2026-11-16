@@ -370,7 +370,58 @@ export interface StepStatus {
 
 export function bondInstruction(p: Problem): string {
   // In a positive ion one bond gets both of its electrons from the middle atom, so "one from each" is left out.
-  return `Drag ${eachOuter(p)} onto ${lower(p.center)} and let go. Each bond is 2 shared electrons${p.charge > 0 ? '' : ', one from each atom'}.`
+  return `Bond ${eachOuter(p)} to ${lower(p.center)}. Each bond is 2 shared electrons${p.charge > 0 ? '' : ', one from each atom'}.`
+}
+/** What the place step asks for, once the middle atom is known. */
+export function placeInstruction(p: Problem): string {
+  const n = atomsOf(p).length
+  return middleNeeded(p) ? `Put all ${n} atoms on the board, with ${lower(p.center)} in the middle.` : `Put all ${n} atoms on the board.`
+}
+
+// ---------------------------------------------------------------- how to act on the board
+//
+// The steps that are worked on the board say how: which gesture puts an atom down, makes a bond,
+// or changes an electron. The pointing finger on the board acts out the first of them.
+
+/** One way to act on the board, and the gesture it takes. */
+export interface HowTo {
+  gesture: 'drag' | 'tap' | 'swipe'
+  text: string
+}
+/** Said beside the bin while an atom is being carried. */
+export const BIN_WORDS = 'Drop here to take it off'
+const CUT: HowTo = { gesture: 'swipe', text: 'To take a bond back, swipe across its line.' }
+const BIN: HowTo = { gesture: 'drag', text: 'To take an atom off the board, drag it to the bin in the corner.' }
+/** "an oxygen atom", "a hydrogen atom", or "an outer atom" when the outer atoms differ. */
+function oneOuter(p: Problem): string {
+  const kinds = [...new Set(outerEls(p))]
+  if (kinds.length !== 1) return 'an outer atom'
+  const name = lower(kinds[0]!)
+  return `${/^[aeio]/.test(name) ? 'an' : 'a'} ${name} atom`
+}
+/** How the board is worked in a step: empty for the steps that are answered in the panel. */
+export function howTo(step: StepId, p: Problem): HowTo[] {
+  const c = lower(p.center)
+  if (step === 'place') return [{ gesture: 'drag', text: 'Press on an atom in the row under the board, drag it onto the board and let go. A tap on the atom puts it on the board too.' }, BIN]
+  if (step === 'bond') return [{ gesture: 'drag', text: `Press on ${oneOuter(p)}, drag it onto ${c} and let go.` }, CUT]
+  if (step === 'check') {
+    return [
+      { gesture: 'drag', text: `To add a second or third bond, drag the outer atom onto ${c} again.` },
+      CUT,
+      { gesture: 'tap', text: 'To add or take off an electron, tap an atom, then “+ electron” or “− electron”.' },
+    ]
+  }
+  return []
+}
+/** How the board is worked in free build. */
+export function howToFree(): HowTo[] {
+  return [
+    { gesture: 'drag', text: 'Drag an atom from the row under the board onto the board. Drop it on another atom to bond the two.' },
+    { gesture: 'drag', text: 'To bond two atoms on the board, drag one onto the other.' },
+    CUT,
+    BIN,
+    { gesture: 'tap', text: 'To add or take off an electron, tap an atom, then “+ electron” or “− electron”.' },
+  ]
 }
 
 export function bondStatus(p: Problem, s: Structure): StepStatus {
@@ -481,6 +532,51 @@ export function checkRows(p: Problem | null, s: Structure): CheckRow[] {
     rows.push({ state: 'wait', text: 'The formal charges are as small as they can be.' })
   }
   return rows
+}
+
+/** One of the three checks as the strip over the board shows it: a name, a count where the check
+ *  has one, and the full sentence from the list in step 4 for a screen reader. */
+export interface CheckChip {
+  id: 'electrons' | 'joined' | 'shells' | 'charges'
+  state: CheckRow['state']
+  /** The name, and a shorter one for a narrow screen. */
+  label: string
+  short: string
+  /** "2 of 3", or nothing. */
+  value: string
+  says: string
+}
+/** The same three checks as `checkRows`, in the same order and with the same states, for the
+ *  strip that stays over the board in every step. Two differences, both about an electron total
+ *  that is not wrong yet. While atoms are still off the board, the strip shows that check as
+ *  waiting. And in the steps before the check step (`early`), an ion whose atoms still hold exactly
+ *  what neutral atoms bring is waiting too: the ion's charge is dealt with in the check step. */
+export function checkChips(p: Problem | null, s: Structure, early = false): CheckChip[] {
+  const rows = checkRows(p, s)
+  const a = assess(s, p ? speciesOf(p) : undefined)
+  const atoms = p ? atomsOf(p).length : s.atoms.length
+  // when the check passes, every atom counts (a loose piece with an unpaired electron is not judged yet, as in the list)
+  const full = rows[1]!.state === 'pass' ? atoms : a.atoms.filter((x) => x.status === 'full').length
+  const placing = !!p && a.issues.some((i) => i.kind === 'missing') && a.electrons.have <= (a.electrons.need ?? 0)
+  const chargeToCome = !!p && early && p.charge !== 0 && a.electrons.have === neutralElectrons(p)
+  const first: CheckChip = p
+    ? { id: 'electrons', state: placing || chargeToCome ? 'wait' : rows[0]!.state, label: 'Electron total', short: 'Electrons', value: '', says: rows[0]!.text }
+    : { id: 'joined', state: rows[0]!.state, label: 'One molecule', short: 'Joined', value: '', says: rows[0]!.text }
+  return [
+    first,
+    { id: 'shells', state: rows[1]!.state, label: 'Full shells', short: 'Shells', value: atoms ? `${full} of ${atoms}` : '', says: rows[1]!.text },
+    { id: 'charges', state: rows[2]!.state, label: 'Formal charges', short: 'Charges', value: '', says: rows[2]!.text },
+  ]
+}
+/** The electrons on the board as pairs, for the counter over the board: "4 pairs" in bonds, and
+ *  "6 lone pairs" once every atom has a full shell. Before that, an atom's unshared electrons are
+ *  not all in pairs (a loose carbon atom has 4 single electrons), so no number is given. */
+export function pairWords(s: Structure): { bonded: string; lone: string } {
+  const lines = s.bonds.reduce((n, b) => n + b.order, 0)
+  const a = assess(s)
+  const settled = a.atoms.every((x) => x.status === 'full') && !a.issues.some((i) => i.kind === 'unpaired')
+  const lone = s.atoms.reduce((n, x) => n + Math.floor(x.lone / 2), 0)
+  return { bonded: lines ? plural(lines, 'pair') : '', lone: settled && lone ? plural(lone, 'lone pair') : '' }
 }
 
 const signed = (n: number) => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : '0')
@@ -920,7 +1016,7 @@ export function bondQuestion(a: El, b: El): { ask: string; sub: string; draw: st
   return {
     ask: `Is the ${bondName(a, b)} bond polar?`,
     sub: 'Subtract the smaller electronegativity from the larger. The difference is ΔEN: 0.4 or less is a nonpolar bond, and above 0.4 is a polar bond.',
-    draw: `For a polar bond, draw the dipole arrow on the board: drag from ${lower(a)} to ${lower(b)}, or from ${lower(b)} to ${lower(a)}. The arrow points at the atom where you let go.`,
+    draw: `For a polar bond, draw its arrow on the board: drag from ${lower(a)} to ${lower(b)}, or from ${lower(b)} to ${lower(a)}. The arrow points at the atom where you let go.`,
     none: NO_ARROW,
     answers: ['nonpolar', a, b],
   }
@@ -965,6 +1061,10 @@ export function bondCoach(a: El, b: El, pol: BondPolarity, answer: BondAnswer, t
 /** What the board says when an arrow is drawn between two atoms that are not the bond in question. */
 export function drawRefusal(a: El, b: El): string {
   return `This question is about the ${bondName(a, b)} bond. Draw the arrow from ${lower(a)} to ${lower(b)}, or from ${lower(b)} to ${lower(a)}.`
+}
+/** Printed beside the head of a bond's arrow while it is being drawn over an atom. */
+export function arrowCaption(el: El): string {
+  return `points at ${lower(el)}`
 }
 /** What a screen reader says for an atom while a bond's arrow can be drawn: the first atom starts
  *  the arrow, and the second is the atom the arrow points at. */
@@ -1093,8 +1193,21 @@ export function judgeNetArrow(m: MoleculePolarity, seen: SeenBond[], drawn: { x:
 export function netArrowQuestion(p: Problem): { ask: string; draw: string } {
   return {
     ask: `Which way does the net dipole of ${p.name} point?`,
-    draw: `Draw the net dipole on the 3D model: press on ${lower(p.center)} and drag the way the bond arrows add up.`,
+    draw: `Draw the net dipole on the 3D model: drag from ${lower(p.center)} to one of the dots, or tap a dot. The dots are at the outer atoms, at the lone pairs, and in the space between them.`,
   }
+}
+/** The words beside the net dipole while it is being drawn, for each kind of aim point: an outer
+ *  atom, a lone pair of the middle atom, the middle of the outer atoms, and straight away from it. */
+export function aimWords(m: MoleculePolarity): { atoms: Record<string, string>; lone: string; middle: string; away: string } {
+  const els = m.bonds.map((b) => b.el)
+  const atoms: Record<string, string> = {}
+  for (const b of m.bonds) {
+    const name = lower(b.el)
+    atoms[b.atomId] = els.filter((el) => el === b.el).length === 1 ? `toward ${name}` : `toward ${/^[aeio]/.test(name) ? 'an' : 'a'} ${name} atom`
+  }
+  const same = els.every((el) => el === els[0])
+  const group = same && els[0] ? `the ${els.length} ${lower(els[0])} atoms` : `the ${els.length} outer atoms`
+  return { atoms, lone: m.lonePairs === 1 ? 'toward the lone pair' : 'toward a lone pair', middle: `toward the middle of ${group}`, away: `away from ${group}` }
 }
 /** Where the net dipole points, by the atoms it runs between: "from carbon toward oxygen". Bonds
  *  that are all alike add up to an arrow along the line through the middle atom and the middle of

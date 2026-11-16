@@ -426,6 +426,177 @@ describe('guided steps', () => {
   })
 })
 
+describe('clearing the board', () => {
+  it('clears from the 3D model in free build, and comes back to the flat board', () => {
+    store.setMode('free')
+    const o = store.place('O', null)!
+    for (let k = 0; k < 2; k++) store.bond(store.place('H', null)!, o)
+    store.setView('shape')
+    expect(store.getState().view).toBe('shape')
+    expect(store.editable()).toBe(false)
+    store.clearBoard()
+    expect(store.getState()).toMatchObject({ view: 'flat', s: { atoms: [] } })
+    // undo brings the atoms back, on the 3D model they were cleared from
+    store.undo()
+    expect(store.getState().s.atoms).toHaveLength(3)
+    expect(store.getState().view).toBe('shape')
+    store.clearBoard()
+    store.setMode('guided')
+  })
+  it('clears from a later step of a guided molecule, back to the step where the atoms are put on the board', () => {
+    toStep('CO2', 'polar')
+    expect(store.editable()).toBe(false)
+    store.clearBoard()
+    expect(store.getState()).toMatchObject({ step: 'place', view: 'flat', s: { atoms: [] } })
+    // the answers about the finished structure are gone, and the middle atom is still known
+    expect(store.getState().shape.pick).toBeNull()
+    expect(store.getState().middle.right).toBe(true)
+    expect(store.cue()).toEqual({ kind: 'tray', el: 'C', demo: true })
+    store.undo()
+    expect(store.getState().s.atoms).toHaveLength(3)
+    expect(store.stepDone('check')).toBe(true)
+  })
+  it('Undo straight after that Clear puts the step, the view and every answer back', () => {
+    toStep('CO2', 'orbitals')
+    store.setBondCount('sigma', 2)
+    store.setBondCount('pi', 2)
+    store.checkBondCounts()
+    const before = store.getState()
+    store.clearBoard()
+    expect(store.getState().step).toBe('place')
+    store.undo()
+    const after = store.getState()
+    expect(after).toMatchObject({ step: 'orbitals', view: 'shape', cleared: null })
+    expect(after.s).toBe(before.s)
+    expect(after.shape).toBe(before.shape)
+    expect(after.polar).toBe(before.polar)
+    expect(after.orbitals).toBe(before.orbitals)
+    expect(store.stepDone('polar')).toBe(true)
+    // a board change after the Clear drops what was kept: Undo then brings back the atoms only
+    store.clearBoard()
+    store.place('C', null)
+    store.undo() // takes the new carbon off
+    store.undo() // brings the old structure back
+    expect(store.getState().s).toBe(before.s)
+    expect(store.getState()).toMatchObject({ step: 'place', view: 'flat' })
+    expect(store.getState().shape.pick).toBeNull()
+  })
+  it('does nothing in the count step, where the board shows sample atoms', () => {
+    store.selectProblem(idx('CO2'))
+    const before = store.getState()
+    store.clearBoard()
+    expect(store.getState()).toBe(before)
+  })
+})
+
+describe('where the next action is', () => {
+  it('follows carbon dioxide from the first counter to the last answer', () => {
+    store.selectProblem(idx('CO2'))
+    // count: the first counter still at 0, then the button that checks them
+    expect(store.cue()).toEqual({ kind: 'ask', key: 'count-C' })
+    store.setCount('C', 4)
+    expect(store.cue()).toEqual({ kind: 'ask', key: 'count-O' })
+    store.setCount('O', 5)
+    expect(store.cue()).toEqual({ kind: 'ask', key: 'count-check' })
+    store.checkCounts()
+    // oxygen was wrong and has not been changed since: back to its counter
+    expect(store.cue()).toEqual({ kind: 'ask', key: 'count-O' })
+    store.setCount('O', 6)
+    expect(store.cue()).toEqual({ kind: 'ask', key: 'count-check' })
+    store.checkCounts()
+    expect(store.cue()).toEqual({ kind: 'ask', key: 'total' })
+    store.typeTotal(16)
+    store.checkTotal()
+    expect(store.cue()).toEqual({ kind: 'next' })
+    store.next()
+    // place: the question, then the middle atom in the row under the board, with the drag shown for the first atom only
+    expect(store.cue()).toEqual({ kind: 'ask', key: 'middle' })
+    store.pickMiddle('C')
+    expect(store.cue()).toEqual({ kind: 'tray', el: 'C', demo: true })
+    const c = store.place('C', null)!
+    expect(store.cue()).toEqual({ kind: 'tray', el: 'O', demo: false })
+    const o1 = store.place('O', null)!
+    const o2 = store.place('O', null)!
+    expect(store.cue()).toEqual({ kind: 'next' })
+    store.next()
+    // bond: the drag from an oxygen onto carbon until the first bond is made, then the atom still to bond
+    expect(store.cue()).toEqual({ kind: 'drag', from: o1, to: c })
+    store.bond(o1, c)
+    expect(store.cue()).toEqual({ kind: 'atoms', ids: [o2] })
+    store.bond(o2, c)
+    expect(store.cue()).toEqual({ kind: 'next' })
+    store.next()
+    // check: the list of checks, until the structure is right
+    expect(store.cue()).toEqual({ kind: 'ask', key: 'checks' })
+    store.bond(o1, c)
+    store.bond(o2, c)
+    expect(store.stepDone('check')).toBe(true)
+    expect(store.cue()).toEqual({ kind: 'next' })
+    store.next()
+    expect(store.cue()).toEqual({ kind: 'ask', key: 'groups' })
+    store.answerGroups(2)
+    expect(store.cue()).toEqual({ kind: 'ask', key: 'shapes' })
+    store.pickShape('linear')
+    expect(store.cue()).toEqual({ kind: 'next' })
+    store.next()
+    // polar: until the first try the hand takes the three answers in turn along one C–O bond (an arrow each way,
+    // and the button for no arrow); after it, the atoms of that bond and the button are marked
+    expect(store.cue()).toMatchObject({ kind: 'arrow', a: c, b: o1, also: [o2], key: 'no-arrow' })
+    store.drawBondArrow(o1, c) // wrong way round
+    expect(store.cue()).toEqual({ kind: 'atoms', ids: [c, o1, o2], key: 'no-arrow' })
+    store.drawBondArrow(c, o1)
+    expect(store.cue()).toEqual({ kind: 'ask', key: 'net' })
+    store.answerNet(false)
+    expect(store.cue()).toEqual({ kind: 'next' })
+    store.next()
+    expect(store.cue()).toEqual({ kind: 'ask', key: 'bond-counts' })
+    store.setBondCount('sigma', 2)
+    store.setBondCount('pi', 2)
+    store.checkBondCounts()
+    expect(store.cue()).toEqual({ kind: 'ask', key: 'hybrid' })
+    store.pickHybrid('sp')
+    expect(store.cue()).toEqual({ kind: 'next' })
+  })
+  it('points at the middle atom for the net dipole, and at the switch to the 3D model from the flat drawing', () => {
+    toStep('H2O', 'polar')
+    const st = store.getState()
+    const o = st.s.atoms.find((a) => a.el === 'O')!.id
+    const hs = st.s.atoms.filter((a) => a.el === 'H').map((a) => a.id)
+    expect(store.cue()).toMatchObject({ kind: 'arrow', a: o, b: hs[0], also: [hs[1]], key: 'no-arrow' })
+    store.drawBondArrow(hs[0]!, o)
+    store.answerNet(true)
+    // the net dipole: the drag out of oxygen is acted out until the first try
+    expect(store.cue()).toEqual({ kind: 'aim', id: o })
+    store.setView('flat')
+    expect(store.cue()).toEqual({ kind: 'ask', key: 'view-shape' })
+    store.setView('shape')
+    store.drawNetArrow({ x: 0, y: -1 }, seenAs(WATER), WORLD) // the opposite way
+    expect(store.cue()).toEqual({ kind: 'atoms', ids: [o] })
+  })
+  it('starts the bond arrow demonstration with a different answer from one molecule to the next', () => {
+    // the first thing the hand shows must not always be the same answer: 0 is the arrow out, 1 the arrow back, 2 the button
+    const firsts = new Set<number>()
+    for (const id of ['CH4', 'NH3', 'H2O', 'CO2']) {
+      toStep(id, 'polar')
+      const c = store.cue()
+      expect(c?.kind, id).toBe('arrow')
+      if (c?.kind === 'arrow') firsts.add(c.first)
+    }
+    expect([...firsts].sort()).toEqual([0, 1, 2])
+  })
+  it('is off while the molecule picker is open, and in free build once an atom is on the board', () => {
+    store.togglePicker(true)
+    expect(store.cue()).toBeNull()
+    store.togglePicker(false)
+    store.setMode('free')
+    expect(store.cue()).toEqual({ kind: 'tray', el: 'H', demo: true })
+    store.place('H', null)
+    expect(store.cue()).toBeNull()
+    store.clearBoard()
+    store.setMode('guided')
+  })
+})
+
 describe('placing with a tap', () => {
   it('puts the middle atom in the middle even when old positions are left over from the count step', () => {
     store.selectProblem(idx('CH2O'))

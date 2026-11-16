@@ -2,6 +2,20 @@
 
 Dated entries, newest first. Each says what was run, on which build, by whom, and what it did not cover. Add an entry when you verify something a reader would otherwise have to take on trust. A claim with no entry here has not been checked.
 
+## 2026-11-16: the glow and the hand, the strip of checks, one-move controls, aim points (build session, team lewis)
+
+Run in the main checkout on the branch `lewis/prompts-and-checks`, on the working tree on top of 292b38b before it was committed. `pnpm verify` was run once more on that tree just before the commit and passed with the same numbers. The browser checks were not rerun after that.
+
+- `pnpm verify` exits 0: typecheck, lint, 418 unit tests in 10 files, `check-repo: ok`, and the production web build.
+- Browser, real input (headless Chromium with a software renderer), against that build served on port 5210:
+  - All 20 molecules solved start to finish at 1360 x 840 with a mouse (1192 checks) and at 390 x 844 with touch (1152 checks), 0 failed. New in each run: the glow is on the control or the atoms the next action needs at every step, read from the page itself; the three checks are over the board from the place step on and end at "pass pass pass"; each atom shows its electron count in the place step; the label beside a bond's arrow names the atom it points at; the net dipole has its aim points, and every second polar molecule sets its net dipole with a tap on one.
+  - The extras pass at both sizes (333 checks with a mouse, 252 with touch). New in them: a swipe across a bond cuts it and a swipe across bare board changes nothing; an atom carried to the Clear button comes off the board, and the button says so while the atom is carried; in free build an atom dropped on another is bonded to it; Clear from the 3D view and from step 7, and Undo after it putting the step, the view and the answers back; the hand acting out the first drag, and the atom it carries keeping its face.
+  - Home screen, opening the module, the way back and saved progress pass at both sizes (76 checks with a mouse, 74 with touch).
+- A second session read the new code and reported eight findings. `HANDOFF.md` lists them. All eight were acted on before these runs. The fixes have had no second read.
+- Looked at by the session that built it, in screenshots at both sizes: the glow and the hand on a question, the hand acting out a bond, the strip in each state, the bin, the swipe's line, the aim points with their labels.
+- Not checked: a real phone or tablet (W-003), Safari's engine (W-012), frame rate on a real device, and whether a student finds the hand's demonstration and the aim points clear. The hand's demonstration and the glow were seen as still frames, never at full speed.
+- Reduced motion, one look on the development server with the browser's setting on, at the bond step of carbon dioxide: both atoms are ringed, the hand points at the outer atom and stays where it is, neither the hand's poke nor the glow's pulse runs, and the page reports no error. The full runs did not have that setting on.
+
 ## 2026-11-16: steps 6 and 7 with the dipoles drawn (build session, team lewis)
 
 Run in the main checkout, on the working tree that was committed on top of 49d0d69 the same day.

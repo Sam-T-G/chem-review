@@ -7,15 +7,19 @@ import { courseEN } from '../../chem/polarity'
 import { atomById, electronsOnBoard, sharedElectrons, shellCount, type Structure } from '../../chem/structure'
 import { shapeOf, type ShapeInfo, type ShapeName } from '../../chem/vsepr'
 import {
+  BIN_WORDS,
   DIPOLE_WORDS,
   HYBRIDS,
   STEPS,
+  aimWords,
   angleMarks,
+  arrowCaption,
   arrowLabel,
   bondInstruction,
   bondQuestion,
   bondStatus,
   cap,
+  checkChips,
   checkCoach,
   checkRows,
   elementsOf,
@@ -23,6 +27,8 @@ import {
   finishedNotes,
   formalChargeSum,
   groupFacts,
+  howTo,
+  howToFree,
   hybridLabel,
   hybridQuestion,
   inventory,
@@ -34,6 +40,8 @@ import {
   netArrowQuestion,
   netQuestion,
   nextMove,
+  pairWords,
+  placeInstruction,
   placedCount,
   polarity,
   polarityNote,
@@ -49,6 +57,7 @@ import {
   type BondAnswer,
   type CheckRow,
   type Coach,
+  type HowTo,
   type Hybrid,
   type TallyReveal,
   type StepId,
@@ -83,6 +92,23 @@ export interface MountOptions {
   onFeel?: (kind: Feel) => void
 }
 export type Feel = 'land' | 'bond' | 'refuse' | 'done'
+
+/** The pointing hand: a white glove with a grape cuff, drawn pointing up. The finger that points
+ *  at things on the page is this drawing, and so are the two small pictures beside a how-to line. */
+const HAND = `<path class="mb-hand-cuff" d="M17 50h21a2.500 2.500 0 0 1 2.500 2.500v3A2.500 2.500 0 0 1 38 58H17a2.500 2.500 0 0 1-2.500-2.500v-3A2.500 2.500 0 0 1 17 50z"/><path class="mb-hand-skin" d="M16 30V8.500a5.500 5.500 0 0 1 11 0V21c.6-2.400 5.600-2.600 6 .6.8-2 5.400-1.800 6 1.200 1-1.600 5-1 5 2V38c0 9-6 15-15 15h-5c-5 0-8.500-2.500-11-7L6 36.500c-2-3.200 2.200-6.400 5-3.800l5 4.300z"/><path class="mb-hand-line" d="M27 21v6M33 22v5M39 23.500v4"/><path class="mb-hand-shine" d="M20 10.500v8"/>`
+const GESTURE: Record<HowTo['gesture'], string> = {
+  // the hand with an arrow beside it: press, move, let go
+  drag: `<svg class="mb-how-icon" viewBox="-2 0 72 60" aria-hidden="true"><path class="mb-how-mark" d="M50 30h14M58 23l7 7-7 7"/>${HAND}</svg>`,
+  // the hand with two short arcs over the fingertip: a tap
+  tap: `<svg class="mb-how-icon" viewBox="-2 -8 72 68" aria-hidden="true"><path class="mb-how-mark" d="M9 4a13 13 0 0 1 25 0M3 0a20 20 0 0 1 37 0"/>${HAND}</svg>`,
+  // the hand beside a line with a stroke through it: a swipe across a bond
+  swipe: `<svg class="mb-how-icon" viewBox="-2 0 72 60" aria-hidden="true"><path class="mb-how-mark is-bond" d="M58 6v44"/><path class="mb-how-mark" d="M48 38l20-18"/>${HAND}</svg>`,
+}
+/** How the board is worked in this step: one line for each gesture, with a small picture of it. */
+function howBox(lines: HowTo[]): string {
+  if (!lines.length) return ''
+  return `<ul class="mb-how" data-k="how" data-kv="">${lines.map((h) => `<li>${GESTURE[h.gesture]}<span>${esc(h.text)}</span></li>`).join('')}</ul>`
+}
 
 // An atom as drawn in the panel and the tray: its symbol under a pale patch with two eyes, like the balls on the board.
 // Each element blinks on its own beat.
@@ -238,7 +264,7 @@ function stepCount(s: State, p: Problem): string {
         ${
           right
             ? `<span class="mb-row-val" data-k="value-${el}">${n}</span><span class="mb-mark" data-ok="true">${ICON.check}<span class="mb-sr">correct</span></span>`
-            : `<div class="mb-stepper" role="group" aria-label="Valence electrons of ${name}">
+            : `<div class="mb-stepper" role="group" aria-label="Valence electrons of ${name}" data-cue="count-${el}">
                 <button data-act="count" data-el="${el}" data-d="-1" data-key="dec-${el}" aria-label="One fewer for ${name}" ${n <= 0 ? 'disabled' : ''}>−</button>
                 <output aria-live="polite" data-k="count-${el}">${n}</output>
                 <button data-act="count" data-el="${el}" data-d="1" data-key="inc-${el}" aria-label="One more for ${name}" ${n >= 8 ? 'disabled' : ''}>+</button>
@@ -254,7 +280,7 @@ function stepCount(s: State, p: Problem): string {
       ? `<div class="mb-total is-right" data-k="total" data-kv="right"><p class="mb-total-big"><b data-k="total-value">${totalElectrons(p)}</b> valence electrons</p><p class="mb-eq">${esc(totalSum(p))} = ${totalElectrons(p)}</p></div>`
       : `<div class="mb-total" data-k="total" data-kv="open">
           <label for="mb-total">${formulaHtml(p)} has ${esc(inventory(p))}. How many valence electrons is that in total?</label>
-          <div class="mb-total-row">
+          <div class="mb-total-row" data-cue="total">
             <input id="mb-total" class="mb-num" type="text" inputmode="numeric" autocomplete="off" maxlength="2" data-key="total" value="${c.total ?? ''}" />
             <button class="mb-btn mb-btn-soft" data-act="total-check" data-key="total-check">Check the total</button>
           </div>
@@ -263,12 +289,11 @@ function stepCount(s: State, p: Problem): string {
   }
   return `<p class="mb-body">Valence electrons are the electrons in an atom's outer shell. Set the number for each atom.</p>
     <div class="mb-rows" data-k="rows" data-kv="">${rows}</div>
-    ${allRight ? '' : `<button class="mb-btn mb-btn-soft" data-act="count-check" data-key="count-check">Check my counts</button>`}
+    ${allRight ? '' : `<button class="mb-btn mb-btn-soft" data-act="count-check" data-key="count-check" data-cue="count-check">Check my counts</button>`}
     ${total}`
 }
 
 function stepPlace(s: State, p: Problem): string {
-  const c = lower(p.center)
   let question = ''
   if (middleNeeded(p)) {
     const chips = middleChoices(p)
@@ -278,7 +303,7 @@ function stepPlace(s: State, p: Problem): string {
         return `<button class="mb-choice" data-act="middle" data-el="${el}" data-key="mid-${el}" data-state="${state}" ${s.middle.right ? 'disabled' : ''}>${ball(el, 'is-small')}<span>${cap(lower(el))}</span></button>`
       })
       .join('')
-    question = `<p class="mb-q">Which atom goes in the middle?</p><div class="mb-choices">${chips}</div>${s.middle.right ? fb(s.middle.text, 'good') : coach(s.middle.coach)}`
+    question = `<p class="mb-q">Which atom goes in the middle?</p><div class="mb-choices" data-cue="middle">${chips}</div>${s.middle.right ? fb(s.middle.text, 'good') : coach(s.middle.coach)}`
   }
   const ready = !middleNeeded(p) || s.middle.right
   const { placed, of } = placedCount(p, s.s)
@@ -286,7 +311,8 @@ function stepPlace(s: State, p: Problem): string {
   return `${question}
     ${
       ready
-        ? `<p class="mb-body">${middleNeeded(p) ? `Drag each atom onto the board, with ${c} in the middle.` : 'Drag each atom onto the board.'}</p>
+        ? `<p class="mb-body">${esc(placeInstruction(p))}</p>
+           ${done ? '' : howBox(howTo('place', p))}
            ${fb(done ? `All ${of} atoms are on the board, each with its own valence electrons.` : `${placed} of ${of} atoms on the board.`, done ? 'good' : 'info')}`
         : ''
     }`
@@ -294,11 +320,11 @@ function stepPlace(s: State, p: Problem): string {
 
 function stepBond(s: State, p: Problem): string {
   const st = bondStatus(p, s.s)
-  return `<p class="mb-body">${esc(bondInstruction(p))}</p>${fb(st.text, st.tone)}`
+  return `<p class="mb-body">${esc(bondInstruction(p))}</p>${st.done ? '' : howBox(howTo('bond', p))}${fb(st.text, st.tone)}`
 }
 
 function checklist(rows: CheckRow[]): string {
-  return `<ul class="mb-checks" data-k="checks" data-kv="">${rows
+  return `<ul class="mb-checks" data-k="checks" data-kv="" data-cue="checks">${rows
     .map(
       (r) =>
         `<li data-state="${r.state}"><span class="mb-mark" data-ok="${r.state === 'pass'}" data-wait="${r.state === 'wait'}">${r.state === 'pass' ? ICON.check : r.state === 'fail' ? ICON.cross : ''}</span><span>${esc(r.text)}<span class="mb-sr">${r.state === 'pass' ? ' (done)' : r.state === 'fail' ? ' (not yet)' : ''}</span></span></li>`,
@@ -312,6 +338,7 @@ function stepCheck(s: State, p: Problem): string {
   return `<p class="mb-body">Count the electrons around each atom. Shared electrons count for both atoms in the bond.</p>
     ${checklist(checkRows(p, s.s))}
     ${done ? fb(`This is the Lewis structure of ${p.name}.`, 'good') : coach(checkCoach(p, s.s))}
+    ${done ? '' : howBox(howTo('check', p))}
     ${notes.map((n) => `<p class="mb-note">${esc(n)}</p>`).join('')}`
 }
 
@@ -353,7 +380,7 @@ function stepPolar(s: State, p: Problem): string {
     else if (k.terminal === asked) {
       // a polar bond is answered on the board, by drawing its arrow; a nonpolar bond with the button
       const q = bondQuestion(k.center, k.terminal)
-      const none = `<button class="mb-choice" data-act="bond-polar" data-el="${k.terminal}" data-answer="nonpolar" data-key="pol-${k.terminal}-nonpolar" data-state="${a?.pick === 'nonpolar' ? 'wrong' : 'idle'}">${esc(q.none)}</button>`
+      const none = `<button class="mb-choice" data-act="bond-polar" data-el="${k.terminal}" data-answer="nonpolar" data-key="pol-${k.terminal}-nonpolar" data-cue="no-arrow" data-state="${a?.pick === 'nonpolar' ? 'wrong' : 'idle'}">${esc(q.none)}</button>`
       html += `<p class="mb-q">${esc(q.ask)}</p><p class="mb-body mb-sub">${esc(q.sub)}</p><p class="mb-body mb-draw">${DRAW_ICON}<span>${esc(q.draw)}</span></p><div class="mb-choices">${none}</div>${coach(a?.coach)}`
     }
   }
@@ -363,7 +390,7 @@ function stepPolar(s: State, p: Problem): string {
   if (net.pick === null) {
     const q = netQuestion(p)
     const chips = q.choices.map((c) => `<button class="mb-choice" data-act="net-polar" data-polar="${c.polar}" data-key="net-${c.polar ? 'polar' : 'nonpolar'}" data-state="idle">${esc(c.label)}</button>`).join('')
-    return `${html}${shown ? dipoleKey(false) : ''}<p class="mb-q">${esc(q.ask)}</p><p class="mb-body mb-sub">${esc(q.sub)}</p><div class="mb-choices">${chips}</div>`
+    return `${html}${shown ? dipoleKey(false) : ''}<p class="mb-q">${esc(q.ask)}</p><p class="mb-body mb-sub">${esc(q.sub)}</p><div class="mb-choices" data-cue="net">${chips}</div>`
   }
   html += net.right ? fb(net.text, 'good') : coach(net.coach)
   if (!m.polar) return `${html}${shown ? dipoleKey(false) : ''}`
@@ -390,13 +417,13 @@ function stepOrbitals(s: State, p: Problem): string {
         </div>
       </div>`
     return `<p class="mb-q">${esc(q.ask)}</p><p class="mb-body mb-sub">${esc(q.sub)}</p>
-      <div class="mb-rows" data-k="rows" data-kv="">${row('sigma', q.sigma, o.sigma)}${row('pi', q.pi, o.pi)}</div>
+      <div class="mb-rows" data-k="rows" data-kv="" data-cue="bond-counts">${row('sigma', q.sigma, o.sigma)}${row('pi', q.pi, o.pi)}</div>
       <button class="mb-btn mb-btn-soft" data-act="bonds-check" data-key="bonds-check">${esc(q.check)}</button>
       ${coach(o.counts.coach)}`
   }
   if (!o.hybrid.right) {
     const chips = HYBRIDS.map((h) => `<button class="mb-choice is-num" data-act="hybrid" data-h="${h}" data-key="hyb-${h}" data-state="${o.hybrid.pick === h ? 'wrong' : 'idle'}">${esc(hybridLabel(h))}</button>`).join('')
-    return `${fb(o.counts.text, 'good')}<p class="mb-q">${esc(hybridQuestion(p.center))}</p><div class="mb-choices">${chips}</div>${coach(o.hybrid.coach)}`
+    return `${fb(o.counts.text, 'good')}<p class="mb-q">${esc(hybridQuestion(p.center))}</p><div class="mb-choices" data-cue="hybrid">${chips}</div>${coach(o.hybrid.coach)}`
   }
   return `${fb(o.counts.text, 'good')}${fb(o.hybrid.text, 'good')}${readout(p, p.center, info, mixedOuter(s.s), profile(p, s.s), false)}${fb(finishedLine(p), 'good')}`
 }
@@ -414,7 +441,7 @@ function stepShape(s: State, p: Problem): string {
       .join('')
     return `<p class="mb-q">How many electron groups are around ${c}?</p>
       <p class="mb-body mb-sub">A lone pair (2 unshared electrons on one atom) is 1 group. A bond is 1 group, even a double or triple bond.</p>
-      <div class="mb-choices">${groupChips}</div>
+      <div class="mb-choices" data-cue="groups">${groupChips}</div>
       ${coach(sh.groupsCoach)}`
   }
   if (!sh.pick) {
@@ -423,7 +450,7 @@ function stepShape(s: State, p: Problem): string {
       .join('')
     return `${fb(sh.groupsFeedback, 'good')}
       <p class="mb-q">The groups push each other as far apart as they can get. What shape do the atoms make?</p>
-      <div class="mb-choices">${chips}</div>`
+      <div class="mb-choices" data-cue="shapes">${chips}</div>`
   }
   return `${sh.pickRight ? fb(sh.pickFeedback, 'good') : coach(sh.pickCoach)}${readout(p, p.center, info, mixedOuter(s.s))}`
 }
@@ -445,7 +472,7 @@ function freePanel(s: State): string {
              ? `<p class="mb-note">${a.topology.kind === 'star' ? `This demo has no 3D shape for ${a.topology.terminals.length + Math.floor((center?.lone ?? 0) / 2)} electron groups.` : 'This demo shows 3D shapes only for molecules with one middle atom.'}</p>`
              : ''
          }`
-  return `<p class="mb-body">Drag atoms onto the board. Drag one atom onto another to bond them. Tap an atom or a bond to change it.</p>
+  return `${howBox(howToFree())}
     ${checklist(checkRows(null, s.s))}
     ${s.s.atoms.length ? `<p class="mb-charge">Charge of everything on the board: <b>${charge}</b></p>` : ''}
     ${note}
@@ -497,12 +524,16 @@ function drawFor(s: State, st: Structure): SceneInput['draw'] {
   const labels: Record<string, string> = {}
   if (kind === 'net') {
     labels[m.center.id] = netArrowLabel(m.center.el)
-    return { kind, center: m.center.id, aim: s.polar.aim, wrong: s.polar.arrow.drawn ? { dir: s.polar.arrow.drawn } : null, labels }
+    return { kind, center: m.center.id, aim: s.polar.aim, wrong: s.polar.arrow.drawn ? { dir: s.polar.arrow.drawn } : null, labels, captions: {}, aims: aimWords(m) }
   }
   const started = s.selection?.kind === 'atom' ? s.selection.id : null
-  for (const a of st.atoms) labels[a.id] = arrowLabel(a.el, started !== null && started !== a.id)
+  const captions: Record<string, string> = {}
+  for (const a of st.atoms) {
+    labels[a.id] = arrowLabel(a.el, started !== null && started !== a.id)
+    captions[a.id] = arrowCaption(a.el)
+  }
   const asked = store.bondAsked(s)
-  return { kind, center: m.center.id, aim: s.polar.aim, wrong: (asked && s.polar.bonds[asked]?.drawn) || null, labels }
+  return { kind, center: m.center.id, aim: s.polar.aim, wrong: (asked && s.polar.bonds[asked]?.drawn) || null, labels, captions, aims: null }
 }
 
 /** The groups the board should ring after a wrong group count, while that question is still open. */
@@ -536,7 +567,27 @@ function ledger(s: State): string {
   } else first = tile('Electrons on the board', String(have), '', '', bead)
   const a = s.mode === 'free' && s.s.atoms.length ? assess(s.s) : null
   const chargeTile = a ? tile('Charge', a.charge === 0 ? '0' : `${Math.abs(a.charge)}${a.charge > 0 ? '+' : '−'}`) : ''
-  return `${first}${tile('In bonds', String(shared))}${tile('Unshared', String(have - shared))}${chargeTile}`
+  const pairs = pairWords(s.s)
+  const more = (text: string) => (text ? `<i class="mb-tile-more">${esc(text)}</i>` : '')
+  return `${first}${tile('In bonds', String(shared), more(pairs.bonded))}${tile('Unshared', String(have - shared), more(pairs.lone))}${chargeTile}`
+}
+
+/** The three checks, in a strip that stays under the counter in every step that has a board:
+ *  a mark, a name, and a count where the check has one. The full sentence is there for a screen
+ *  reader and as a tooltip. */
+function checkbar(s: State): string {
+  if (store.isSpecimen(s)) return ''
+  // before the check step an ion's charge has not been dealt with yet, so its electron total waits
+  return checkChips(s.mode === 'guided' ? store.problemOf(s) : null, s.s, s.mode === 'guided' && (s.step === 'place' || s.step === 'bond'))
+    .map(
+      (c) =>
+        `<li class="mb-chk" data-k="chk-${c.id}" data-kv="${c.state}" data-state="${c.state}" title="${esc(c.says)}"><span class="mb-mark" data-ok="${c.state === 'pass'}" data-wait="${c.state === 'wait'}">${
+          c.state === 'pass' ? ICON.check : c.state === 'fail' ? ICON.cross : ''
+        }</span><span class="mb-chk-l" aria-hidden="true">${esc(c.label)}</span><span class="mb-chk-s" aria-hidden="true">${esc(c.short)}</span>${c.value ? `<b aria-hidden="true">${esc(c.value)}</b>` : ''}<span class="mb-sr">${esc(c.says)}${
+          c.state === 'pass' ? ' (done)' : c.state === 'fail' ? ' (not yet)' : ''
+        }</span></li>`,
+    )
+    .join('')
 }
 
 function selectionCard(s: State, st: Structure): string {
@@ -577,7 +628,7 @@ function dock(s: State): string {
   const canEdit = store.editable(s)
   const tools = `<div class="mb-tools">
       <button class="mb-icon" data-act="undo" data-key="undo" ${canEdit && s.past.length ? '' : 'disabled'} aria-label="Undo">${ICON.undo}<span>Undo</span></button>
-      <button class="mb-icon" data-act="clear" data-key="clear" ${canEdit && s.s.atoms.length ? '' : 'disabled'} aria-label="Clear the board">${ICON.clear}<span>Clear</span></button>
+      <button class="mb-icon" data-act="clear" data-key="clear" data-bin="${esc(BIN_WORDS)}" ${s.s.atoms.length ? '' : 'disabled'} aria-label="Clear the board">${ICON.clear}<span>Clear</span></button>
     </div>`
   // Guided: the switch appears once the shape has been revealed. Free build: only while the 3D
   // shape is showing (the panel's "See the 3D shape" button opens it), so the tray keeps its room.
@@ -585,7 +636,7 @@ function dock(s: State): string {
   const views = canShape
     ? `<div class="mb-views" role="tablist" aria-label="View">
         <button role="tab" aria-selected="${s.view === 'flat'}" data-act="view" data-view="flat" data-key="view-flat">Flat drawing</button>
-        <button role="tab" aria-selected="${s.view === 'shape'}" data-act="view" data-view="shape" data-key="view-shape">3D shape</button>
+        <button role="tab" aria-selected="${s.view === 'shape'}" data-act="view" data-view="shape" data-key="view-shape" data-cue="view-shape">3D shape</button>
       </div>`
     : ''
   let middle = ''
@@ -606,7 +657,7 @@ function dock(s: State): string {
 
 /** Everything in a redrawn region that moves once when it appears: numbers that pop, boxes that
  *  rise, answers and cards that shake or flash. */
-const ONE_SHOT = '.mb-stepper output, .mb-row, .mb-row-val, .mb-tile-v b, .mb-total-big b, .mb-fb, .mb-choice, .mb-sel, .mb-picker'
+const ONE_SHOT = '.mb-stepper output, .mb-row, .mb-row-val, .mb-tile-v b, .mb-total-big b, .mb-fb, .mb-choice, .mb-sel, .mb-picker, .mb-chk'
 /** The pieces of each redrawn region that leave and arrive like bubbles: in the panel, each chunk
  *  of a step's text, each row of the checklist, each hint, and the cards under the counters. Above
  *  the board, the tiles of the electron counter. Under it, the atom tray or the card for a
@@ -655,7 +706,7 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
       <div class="mb-canvas-wrap"></div>
       <div class="mb-overlay"></div>
       <div class="mb-top"></div>
-      <div class="mb-center"><div class="mb-ledger" role="group" aria-label="Electrons"></div><p class="mb-toast" role="status"></p></div>
+      <div class="mb-center"><div class="mb-ledger" role="group" aria-label="Electrons"></div><ul class="mb-checkbar" aria-label="Checks"></ul><p class="mb-toast" role="status"></p></div>
       <div class="mb-dock"></div>
     </section>
     <aside class="mb-panel" aria-label="Guide"></aside>
@@ -663,7 +714,7 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
   const q = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel)!
   const stage = q('.mb-stage')
   const wrap = q('.mb-canvas-wrap')
-  const regions = { top: q('.mb-top'), ledger: q('.mb-ledger'), dock: q('.mb-dock'), panel: q('.mb-panel') }
+  const regions = { top: q('.mb-top'), ledger: q('.mb-ledger'), checks: q('.mb-checkbar'), dock: q('.mb-dock'), panel: q('.mb-panel') }
   const toastEl = q('.mb-toast')
   const fx = q('.mb-fx')
   const lastHtml: Record<string, string> = {}
@@ -736,6 +787,11 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
     }
   }
 
+  /** True when a point on the page is on the bin (the Clear button), with some room around it. */
+  const overBin = (x: number, y: number) => {
+    const r = regions.dock.querySelector('[data-key="clear"]')?.getBoundingClientRect()
+    return !!r && r.width > 0 && x >= r.left - 18 && x <= r.right + 18 && y >= r.top - 18 && y <= r.bottom + 18
+  }
   let scene: Scene
   try {
     scene = new Scene(wrap, q('.mb-overlay'), store.positions, {
@@ -743,6 +799,17 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
       tapBond: (id) => store.tapBond(id),
       tapEmpty: () => store.clearSelection(),
       bond: (a, b) => store.bond(a, b),
+      cut: (id) => store.unbond(id),
+      // the bin: while an atom is carried, the Clear button opens up as the place to drop it
+      carry: (id, x, y) => {
+        regions.dock.classList.toggle('is-binning', id !== null)
+        regions.dock.classList.toggle('is-bin-hot', id !== null && overBin(x, y))
+      },
+      drop: (id, x, y) => {
+        if (!overBin(x, y)) return false
+        store.remove(id)
+        return true
+      },
       drawBond: (from, to) => store.drawBondArrow(from, to),
       drawNet: (drawn, seen, world) => store.drawNetArrow(drawn, seen, world),
       place: (el, at) => store.place(el, at),
@@ -761,6 +828,241 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
     store.board.halfW = halfW
     store.board.halfH = halfH
   }
+
+  // ---------------------------------------------------------------- where to look next
+  //
+  // The place of the student's next action glows, and a pointing hand shows it: it points at a
+  // question in the panel, and on the board it acts out the drag the step needs. All of it is
+  // drawn in the layer over the page, so no control's own styles or animations are touched, and
+  // it is placed again on every frame, because the model turns and the panel scrolls.
+  const halos: HTMLElement[] = []
+  const hand = document.createElement('span')
+  hand.className = 'mb-finger'
+  hand.innerHTML = `<svg viewBox="0 0 48 60" aria-hidden="true">${HAND}</svg>`
+  const carried = document.createElement('span')
+  carried.className = 'mb-cue-ball'
+  const trail = document.createElement('span')
+  trail.className = 'mb-cue-line'
+  fx.append(trail, carried, hand)
+  /** The fingertip inside the hand's 38 by 48 box. */
+  const TIP = { x: 17.2, y: 2.6 }
+  let cueNow: store.Cue | null = null
+  let cueKey = ''
+  let cueAt = performance.now()
+  let cueRaf = 0
+  let pressed = false
+  /** For tests: what the layer showed on its last frame. */
+  let cueShown: { halos: { x: number; y: number; w: number; h: number }[]; hand: 'off' | 'point' | 'demo' } = { halos: [], hand: 'off' }
+  const radii = new WeakMap<Element, number>()
+  const arrived = new WeakSet<Element>()
+
+  const setCue = (c: store.Cue | null) => {
+    const key = JSON.stringify(c)
+    if (key !== cueKey) {
+      cueKey = key
+      cueAt = performance.now()
+    }
+    cueNow = c
+  }
+  /** A glow around a box on the page, in the layer's own coordinates. */
+  const glow = (i: number, left: number, top: number, width: number, height: number, radius: number) => {
+    let el = halos[i]
+    if (!el) {
+      el = document.createElement('span')
+      el.className = 'mb-halo'
+      fx.prepend(el)
+      halos[i] = el
+    }
+    // styles are written only when the box has moved or changed size: most frames nothing has
+    const box = `${left.toFixed(1)},${top.toFixed(1)},${width.toFixed(1)},${height.toFixed(1)},${radius.toFixed(1)}`
+    if (el.dataset.box !== box) {
+      el.dataset.box = box
+      el.style.transform = `translate(${left.toFixed(1)}px, ${top.toFixed(1)}px)`
+      el.style.width = `${width.toFixed(1)}px`
+      el.style.height = `${height.toFixed(1)}px`
+      el.style.borderRadius = `${radius.toFixed(1)}px`
+    }
+    el.classList.add('is-on')
+    cueShown.halos.push({ x: left, y: top, w: width, h: height })
+  }
+  /** The hand with its fingertip at a point, pointing along `deg` (0 is to the right, 90 is down). */
+  const pointAt = (x: number, y: number, deg: number, how: 'point' | 'demo', scale = 1, opacity = 1) => {
+    const at = `translate(${(x - TIP.x).toFixed(1)}px, ${(y - TIP.y).toFixed(1)}px) rotate(${(deg + 90).toFixed(1)}deg) scale(${scale.toFixed(3)})`
+    if (hand.style.transform !== at) hand.style.transform = at
+    const seen = opacity.toFixed(2)
+    if (hand.style.opacity !== seen) hand.style.opacity = seen
+    hand.classList.toggle('is-poking', how === 'point')
+    cueShown.hand = how
+  }
+  const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2)
+  /** One round of a drag acted out by the hand, from A to B: it comes down on A, presses, moves to
+   *  B, lets go and fades. `t` is seconds into the round. Returns how far along the way it is, 0 to 1. */
+  const actOut = (t: number, a: { x: number; y: number }, b: { x: number; y: number }, size = 1): number => {
+    const go = t < 0.75 ? 0 : t > 1.95 ? 1 : ease((t - 0.75) / 1.2)
+    const x = a.x + (b.x - a.x) * go
+    const y = a.y + (b.y - a.y) * go
+    const fade = t < 0.3 ? t / 0.3 : t > 2.35 ? Math.max(0, 1 - (t - 2.35) / 0.35) : 1
+    const down = t > 0.45 && t < 2.1
+    // the hand comes in from the lower right, so it never covers what it presses on
+    pointAt(x, y + (t < 0.45 ? (0.45 - t) * 30 : 0), -118, 'demo', size * (down ? 0.9 : 1), fade)
+    return go
+  }
+  /** The hand's size beside an atom drawn with this radius: smaller on a phone, where the atoms are small. */
+  const sized = (r: number) => Math.max(0.62, Math.min(1.25, r / 30))
+  const ROUND = 3.3
+
+  const tickCue = (now: number) => {
+    cueRaf = requestAnimationFrame(tickCue)
+    cueShown = { halos: [], hand: 'off' }
+    const box = root.getBoundingClientRect()
+    const age = (now - cueAt) / 1000
+    const c = cueNow
+    let handOn = false
+    let carry: { x: number; y: number; size: number; el: El } | null = null
+    let line: { a: { x: number; y: number }; b: { x: number; y: number }; go: number } | null = null
+    // the hand waits for the new step's text to arrive, and stays away while the student is acting
+    const handFree = age > 0.7 && !pressed && !scene.busy
+    const round = calm ? 1.2 : ((age - 0.7) % ROUND + ROUND) % ROUND
+    const circle = (at: { x: number; y: number; r: number }, pad = 7) => glow(cueShown.halos.length, at.x - box.left - at.r - pad, at.y - box.top - at.r - pad, (at.r + pad) * 2, (at.r + pad) * 2, at.r + pad)
+    const rel = (p: { x: number; y: number }) => ({ x: p.x - box.left, y: p.y - box.top })
+    const elOf = (id: string) => store.getState().s.atoms.find((a) => a.id === id)?.el
+
+    /** The glow on a control in the panel or under the board, and with `withHand` the hand that
+     *  points at it from the left. False when the control is not there to point at. */
+    const controlGlow = (el: HTMLElement | null, withHand: boolean): boolean => {
+      const r = el?.getBoundingClientRect()
+      // inside the panel the text scrolls: a question that is scrolled out of view gets no glow
+      const view = el?.closest('.mb-scroll')?.getBoundingClientRect()
+      // a piece that is still blowing up into place is not there to point at yet: settle() marks it,
+      // and while its entrance runs it is not fully opaque
+      let arriving = false
+      for (let up: HTMLElement | null = el; up && up !== root && !arriving; up = up.parentElement) arriving = up.style.pointerEvents === 'none'
+      const piece = el?.closest<HTMLElement>('.is-new')
+      if (piece && !arriving && !arrived.has(piece)) {
+        arriving = parseFloat(getComputedStyle(piece).opacity) < 0.95
+        // once a piece has arrived it is not measured again
+        if (!arriving) arrived.add(piece)
+      }
+      if (!el || !r || r.width === 0 || arriving || (view && (r.bottom < view.top + 12 || r.top > view.bottom - 12))) return false
+      let radius = radii.get(el)
+      if (radius === undefined) {
+        radius = Math.min(parseFloat(getComputedStyle(el).borderTopLeftRadius) || 14, r.height / 2)
+        radii.set(el, radius)
+      }
+      const pad = 5
+      const top = Math.max(r.top - pad, view ? view.top + 2 : -Infinity)
+      const bottom = Math.min(r.bottom + pad, view ? view.bottom - 2 : Infinity)
+      glow(cueShown.halos.length, r.left - pad - box.left, top - box.top, r.width + pad * 2, bottom - top, radius + pad)
+      // The hand points at a control from the left, where there is room beside the panel. On a phone
+      // the panel fills the width and the hand would cover the words beside the control: the glow
+      // does the job there.
+      if (!withHand || !handFree || box.width <= 880 || r.left - pad - box.left <= 34) return true
+      const y = Math.min(Math.max(r.top + Math.min(r.height / 2, 24), top + 8), bottom - 8)
+      pointAt(r.left - pad - 2 - box.left, y - box.top, 0, 'point')
+      handOn = true
+      return true
+    }
+
+    if (c && age > 0.25) {
+      if (c.kind === 'ask' || c.kind === 'next') {
+        controlGlow(c.kind === 'next' ? regions.panel.querySelector<HTMLElement>('.mb-btn-main:not([disabled])') : root.querySelector<HTMLElement>(`[data-cue="${c.key}"]`), c.kind === 'ask')
+      } else if (c.kind === 'tray') {
+        const chip = regions.dock.querySelector<HTMLElement>(`[data-tray="${c.el}"]`)
+        const r = chip?.getBoundingClientRect()
+        // on a phone, free build's row of atoms scrolls sideways: a chip that is scrolled out of the row is not pointed at
+        const row = chip?.closest('.mb-tray')?.getBoundingClientRect()
+        if (r && r.width > 0 && (!row || (r.left >= row.left - 4 && r.right <= row.right + 4))) {
+          const at = { x: r.left + r.width / 2, y: r.top + r.height / 2, r: r.width / 2 }
+          circle(at, 5)
+          if (handFree) {
+            if (c.demo && !calm) {
+              const go = actOut(round, rel(at), rel(scene.boardOnPage()), sized(at.r))
+              if (round > 0.45 && round < 2.35) carry = { ...rel({ x: at.x + (scene.boardOnPage().x - at.x) * go, y: at.y + (scene.boardOnPage().y - at.y) * go }), size: r.width * 0.86, el: c.el }
+            } else pointAt(at.x - box.left, r.top - 4 - box.top, 90, 'point', sized(at.r))
+            handOn = true
+          }
+        }
+      } else if (c.kind === 'drag' || c.kind === 'arrow') {
+        const a = scene.atomOnPage(c.kind === 'drag' ? c.from : c.a)
+        const b = scene.atomOnPage(c.kind === 'drag' ? c.to : c.b)
+        if (a && b) {
+          circle(a)
+          circle(b)
+          if (c.kind === 'arrow') for (const id of c.also) { const o = scene.atomOnPage(id); if (o) circle(o) }
+          // a bond's question has a third answer, the button for a bond with no arrow: it glows with the atoms
+          const button = c.kind === 'arrow' ? root.querySelector<HTMLElement>(`[data-cue="${c.key}"]`) : null
+          // the hand takes the answers in turn: the arrow one way, the arrow the other way, the button
+          const turn = c.kind === 'arrow' ? (Math.floor(Math.max(0, age - 0.7) / ROUND) + c.first) % 3 : 0
+          const atButton = turn === 2 && !calm && !!button && controlGlow(button, true)
+          if (button && turn !== 2) controlGlow(button, false)
+          if (handFree && !atButton) {
+            if (calm) pointAt(a.x + a.r * 0.7 - box.left, a.y + a.r * 0.7 - box.top, -135, 'point', sized(a.r))
+            else if (c.kind === 'drag') {
+              const go = actOut(round, rel(a), rel(b), sized(a.r))
+              const el = elOf(c.from)
+              if (el && round > 0.45 && round < 2.35) carry = { x: a.x + (b.x - a.x) * go - box.left, y: a.y + (b.y - a.y) * go - box.top, size: a.r * 2, el }
+            } else {
+              // a bond's arrow: one round from the middle atom out, another one back, so neither way is shown as the answer
+              // (on a phone, or with the button out of view, the button's turn is one more arrow)
+              const back = turn === 1 || (turn === 2 && Math.floor(Math.max(0, age - 0.7) / ROUND) % 2 === 1)
+              const [from, to] = back ? [b, a] : [a, b]
+              const len = Math.hypot(to.x - from.x, to.y - from.y) || 1
+              const ux = (to.x - from.x) / len
+              const uy = (to.y - from.y) / len
+              const start = { x: from.x + ux * from.r * 0.5, y: from.y + uy * from.r * 0.5 }
+              const end = { x: to.x - ux * to.r * 0.5, y: to.y - uy * to.r * 0.5 }
+              const go = actOut(round, rel(start), rel(end), sized(a.r))
+              if (round > 0.6 && round < 2.6) line = { a: rel(start), b: rel(end), go }
+            }
+            handOn = true
+          }
+        }
+      } else if (c.kind === 'atoms' || c.kind === 'aim') {
+        const ids = c.kind === 'aim' ? [c.id] : c.ids
+        const at = ids.map((id) => scene.atomOnPage(id)).filter((x): x is { x: number; y: number; r: number } => !!x)
+        for (const a of at) circle(a)
+        if (c.kind === 'atoms' && c.key) controlGlow(root.querySelector<HTMLElement>(`[data-cue="${c.key}"]`), false)
+        const first = at[0]
+        if (first && handFree) {
+          const aims = c.kind === 'aim' && !calm ? scene.aimsOnPage() : []
+          if (aims.length) {
+            // the net dipole: the hand drags from the middle atom to each aim point in turn
+            const to = aims[Math.floor((age - 0.7) / ROUND) % aims.length]!
+            const go = actOut(round, rel(first), rel(to), sized(first.r))
+            if (round > 0.6 && round < 2.6) line = { a: rel(first), b: rel(to), go }
+          } else pointAt(first.x + first.r * 0.72 - box.left, first.y + first.r * 0.72 - box.top, -135, 'point', sized(first.r))
+          handOn = true
+        }
+      }
+    }
+    for (let i = cueShown.halos.length; i < halos.length; i++) halos[i]!.classList.remove('is-on')
+    hand.classList.toggle('is-on', handOn)
+    if (!handOn) hand.style.opacity = ''
+    carried.classList.toggle('is-on', !!carry)
+    if (carry) {
+      if (carried.dataset.el !== carry.el) {
+        carried.dataset.el = carry.el
+        carried.innerHTML = ball(carry.el)
+      }
+      carried.style.transform = `translate(${(carry.x - 23).toFixed(1)}px, ${(carry.y - 23).toFixed(1)}px) scale(${(carry.size / 46).toFixed(3)})`
+    }
+    trail.classList.toggle('is-on', !!line)
+    if (line) {
+      const dx = line.b.x - line.a.x
+      const dy = line.b.y - line.a.y
+      trail.style.width = `${(Math.hypot(dx, dy) * Math.max(0.02, line.go)).toFixed(1)}px`
+      trail.style.transform = `translate(${line.a.x.toFixed(1)}px, ${(line.a.y - 2.5).toFixed(1)}px) rotate(${((Math.atan2(dy, dx) * 180) / Math.PI).toFixed(1)}deg)`
+    }
+  }
+  cueRaf = requestAnimationFrame(tickCue)
+  root.addEventListener('pointerdown', () => (pressed = true), on)
+  window.addEventListener('pointerup', () => (pressed = false), on)
+  window.addEventListener('pointercancel', () => (pressed = false), on)
+  window.addEventListener('blur', () => (pressed = false), on)
+  // a mouse button let go outside the window never sends its pointerup here: the next move shows it is up
+  root.addEventListener('pointermove', (e) => {
+    if (e.pointerType === 'mouse' && e.buttons === 0) pressed = false
+  }, on)
 
   /** The module's style rules, copied once into a sheet a shadow root can use. Null where the browser can't do that. */
   let ghostSheet: CSSStyleSheet | null | undefined
@@ -934,6 +1236,9 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
         again.focus({ preventScroll: true })
         // a redraw while typing keeps the caret at the end of what was typed
         if (again instanceof HTMLInputElement) again.setSelectionRange(again.value.length, again.value.length)
+      } else if (name === 'dock') {
+        // Clear emptied the board and switched itself off: Undo, which brings the atoms back, takes the focus
+        el.querySelector<HTMLElement>('[data-key="undo"]:not([disabled])')?.focus({ preventScroll: true })
       } else if (name === 'panel') {
         // The control that had the focus is gone or switched off (an answer was accepted, the hints
         // ran out). Move to the step's main button when it is ready. Otherwise park the focus on
@@ -966,9 +1271,13 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
   const measure = () => {
     const sr = stage.getBoundingClientRect()
     const lr = regions.ledger.getBoundingClientRect()
+    const cr = regions.checks.getBoundingClientRect()
     const tr = regions.top.getBoundingClientRect()
     const dr = regions.dock.getBoundingClientRect()
-    const top = Math.max(lr.height ? lr.bottom : 0, tr.bottom) - sr.top + 14
+    // On a phone the board is short, and the strip of checks would take a fifth of it. There the
+    // strip keeps half its height clear and lies over the board's top rim with the rest.
+    const strip = cr.height ? (sr.width <= 560 ? cr.top + cr.height / 2 : cr.bottom) : 0
+    const top = Math.max(lr.height ? lr.bottom : 0, strip, tr.bottom) - sr.top + 14
     // The board keeps clear of the dock at its resting height. The card for a selected atom can be
     // taller; it is allowed to overlap the board's edge so the board does not jump when it opens.
     if (!regions.dock.querySelector('.mb-sel')) dockRest = dr.height ? sr.bottom - dr.top : 0
@@ -979,6 +1288,7 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
     const stepKey = `${s.mode}:${s.problem}:${s.step}`
     paint('top', topbar(s, !!opts.onExit))
     paint('ledger', ledger(s))
+    paint('checks', checkbar(s))
     paint('dock', dock(s))
     // on a move to another step every chunk of the old step leaves and every chunk of the new one arrives
     paint('panel', panel(s), lastStep !== null && stepKey !== lastStep)
@@ -1019,13 +1329,16 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
       selection: s.selection,
       view: s.view,
       specimen: store.isSpecimen(s),
-      showCounts: s.mode === 'free' || s.step === 'bond' || s.step === 'check',
-      showCharges: s.mode === 'free' || s.step === 'check' || s.step === 'shape',
+      // each atom's electron count stays beside it from the moment it is on the board; formal charges come in with step 4
+      showCounts: !store.isSpecimen(s),
+      showCharges: s.mode === 'free' || !['count', 'place', 'bond'].includes(s.step),
       shells: new Map((report?.atoms ?? []).map((a) => [a.id, { count: a.count, target: a.target, status: a.status }])),
       refused: s.refused,
       point: ringGroups(s),
       dipoles: dipolesFor(s, st),
       draw: drawFor(s, st),
+      // an atom dropped from the tray onto another atom is bonded to it, except in the place step, where bonding is the next step
+      dropBonds: s.mode === 'free' || s.step === 'bond' || s.step === 'check',
       // the net dipole runs along the same line as an angle's label, so the two are never drawn together
       angles: shown && !showsDipoles(s) ? angleMarks(s.mode === 'guided' ? store.problemOf(s) : null, shown, mixedOuter(st)) : [],
     }
@@ -1037,6 +1350,8 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
       const main = regions.panel.querySelector<HTMLElement>('.mb-btn-main:not([disabled])')
       ;(main ?? regions.panel.querySelector<HTMLElement>('.mb-step'))?.focus({ preventScroll: true })
     }
+
+    setCue(store.cue(s))
 
     if (s.toast && s.toast.n !== toastSeen) {
       toastSeen = s.toast.n
@@ -1190,7 +1505,30 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
   render(store.getState())
 
   // a handle for scripts/check-browser.mjs: screen positions of what is on the board, the state, and the checker
-  const handle = { scene, store, report: () => assess(store.getState().s, store.getState().mode === 'guided' ? speciesOf(store.problemOf()) : undefined), nextMove: () => nextMove(store.getState().mode === 'guided' ? store.problemOf() : null, store.getState().s) }
+  const handle = {
+    scene,
+    store,
+    report: () => assess(store.getState().s, store.getState().mode === 'guided' ? speciesOf(store.problemOf()) : undefined),
+    nextMove: () => nextMove(store.getState().mode === 'guided' ? store.problemOf() : null, store.getState().s),
+    /** What the glow and the pointing hand show now, read from the page itself: each glow that is
+     *  switched on, where it is, and whether the hand can be seen. */
+    cue: () => {
+      const seen = (n: Element) => {
+        const r = n.getBoundingClientRect()
+        return { x: r.left, y: r.top, w: r.width, h: r.height, opacity: Number(getComputedStyle(n).opacity) }
+      }
+      const h = seen(hand)
+      const handSeen = hand.classList.contains('is-on') && h.opacity > 0.5 && h.x + h.w > 0 && h.y + h.h > 0 && h.x < window.innerWidth && h.y < window.innerHeight
+      const eyes = carried.classList.contains('is-on') ? carried.querySelector('.mb-eyes') : null
+      return {
+        cue: store.cue(),
+        hand: handSeen ? cueShown.hand : 'off',
+        halos: halos.filter((n) => n.classList.contains('is-on')).map(seen),
+        /** The atom the hand carries: how wide its eyes are drawn, or null when no atom is carried. */
+        carriedEyes: eyes ? eyes.getBoundingClientRect().width : null,
+      }
+    },
+  }
   ;(window as unknown as { __mb?: unknown }).__mb = handle
 
   return () => {
@@ -1198,6 +1536,7 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
     unsubscribe()
     ro.disconnect()
     cancelAnimationFrame(aiming)
+    cancelAnimationFrame(cueRaf)
     window.clearTimeout(toastTimer)
     scene.dispose()
     root.replaceChildren()

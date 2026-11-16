@@ -2,6 +2,50 @@
 
 Add your entry on top, under a heading in exactly this form: `## 2026-11-13 (team) What changed`. Say what changed, what you checked and how, what you ask of other teams or of Sam, and the next step.
 
+## 2026-11-16 (lewis) The next action glows, the checks stay on screen, bonds are cut with a swipe, and the net dipole has aim points
+
+**State.** Committed on 2026-11-16, on top of 292b38b, when Sam wrote "commit and push and deploy to the live link" for the second time that day. It was built on the branch `lewis/prompts-and-checks`. The push and the deploy follow this commit.
+
+Sam sent three messages on 2026-11-16. D-0024 and D-0025 quote them in full. In short: make a question noticeable with a glow or a cute pointing finger, show how to work the board, keep the checks on screen, let atoms and bonds be added and removed in one move, make the dipole drawing clearer (an arrow may point into empty space or at a lone pair), and let the board be cleared from the 3D view. How each is built is this session's design (D-0026, provisional).
+
+**Changed**
+- Where to look next: `cue()` in `src/modules/lewis/store.ts` names the place of the next action. `src/modules/lewis/ui.ts` draws a glow there and a pointing hand, in the layer over the page. On the board the hand acts out the drag a step needs until the student has tried it once.
+- How-to lines under the instruction of the place, bond and check steps and in free build (`howTo`, `howToFree`).
+- A strip of three checks under the electron counter in every step that has a board (`checkChips`), each atom's electron count beside it from the place step on, and pairs beside the counter's numbers.
+- A swipe across a bond cuts one of its lines. An atom carried to the Clear button comes off the board. In free build and in the bond and check steps, an atom dropped from the row onto another atom is bonded to it.
+- Clear works from the 3D view and from steps 5 to 7: the flat board comes back, and a guided molecule returns to the place step. Undo straight after it puts back the atoms, the step, the view and every answer.
+- Step 6: a label beside a bond's arrow says which atom it points at. The net dipole has aim points (outer atoms, lone pairs, the middle of the outer atoms, and straight away from it) that the arrow snaps to, each with a label, and a tap on one sets the arrow.
+- Words changed: the bond step's instruction now states the goal ("Bond each oxygen atom to carbon."), and the how-to line under it says how. The place step's instruction moved from `src/modules/lewis/ui.ts` into `src/modules/lewis/guide.ts`.
+
+**Checked.** The entry dated 2026-11-16 for this change in `docs/verified.md` has the numbers.
+
+**Review.** A second session read the new code and reported eight findings. All were acted on:
+- The hand acted out a dipole arrow on a nonpolar bond (C–H), where the right answer is the button. Now the atoms and the "Nonpolar, no arrow" button both glow, and the hand takes the three answers in turn, starting with a different one from molecule to molecule.
+- Undo after a Clear in steps 5 to 7 brought back the atoms only. Now it brings back the step, the view and the answers, and the keyboard's focus moves to Undo when Clear switches itself off.
+- The atom the hand carries had lost its eyes to the confetti's style rule.
+- The glow could be drawn on an atom that was scrolled out of free build's row on a phone.
+- The strip could read "3 of 4" beside a passed mark for a loose piece with an unpaired electron.
+- An aim point stayed lit after the mouse left the board.
+- The browser checks read what the layer meant to draw. They now read the glows and the hand from the page.
+- A mouse button let go outside the window could keep the hand hidden until the next press.
+
+**Found on the way.**
+- A swipe whose sample point landed exactly on a bond's line did not cut it. Fixed in `swipe()` in `src/modules/lewis/scene.ts`.
+- The first full run marked the electron total wrong for every negative ion in steps 2 and 3, before the student could have done anything about it: the ion's extra electrons are added in step 4. The strip now shows that check as waiting until then.
+- On a phone the strip of checks took a fifth of the board's height, and the atoms got smaller. The strip now lies over the board's top rim there and keeps half its height clear.
+- The first version of the glow animated a large blurred shadow, and a timing check elsewhere started to fail in the software-rendered browser. The glow's light is now a second box whose opacity pulses.
+- In a headless browser the atoms keep sliding toward the middle of the board for several seconds after a bond, because the 3D loop runs slower than real time there. A check that reads an atom's place and then acts on it waits for the atoms to stop (`atomsAtRest()` in `scripts/check-browser.mjs`). The existing drags read the place right before each drag and are not affected.
+- Three checks waited a fixed time for something that takes longer under load (a count fading in, the picture of the shells scrolling into view, two glows fading in). They now look until it has happened, with a limit.
+
+**Asks**
+- Sam: D-0026 is provisional. To look at: the hand and the glow, the three chips and their names, the swipe that cuts a bond, the bin, and the aim points for the net dipole.
+- Sam: electrons are still changed with a tap on the atom and a button. A drag for electrons was left out to keep this change small.
+- Sam: "the flexibility of the overall sim" in his second message was read as the list that followed it. If he meant more, that is a new ask.
+- design, learning: the hand, the glow and every new label were reviewed by the session that built them only.
+- platform: none of this has been on a real phone (W-003). The swipe and the bin were driven with a mouse and with touch in headless Chromium.
+
+**Next step.** Sam looks at it on localhost:8081. On his word: commit, push and deploy.
+
 ## 2026-11-16 (lewis) Step 6: a student draws the dipole arrows, and steps 6 and 7 are committed
 
 **State.** Committed on 2026-11-16, on top of 49d0d69, when Sam wrote "commit and push and deploy to the live link". The commit also holds the steps 6 and 7 work from 2026-11-13 (D-0021, W-020), which sat uncommitted in this checkout and never had a handoff entry. The push and the deploy follow this commit.

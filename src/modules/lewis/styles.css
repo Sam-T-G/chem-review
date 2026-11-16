@@ -141,6 +141,18 @@
   opacity: 0; transition: opacity 0.25s;
 }
 .mb .mb-delta[data-sign='minus'] { background: var(--grape-deep); color: #fff; box-shadow: 0 0 0 1.5px var(--grape-lip), 0 4px 8px -5px rgba(74, 58, 140, 0.55); }
+/* the words beside the head of an arrow that is being drawn: what it points at */
+.mb .mb-delta.is-cap { background: var(--ink); color: #fff; box-shadow: 0 0 0 1.5px var(--paper), 0 6px 10px -6px rgba(58, 51, 88, 0.7); font-size: 14px; transition: opacity 0.12s; }
+/* The net dipole's aim points: a dot beyond each outer atom, beyond each lone pair, and in the
+   space between. The one the arrow has snapped to, or the pointer is on, grows and lights up. */
+.mb .mb-aim {
+  position: absolute; left: 0; top: 0; width: 17px; height: 17px; border-radius: 50%;
+  background: var(--paper); box-shadow: 0 0 0 3px var(--blue-deep), 0 0 0 5.5px color-mix(in srgb, var(--paper) 80%, transparent);
+  opacity: 0; transition: opacity 0.2s, scale 0.12s, background 0.12s;
+}
+.mb .mb-aim.is-near { scale: 1.5; background: var(--butter); }
+/* the line a swipe across the board has drawn: it cuts the bonds it crosses */
+.mb .mb-cut { fill: none; stroke: var(--straw-deep); stroke-width: 3; stroke-dasharray: 2 8; stroke-linecap: round; stroke-linejoin: round; opacity: 0.85; }
 .mb .mb-delta.is-net { background: var(--blue-soft); color: var(--blue-deep); box-shadow: 0 0 0 1.5px #c6d4ff; font-size: 13.5px; }
 /* a bond angle printed beside its arc on the 3D model */
 .mb .mb-angle {
@@ -222,6 +234,23 @@
 .mb .mb-tile[data-state='ok'] b { color: var(--mint-deep); }
 .mb .mb-tile[data-state='warn'] { background: var(--straw-soft); box-shadow: 0 var(--lip) 0 var(--straw-line), var(--drop); }
 .mb .mb-tile[data-state='warn'] b { color: var(--straw-deep); }
+.mb .mb-tile-v i.mb-tile-more { font-family: var(--body, inherit); font-size: 12.5px; font-weight: 800; white-space: nowrap; }
+/* The three checks, in a strip that stays under the counter: a mark, a name, a count. Green when
+   the check passes, strawberry when something is wrong, plain while it waits for the board. */
+.mb .mb-checkbar { list-style: none; margin: -3px 0 0; padding: 0; display: flex; gap: 6px; justify-content: center; }
+.mb .mb-checkbar:empty { display: none; }
+.mb .mb-chk {
+  display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 3px 11px 3px 4px;
+  border-radius: 999px; background: var(--paper); color: var(--ink-2);
+  box-shadow: 0 2px 0 var(--paper-lip), 0 8px 12px -10px rgba(74, 58, 140, 0.7);
+  font-size: 13.5px; font-weight: 800; white-space: nowrap; pointer-events: auto;
+}
+.mb .mb-chk .mb-mark { width: 22px; height: 22px; }
+.mb .mb-chk .mb-mark svg { width: 13px; height: 13px; }
+.mb .mb-chk b { font-family: var(--display); font-size: 14.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.mb .mb-chk-s { display: none; }
+.mb .mb-chk[data-state='pass'] { background: var(--mint-soft); color: var(--mint-deep); box-shadow: 0 2px 0 var(--mint-lip), 0 8px 12px -10px rgba(74, 58, 140, 0.7); animation: mb-yes 0.42s var(--spring); }
+.mb .mb-chk[data-state='fail'] { background: var(--straw-soft); color: var(--straw-deep); box-shadow: 0 2px 0 var(--straw-line), 0 8px 12px -10px rgba(74, 58, 140, 0.7); }
 /* one electron beside the electron total, glowing like the ones on the board */
 .mb .mb-bead {
   align-self: center; flex: none;
@@ -308,6 +337,15 @@
 .mb .mb-chip:nth-child(3n) .mb-ball { animation-delay: calc(var(--now, 0) * -1s - 1.8s); }
 .mb .mb-chip:hover { scale: 1.12; rotate: -6deg; }
 .mb .mb-chip:active { scale: 0.92; rotate: 0deg; cursor: grabbing; }
+/* The bin. While an atom is carried across the board, the Clear button opens up as the place to
+   drop it: it grows, turns strawberry and says what a drop there does. */
+.mb .mb-dock.is-binning [data-key='clear'] { position: relative; scale: 1.14; background: var(--straw-soft); color: var(--straw-deep); box-shadow: 0 var(--lip) 0 var(--straw-line), 0 0 0 3px var(--straw), var(--drop); transition: scale 0.15s, background 0.15s; }
+.mb .mb-dock.is-binning [data-key='clear']::after {
+  content: attr(data-bin); position: absolute; left: 0; bottom: calc(100% + 12px);
+  padding: 5px 11px 6px; border-radius: 12px; background: var(--straw-deep); color: #fff;
+  font-size: 13.5px; font-weight: 800; white-space: nowrap; pointer-events: none;
+}
+.mb .mb-dock.is-bin-hot [data-key='clear'] { scale: 1.3; background: var(--straw); color: #fff; }
 @keyframes mb-bob { 50% { translate: 0 -4px; } }
 .mb .mb-chip-n {
   position: absolute; right: -4px; bottom: -3px;
@@ -535,6 +573,20 @@
 .mb .mb-q { margin: 0 0 10px; font-family: var(--display); font-size: 18.5px; font-weight: 500; line-height: 1.35; max-width: 40ch; }
 .mb .mb-fb + .mb-q, .mb .mb-readout + .mb-q { margin-top: 20px; }
 .mb .mb-try { margin-top: 14px; }
+/* how the board is worked in this step: one line for each gesture, with the pointing hand beside it */
+.mb .mb-how { list-style: none; margin: 0 0 14px; padding: 9px 12px 10px; display: grid; gap: 8px; border-radius: var(--r-m); background: var(--tint); box-shadow: inset 0 0 0 1.5px var(--tint-2); font-weight: 700; font-size: 15px; }
+.mb .mb-how li { display: flex; align-items: flex-start; gap: 9px; }
+.mb .mb-how li span { max-width: 44ch; }
+.mb .mb-how-icon { flex: none; width: 31px; height: 26px; margin-top: 1px; overflow: visible; }
+.mb .mb-how-mark { fill: none; stroke: var(--grape-deep); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+.mb .mb-how-mark.is-bond { stroke: var(--grape); stroke-width: 6; }
+/* the pointing hand */
+.mb .mb-hand-skin { fill: var(--paper); stroke: var(--ink); stroke-width: 2.6; stroke-linejoin: round; stroke-linecap: round; }
+.mb .mb-hand-cuff { fill: var(--grape); stroke: var(--ink); stroke-width: 2.6; stroke-linejoin: round; }
+.mb .mb-hand-line { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linecap: round; }
+.mb .mb-hand-shine { fill: none; stroke: var(--paper-lip); stroke-width: 2; stroke-linecap: round; }
+.mb .mb-how .mb-hand-skin, .mb .mb-how .mb-hand-cuff { stroke-width: 3.4; }
+.mb .mb-how .mb-hand-line { stroke-width: 2.8; }
 /* how to draw a dipole arrow on the board, with a small arrow in front */
 .mb .mb-draw { display: flex; align-items: flex-start; gap: 10px; padding: 9px 12px 10px; border-radius: var(--r-m); background: var(--tint); box-shadow: inset 0 0 0 1.5px var(--tint2); max-width: none; }
 .mb .mb-draw span { max-width: 44ch; }
@@ -741,8 +793,40 @@
 
 /* paper pieces thrown when a step or a molecule is finished */
 .mb .mb-fx { position: absolute; inset: 0; z-index: 6; pointer-events: none; overflow: hidden; overflow: clip; }
-.mb .mb-fx i { position: absolute; width: 9px; height: 13px; margin: -6px 0 0 -4px; border-radius: 3px; opacity: 0; animation: mb-confetti 1.3s linear forwards; }
-.mb .mb-fx i:nth-child(3n) { width: 10px; height: 10px; border-radius: 50%; }
+/* Where to look next: a glow around the place of the next action, and the pointing hand. Both are
+   placed by ui.ts on every frame. */
+.mb .mb-halo {
+  position: absolute; left: 0; top: 0; opacity: 0; transition: opacity 0.25s;
+  box-shadow: 0 0 0 2.5px var(--butter-lip), 0 0 0 5.5px var(--butter);
+}
+.mb .mb-halo.is-on { opacity: 1; }
+/* The light around the ring is a second box whose opacity pulses. The shadow itself never changes,
+   so the browser paints it once and only fades it. */
+.mb .mb-halo::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit;
+  box-shadow: 0 0 22px 11px color-mix(in srgb, var(--butter) 70%, transparent);
+  will-change: opacity; animation: mb-halo 1.5s ease-in-out infinite;
+}
+@keyframes mb-halo { 50% { opacity: 0.35; } }
+.mb .mb-finger { position: absolute; left: 0; top: 0; width: 38px; height: 48px; transform-origin: 17.2px 2.6px; opacity: 0; transition: opacity 0.2s; filter: drop-shadow(0 5px 4px rgba(58, 51, 88, 0.3)); }
+.mb .mb-finger.is-on { opacity: 1; }
+.mb .mb-finger svg { display: block; width: 100%; height: 100%; overflow: visible; }
+/* the hand pokes at what it points at, and a ring spreads from its fingertip */
+.mb .mb-finger.is-poking svg { animation: mb-poke 0.95s ease-in-out infinite; }
+@keyframes mb-poke { 50% { translate: 0 8px; } }
+.mb .mb-finger.is-poking::before {
+  content: ''; position: absolute; left: 17.2px; top: 2.6px; width: 22px; height: 22px; margin: -11px 0 0 -11px;
+  border-radius: 50%; box-shadow: 0 0 0 2.5px var(--butter-lip), 0 0 0 5px var(--butter);
+  animation: mb-tap 0.95s ease-out infinite;
+}
+@keyframes mb-tap { 0%, 35% { scale: 0.2; opacity: 0; } 50% { scale: 0.5; opacity: 1; } 100% { scale: 1.5; opacity: 0; } }
+/* the atom the hand carries while it acts out a drag, and the line it draws while it acts out an arrow */
+.mb .mb-cue-ball { position: absolute; left: 0; top: 0; width: 46px; height: 46px; transform-origin: 23px 23px; opacity: 0; transition: opacity 0.15s; }
+.mb .mb-cue-ball.is-on { opacity: 0.78; }
+.mb .mb-cue-line { position: absolute; left: 0; top: 0; height: 5px; border-radius: 3px; background: var(--grape-deep); box-shadow: 0 0 0 2px var(--paper); transform-origin: 0 2.5px; opacity: 0; transition: opacity 0.15s; }
+.mb .mb-cue-line.is-on { opacity: 0.8; }
+.mb .mb-fx > i { position: absolute; width: 9px; height: 13px; margin: -6px 0 0 -4px; border-radius: 3px; opacity: 0; animation: mb-confetti 1.3s linear forwards; }
+.mb .mb-fx > i:nth-child(3n) { width: 10px; height: 10px; border-radius: 50%; }
 @keyframes mb-confetti {
   0% { opacity: 1; translate: 0 0; rotate: 0deg; animation-timing-function: cubic-bezier(0.1, 0.7, 0.3, 1); }
   42% { opacity: 1; translate: calc(var(--dx) * 0.8) var(--up); rotate: calc(var(--rot) * 0.5); animation-timing-function: cubic-bezier(0.5, 0, 0.9, 0.5); }
@@ -759,6 +843,13 @@
   .mb .mb-center { top: 66px; }
 }
 @container stage (max-width: 560px) {
+  .mb .mb-tile-v i.mb-tile-more { display: none; }
+  /* the strip lies over the board's top rim here (see measure() in ui.ts), so it takes no taps */
+  .mb .mb-chk { min-height: 27px; padding: 2px 9px 2px 3px; font-size: 12.5px; gap: 5px; pointer-events: none; }
+  .mb .mb-chk .mb-mark { width: 20px; height: 20px; }
+  .mb .mb-chk-l { display: none; }
+  .mb .mb-chk-s { display: inline; }
+  .mb .mb-chk b { font-size: 13.5px; }
   .mb .mb-tile { min-width: 0; padding: 4px 11px 5px; }
   .mb .mb-tile-l { font-size: 11.5px; }
   .mb .mb-tile-v b { font-size: 22px; }

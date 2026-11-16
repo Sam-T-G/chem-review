@@ -9,6 +9,7 @@ import {
   addAtom,
   addElectron as addElectronOp,
   atomById,
+  bondsOf,
   removeAtom as removeAtomOp,
   removeElectron as removeElectronOp,
   share,
@@ -142,6 +143,10 @@ export interface State {
   toast: Toast | null
   /** The atoms in the last move the board refused. `n` goes up with each refusal, so the scene can shake them once. */
   refused: { ids: string[]; n: number } | null
+  /** Set when Clear emptied a finished structure from the 3D model or a later step: the step, the
+   *  view and the answers as they were, so that Undo puts all of it back with the atoms. Any other
+   *  change to the board drops it. */
+  cleared: { s: Structure; step: StepId; view: 'flat' | 'shape'; hints: number; shape: ShapeState; polar: PolarState; orbitals: OrbitalState } | null
 }
 
 const freshCount = (): CountState => ({ answers: {}, right: {}, tries: {}, feedback: {}, changed: {}, total: null, totalRight: false, totalTries: 0, totalFeedback: null })
@@ -187,6 +192,7 @@ function initial(): State {
     solved: loadSolved(),
     toast: null,
     refused: null,
+    cleared: null,
   }
 }
 
@@ -280,6 +286,80 @@ export function unlocked(s: State = state): number {
   return STEPS.length - 1
 }
 
+// ---------------------------------------------------------------- where to look next
+
+/** Where the student's next action is. The panel and the board make that place glow, and a
+ *  pointing finger acts out a drag the first time one is needed.
+ *  - 'ask': a question or control in the panel or under the board, named by its `data-cue`.
+ *  - 'tray': an atom in the row under the board. `demo` shows the drag onto the board.
+ *  - 'drag': an atom on the board to drag onto another one.
+ *  - 'atoms': atoms on the board to press on. No direction is shown, because the direction is the
+ *    answer. `key` names a control that answers the same question (the button for a nonpolar bond).
+ *  - 'arrow': a bond whose dipole arrow is to be drawn, between atoms `a` and `b`. The hand takes
+ *    the three answers in turn: the drag one way, the drag the other way, and the button `key` for
+ *    a bond with no arrow. So it shows the gestures and not the answer. `first` says which of the
+ *    three it starts with, and differs from one molecule to the next. `also` are the other atoms
+ *    of that kind of bond.
+ *  - 'aim': the middle atom, from which the net dipole is dragged toward one of the aim points.
+ *  - 'next': the step is finished, and the button that leads on is the thing to press. */
+export type Cue =
+  | { kind: 'ask'; key: string }
+  | { kind: 'tray'; el: El; demo: boolean }
+  | { kind: 'drag'; from: string; to: string }
+  | { kind: 'atoms'; ids: string[]; key?: string }
+  | { kind: 'arrow'; a: string; b: string; also: string[]; key: string; first: number }
+  | { kind: 'aim'; id: string }
+  | { kind: 'next' }
+
+export function cue(s: State = state): Cue | null {
+  if (s.pickerOpen) return null
+  if (s.mode === 'free') {
+    // free build has no questions: only an empty board points at the atoms
+    const first = trayItems(s)[0]
+    return s.s.atoms.length === 0 && first ? { kind: 'tray', el: first.el, demo: true } : null
+  }
+  const p = problemOf(s)
+  if (stepDone(s.step, s)) return { kind: 'next' }
+  if (s.step === 'count') {
+    const els = elementsOf(p)
+    if (els.every((el) => s.count.right[el])) return { kind: 'ask', key: 'total' }
+    // a counter still at 0, or one that was checked wrong and not changed since; with none of those, the button that checks them
+    const open = els.find((el) => !s.count.right[el] && ((s.count.answers[el] ?? 0) === 0 || (!!s.count.feedback[el] && !s.count.changed[el])))
+    return { kind: 'ask', key: open ? `count-${open}` : 'count-check' }
+  }
+  if (s.step === 'place') {
+    if (middleNeeded(p) && !s.middle.right) return { kind: 'ask', key: 'middle' }
+    const left = trayItems(s).filter((x) => x.n > 0)
+    const next = left.find((x) => x.el === p.center) ?? left[0]
+    return next ? { kind: 'tray', el: next.el, demo: s.s.atoms.length === 0 } : null
+  }
+  if (s.step === 'bond') {
+    const center = s.s.atoms.find((a) => a.el === p.center)
+    const loose = s.s.atoms.filter((a) => a.id !== center?.id && bondsOf(s.s, a.id).length === 0)
+    if (!center || loose.length === 0) return null
+    // the drag is shown until the first bond is made; after that the atoms still to bond are ringed
+    return s.s.bonds.length === 0 ? { kind: 'drag', from: loose[0]!.id, to: center.id } : { kind: 'atoms', ids: loose.map((a) => a.id) }
+  }
+  if (s.step === 'check') return { kind: 'ask', key: 'checks' }
+  if (s.step === 'shape') return { kind: 'ask', key: s.shape.groupsRight ? 'shapes' : 'groups' }
+  if (s.step === 'polar') {
+    const m = polarity(s.s)
+    const asked = bondAsked(s)
+    if (!m) return null
+    if (asked) {
+      const outer = m.bonds.filter((b) => b.el === asked).map((b) => b.atomId)
+      // until the first try, the drag is acted out along one of these bonds; after it, the atoms are ringed
+      const tried = (s.polar.bonds[asked]?.tries ?? 0) > 0
+      return tried || !outer[0] ? { kind: 'atoms', ids: [m.center.id, ...outer], key: 'no-arrow' } : { kind: 'arrow', a: m.center.id, b: outer[0], also: outer.slice(1), key: 'no-arrow', first: (s.problem + m.kinds.findIndex((k) => k.terminal === asked)) % 3 }
+    }
+    if (s.polar.net.pick === null) return { kind: 'ask', key: 'net' }
+    // the net dipole is drawn on the 3D model: on the flat drawing, the switch to the model is the thing to press
+    if (s.view !== 'shape') return { kind: 'ask', key: 'view-shape' }
+    return s.polar.arrow.tries > 0 ? { kind: 'atoms', ids: [m.center.id] } : { kind: 'aim', id: m.center.id }
+  }
+  return { kind: 'ask', key: s.orbitals.counts.right ? 'hybrid' : 'bond-counts' }
+}
+
 /** Free build tray: the atoms used most in first-year problems come first. */
 const FREE_ORDER: El[] = ['H', 'C', 'N', 'O', 'F', 'Cl', 'S', 'P', 'B', 'Br', 'I', 'Si', 'Xe', 'Be', 'Al', 'As', 'Se', 'Kr']
 if (FREE_ORDER.length !== EL_ORDER.length || EL_ORDER.some((el) => !FREE_ORDER.includes(el))) throw new Error('FREE_ORDER must list every element once')
@@ -314,7 +394,7 @@ export function hintsLeft(s: State = state): number {
 
 function resetBoard(problem: number): Partial<State> {
   positions.clear()
-  return { problem, step: 'count', count: freshCount(), middle: freshMiddle(), ...freshAnswers(), s: EMPTY, past: [], selection: null, view: 'flat', hints: 0, pickerOpen: false }
+  return { problem, step: 'count', count: freshCount(), middle: freshMiddle(), ...freshAnswers(), s: EMPTY, past: [], selection: null, view: 'flat', hints: 0, pickerOpen: false, cleared: null }
 }
 
 export function selectProblem(i: number) {
@@ -331,7 +411,7 @@ export function setMode(mode: Mode) {
   if (saved) {
     for (const [k, v] of saved.positions) positions.set(k, { ...v })
     const { positions: _p, ...rest } = saved
-    set({ ...rest, mode, selection: null, pickerOpen: false })
+    set({ ...rest, mode, selection: null, pickerOpen: false, cleared: null })
   } else {
     set({ ...resetBoard(state.problem), mode, step: mode === 'free' ? 'check' : 'count' })
   }
@@ -428,7 +508,7 @@ export function pickMiddle(el: El) {
 // ---------------------------------------------------------------- the board
 
 function commit(s: Structure, extra: Partial<State> = {}) {
-  set({ s, past: [...state.past.slice(-60), state.s], ...freshAnswers(), ...extra })
+  set({ s, past: [...state.past.slice(-60), state.s], ...freshAnswers(), cleared: null, ...extra })
 }
 function apply(op: Op, ids: string[], extra: Partial<State> = {}): boolean {
   if (op.ok) {
@@ -496,11 +576,25 @@ export function minusElectron(id: string) {
 export function undo() {
   const prev = state.past[state.past.length - 1]
   if (!prev || !editable()) return
-  set({ s: prev, past: state.past.slice(0, -1), selection: null, ...freshAnswers() })
+  const was = state.cleared
+  // straight after a Clear that emptied a finished structure: the step, the view and the answers come back with the atoms
+  if (was && was.s === prev) {
+    set({ s: prev, past: state.past.slice(0, -1), selection: null, step: was.step, view: was.view, hints: was.hints, shape: was.shape, polar: was.polar, orbitals: was.orbitals, cleared: null })
+    return
+  }
+  set({ s: prev, past: state.past.slice(0, -1), selection: null, ...freshAnswers(), cleared: null })
 }
+/** Empties the board. On the flat board in a step that builds the structure, that is all. From
+ *  the 3D model, or from a step that works on the finished structure, the flat board comes back
+ *  too, and a guided molecule goes back to the step where its atoms are put on the board. Undo
+ *  brings the atoms back. */
 export function clearBoard() {
-  if (!editable() || state.s.atoms.length === 0) return
-  commit(EMPTY, { selection: null })
+  if (isSpecimen() || state.s.atoms.length === 0) return
+  if (editable()) commit(EMPTY, { selection: null })
+  else {
+    const { s, step, view, hints, shape, polar, orbitals } = state
+    commit(EMPTY, { selection: null, view: 'flat', ...(state.mode === 'guided' ? { step: 'place' as const, hints: 0 } : {}), cleared: { s, step, view, hints, shape, polar, orbitals } })
+  }
 }
 
 /** A tap or click on an atom selects it. From the keyboard, a second atom bonds to the selected one,

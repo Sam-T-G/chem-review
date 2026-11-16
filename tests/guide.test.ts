@@ -18,6 +18,14 @@ import {
   bondCounts,
   bondInstruction,
   bondQuestion,
+  checkChips,
+  howTo,
+  howToFree,
+  BIN_WORDS,
+  aimWords,
+  arrowCaption,
+  pairWords,
+  placeInstruction,
   bondRight,
   bondStatus,
   boardStepDone,
@@ -323,8 +331,31 @@ describe('step 2: the middle atom', () => {
 
 describe('step 3: bonding', () => {
   it('names the outer atoms in the instruction', () => {
-    expect(bondInstruction(P('CH4'))).toMatch(/^Drag each hydrogen atom onto carbon/)
-    expect(bondInstruction(P('CH2O'))).toMatch(/^Drag each outer atom onto carbon/)
+    expect(bondInstruction(P('CH4'))).toMatch(/^Bond each hydrogen atom to carbon\./)
+    expect(bondInstruction(P('CH2O'))).toMatch(/^Bond each outer atom to carbon\./)
+  })
+  it('says how the board is worked in the steps that are worked on the board', () => {
+    expect(placeInstruction(P('CO2'))).toBe('Put all 3 atoms on the board, with carbon in the middle.')
+    expect(howTo('place', P('CO2'))).toEqual([
+      { gesture: 'drag', text: 'Press on an atom in the row under the board, drag it onto the board and let go. A tap on the atom puts it on the board too.' },
+      { gesture: 'drag', text: 'To take an atom off the board, drag it to the bin in the corner.' },
+    ])
+    expect(howTo('bond', P('CO2'))).toEqual([
+      { gesture: 'drag', text: 'Press on an oxygen atom, drag it onto carbon and let go.' },
+      { gesture: 'swipe', text: 'To take a bond back, swipe across its line.' },
+    ])
+    // "a" or "an" by the atom's name, and "an outer atom" when the outer atoms differ
+    expect(howTo('bond', P('CH4'))[0]!.text).toBe('Press on a hydrogen atom, drag it onto carbon and let go.')
+    expect(howTo('bond', P('CH2O'))[0]!.text).toBe('Press on an outer atom, drag it onto carbon and let go.')
+    expect(howTo('check', P('CO2')).map((h) => h.gesture)).toEqual(['drag', 'swipe', 'tap'])
+    expect(howTo('check', P('CO2'))[2]!.text).toBe('To add or take off an electron, tap an atom, then “+ electron” or “− electron”.')
+    // free build lists every move the board takes
+    expect(howToFree().map((h) => h.gesture)).toEqual(['drag', 'drag', 'swipe', 'drag', 'tap'])
+    expect(howToFree()[0]!.text).toBe('Drag an atom from the row under the board onto the board. Drop it on another atom to bond the two.')
+    expect(BIN_WORDS).toBe('Drop here to take it off')
+    expect(howTo('check', P('CO2'))[0]!.text).toBe('To add a second or third bond, drag the outer atom onto carbon again.')
+    // the steps answered in the panel have none
+    for (const step of ['count', 'shape', 'polar', 'orbitals'] as const) expect(howTo(step, P('CO2'))).toEqual([])
   })
   it('lists what is still off the board', () => {
     expect(bondStatus(P('CH4'), star(['C', 'H']).s).text).toBe('Still to put on the board: 3 hydrogen atoms.')
@@ -350,7 +381,7 @@ describe('step 3: bonding', () => {
     expect(bondStatus(P('NH4+'), s).done).toBe(true)
   })
   it('leaves "one from each atom" out for a positive ion, where one bond takes both electrons from the middle atom', () => {
-    expect(bondInstruction(P('NH4+'))).toBe('Drag each hydrogen atom onto nitrogen and let go. Each bond is 2 shared electrons.')
+    expect(bondInstruction(P('NH4+'))).toBe('Bond each hydrogen atom to nitrogen. Each bond is 2 shared electrons.')
     expect(bondInstruction(P('CO3 2-'))).toMatch(/one from each atom\.$/)
   })
   it('does not give the positive-ion advice when extra electrons were added to a neutral molecule', () => {
@@ -584,6 +615,93 @@ describe('step 4: the checklist and what to do next', () => {
   })
 })
 
+describe('the checks that stay over the board', () => {
+  const chips = (id: string | null, s: Structure) => checkChips(id ? P(id) : null, s).map((c) => `${c.label}${c.value ? ` ${c.value}` : ''}: ${c.state}`)
+  it('an empty board and a board still being filled wait, with nothing marked wrong', () => {
+    expect(chips('CO2', star([]).s)).toEqual(['Electron total: wait', 'Full shells 0 of 3: wait', 'Formal charges: wait'])
+    // carbon alone: 4 of 16 electrons, and two atoms still to come
+    expect(chips('CO2', star(['C']).s)).toEqual(['Electron total: wait', 'Full shells 0 of 3: wait', 'Formal charges: wait'])
+  })
+  it('all atoms placed and none bonded: the electron total is right, and the shells wait for the bonds', () => {
+    expect(chips('CO2', star(['C', 'O', 'O']).s)).toEqual(['Electron total: pass', 'Full shells 0 of 3: wait', 'Formal charges: wait'])
+  })
+  it('single bonds in carbon dioxide: no atom has 8 yet', () => {
+    // O–C–O with single bonds: carbon has 6 around it, each oxygen 7
+    expect(chips('CO2', star(['C', 'O', 'O'], [1, 1]).s)).toEqual(['Electron total: pass', 'Full shells 0 of 3: fail', 'Formal charges: wait'])
+  })
+  it('the finished structure passes all three', () => {
+    expect(chips('CO2', solveLikeAStudent('CO2'))).toEqual(['Electron total: pass', 'Full shells 3 of 3: pass', 'Formal charges: pass'])
+    // methane: hydrogen is full with 2
+    expect(chips('CH4', solveLikeAStudent('CH4'))).toEqual(['Electron total: pass', 'Full shells 5 of 5: pass', 'Formal charges: pass'])
+  })
+  it('an electron added by hand puts the total wrong', () => {
+    // O–C–O with single bonds, and one electron more on an oxygen: 17 where carbon dioxide has 16
+    const b = star(['C', 'O', 'O'], [1, 1])
+    const extra = must(addElectron(b.s, b.ids[1]!))
+    expect(chips('CO2', extra)[0]).toBe('Electron total: fail')
+  })
+  it('full shells with formal charges that can be smaller fails only the last check', () => {
+    // carbon dioxide drawn with a triple and a single bond
+    expect(chips('CO2', star(['C', 'O', 'O'], [3, 1]).s)).toEqual(['Electron total: pass', 'Full shells 3 of 3: pass', 'Formal charges: fail'])
+  })
+  it('with an atom still off the board the total waits, unless the board already holds too many electrons', () => {
+    // the ammonium ion has 8. Nitrogen filled up by hand to 8, plus three of the four hydrogens, is 11
+    let s = star(['N', 'H', 'H', 'H']).s
+    const n = s.atoms[0]!.id
+    for (let k = 0; k < 3; k++) s = must(addElectron(s, n))
+    expect(chips('NH4+', s)[0]).toBe('Electron total: fail')
+    // the same atoms as they come off the row: 5 + 3 = 8, not more than the ion has, so the total waits for the last hydrogen
+    expect(chips('NH4+', star(['N', 'H', 'H', 'H']).s)[0]).toBe('Electron total: wait')
+  })
+  it('an ion whose charge has not been dealt with waits before the check step, and is marked in it', () => {
+    // the nitrite ion has 18. One nitrogen and two oxygens bring 17 as neutral atoms
+    const loose = star(['N', 'O', 'O']).s
+    const bonded = star(['N', 'O', 'O'], [1, 1]).s
+    const early = (s: Structure) => checkChips(P('NO2-'), s, true)[0]!.state
+    expect(early(loose)).toBe('wait')
+    expect(early(bonded)).toBe('wait')
+    // in the check step the same board is told it is 1 electron short
+    expect(checkChips(P('NO2-'), bonded)[0]).toMatchObject({ state: 'fail', says: 'The board has 17 electrons. The nitrite ion has 18.' })
+    // an electron added by hand to a neutral molecule is wrong in any step
+    const co2 = star(['C', 'O', 'O'], [1, 1])
+    expect(checkChips(P('CO2'), must(addElectron(co2.s, co2.ids[1]!)), true)[0]!.state).toBe('fail')
+    // the ammonium ion, all five atoms placed: 9 where the ion has 8, and its charge is still to come
+    expect(checkChips(P('NH4+'), star(['N', 'H', 'H', 'H', 'H']).s, true)[0]!.state).toBe('wait')
+    expect(checkChips(P('NH4+'), star(['N', 'H', 'H', 'H', 'H']).s)[0]!.state).toBe('fail')
+  })
+  it('free build checks that the atoms are joined in place of the electron total', () => {
+    expect(chips(null, star(['O', 'H', 'H'], [1, 1]).s)).toEqual(['One molecule: pass', 'Full shells 3 of 3: pass', 'Formal charges: pass'])
+    expect(chips(null, star(['O', 'H', 'H'], [1]).s)[0]).toBe('One molecule: fail')
+  })
+  it('agrees with the list in step 4, for every problem at every stage, and carries its sentences', () => {
+    for (const p of PROBLEMS) {
+      const sp = speciesOf(p)
+      const boards = [star([p.center]).s, star([p.center, ...sp.terminals]).s, star([p.center, ...sp.terminals], sp.terminals.map(() => 1).slice(0, p.id === 'NH4+' ? 3 : undefined)).s, solveLikeAStudent(p.id)]
+      for (const s of boards) {
+        const rows = checkRows(p, s)
+        const strip = checkChips(p, s)
+        expect(strip.map((c) => c.says), p.id).toEqual(rows.map((r) => r.text))
+        // the one difference: the total waits while atoms are still off the board
+        const missing = s.atoms.length < sp.terminals.length + 1
+        expect(strip.map((c) => c.state), p.id).toEqual(rows.map((r, i) => (i === 0 && missing ? 'wait' : r.state)))
+        // a passed shell check always reads "all of them"
+        if (strip[1]!.state === 'pass') expect(strip[1]!.value, p.id).toBe(`${sp.terminals.length + 1} of ${sp.terminals.length + 1}`)
+      }
+      expect(checkChips(p, solveLikeAStudent(p.id)).every((c) => c.state === 'pass'), p.id).toBe(true)
+    }
+  })
+  it('counts the pairs for the counter', () => {
+    // O=C=O: 4 lines, and 2 lone pairs on each oxygen
+    expect(pairWords(solveLikeAStudent('CO2'))).toEqual({ bonded: '4 pairs', lone: '4 lone pairs' })
+    expect(pairWords(solveLikeAStudent('CH4'))).toEqual({ bonded: '4 pairs', lone: '' })
+    // loose atoms: a carbon atom's 4 electrons are 4 single electrons, so no lone pairs are counted yet
+    expect(pairWords(star(['C', 'O']).s)).toEqual({ bonded: '', lone: '' })
+    // O–C–O with single bonds: the shells are not full, so the unshared electrons are not counted as pairs
+    expect(pairWords(star(['C', 'O', 'O'], [1, 1]).s)).toEqual({ bonded: '2 pairs', lone: '' })
+    expect(pairWords(star(['H', 'F'], [1]).s)).toEqual({ bonded: '1 pair', lone: '3 lone pairs' })
+  })
+})
+
 describe('step 5: the shape', () => {
   it('counts groups and names the usual miscounts, with the groups to ring on the board', () => {
     const co2 = solveLikeAStudent('CO2')
@@ -773,7 +891,7 @@ describe('step 6: polar bonds and the net dipole', () => {
     expect(bondQuestion('C', 'O')).toEqual({
       ask: 'Is the C–O bond polar?',
       sub: 'Subtract the smaller electronegativity from the larger. The difference is ΔEN: 0.4 or less is a nonpolar bond, and above 0.4 is a polar bond.',
-      draw: 'For a polar bond, draw the dipole arrow on the board: drag from carbon to oxygen, or from oxygen to carbon. The arrow points at the atom where you let go.',
+      draw: 'For a polar bond, draw its arrow on the board: drag from carbon to oxygen, or from oxygen to carbon. The arrow points at the atom where you let go.',
       none: 'Nonpolar, no arrow',
       // no arrow, an arrow that points at carbon, an arrow that points at oxygen
       answers: ['nonpolar', 'C', 'O'],
@@ -927,9 +1045,21 @@ describe('step 6: the net dipole, drawn on the model', () => {
   it('asks which way the net dipole points, and says how to draw it', () => {
     expect(netArrowQuestion(P('H2O'))).toEqual({
       ask: 'Which way does the net dipole of water point?',
-      draw: 'Draw the net dipole on the 3D model: press on oxygen and drag the way the bond arrows add up.',
+      draw: 'Draw the net dipole on the 3D model: drag from oxygen to one of the dots, or tap a dot. The dots are at the outer atoms, at the lone pairs, and in the space between them.',
     })
     expect(netArrowQuestion(P('NO2-')).ask).toBe('Which way does the net dipole of the nitrite ion point?')
+  })
+  it('names where an arrow points while it is being drawn', () => {
+    expect(arrowCaption('O')).toBe('points at oxygen')
+    // water: two hydrogens and two lone pairs on oxygen
+    const w = aimWords(water.m)
+    expect(Object.values(w.atoms)).toEqual(['toward a hydrogen atom', 'toward a hydrogen atom'])
+    expect(w).toMatchObject({ lone: 'toward a lone pair', middle: 'toward the middle of the 2 hydrogen atoms', away: 'away from the 2 hydrogen atoms' })
+    // ammonia has one lone pair; formaldehyde has one oxygen and two hydrogens around carbon
+    expect(aimWords(polarity(solveLikeAStudent('NH3'))!).lone).toBe('toward the lone pair')
+    const f = aimWords(ch2o.m)
+    expect(Object.values(f.atoms).sort()).toEqual(['toward a hydrogen atom', 'toward a hydrogen atom', 'toward oxygen'])
+    expect(f).toMatchObject({ middle: 'toward the middle of the 3 outer atoms', away: 'away from the 3 outer atoms' })
   })
   it('takes an arrow within 35° of the net dipole as right', () => {
     expect(NET_WITHIN).toBe(35)
@@ -1194,7 +1324,8 @@ describe('every sentence the guide can show', () => {
     const out: string[] = STEPS.flatMap((s) => [s.label, s.title, s.next])
     for (const p of PROBLEMS) {
       const sp = speciesOf(p)
-      out.push(titleOf(p), inventory(p), totalSum(p), bondInstruction(p))
+      out.push(titleOf(p), inventory(p), totalSum(p), bondInstruction(p), placeInstruction(p), ...howToFree().map((h) => h.text))
+      for (const step of STEPS) out.push(...howTo(step.id, p).map((h) => h.text))
       const parts = (c: Coach | null) => (c ? [c.lead, c.why, c.ask] : [])
       for (const [el] of p.formula) {
         for (let n = 0; n <= 8; n++) if (n !== ELEMENTS[el].valence) for (let tries = 1; tries <= 3; tries++) out.push(...parts(countCoach(p, el, n, tries)))

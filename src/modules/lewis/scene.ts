@@ -21,13 +21,20 @@ export interface SceneCallbacks {
   tapBond(id: string): void
   tapEmpty(): void
   bond(a: string, b: string): void
+  /** A swipe across a bond's line: one line of that bond is cut. */
+  cut(bondId: string): void
+  /** An atom is being carried across the board (`id` and where the pointer is), or was just let go (`null`). */
+  carry?(id: string | null, clientX: number, clientY: number): void
+  /** An atom was let go at a point on the page. True when that took it off the board (it was dropped on the bin). */
+  drop?(id: string, clientX: number, clientY: number): boolean
   /** A dipole arrow drawn from one atom to another. The arrow points at `to`. */
   drawBond(from: string, to: string): void
   /** The net dipole drawn on the lifted model: its direction on screen (x to the right, y up), each
    *  bond from the middle atom as the viewer sees it at that moment (unit vectors, z toward the
    *  viewer), and the drawn direction in the board's own 3D frame. */
   drawNet(drawn: { x: number; y: number }, seen: { atomId: string; dir: V3 }[], world: V3): void
-  place(el: El, at: P2 | null): void
+  /** Puts an atom on the board and gives its id back, or null when the board did not take it. */
+  place(el: El, at: P2 | null): string | null
   remove(id: string): void
   /** Something the hand should feel on a phone: an atom landing, a bond forming, a refused move. */
   feel?(kind: 'land' | 'bond' | 'refuse'): void
@@ -66,7 +73,23 @@ export interface SceneInput {
    *  bond's arrow by its two atoms, the net dipole by its direction in the board's 3D frame): it
    *  stays on the board, in the color for mistakes, until the next arrow is started. `labels` is
    *  what a screen reader says for each atom an arrow can start or end on. Null: nothing. */
-  draw: { kind: 'bond' | 'net'; center: string; aim: number; wrong: { from: string; to: string } | { dir: V3 } | null; labels: Record<string, string> } | null
+  draw: {
+    kind: 'bond' | 'net'
+    center: string
+    aim: number
+    wrong: { from: string; to: string } | { dir: V3 } | null
+    labels: Record<string, string>
+    /** What to print beside the arrow's head while it is being drawn: for a bond's arrow, by the
+     *  atom it points at ("points at oxygen"). */
+    captions: Record<string, string>
+    /** The net dipole's aim points: small dots around the model, one beyond each bonded atom, one
+     *  beyond each lone pair of the middle atom, one toward the middle of the bonded atoms and one
+     *  straight away from it. An arrow dragged near a dot snaps to it, and a tap on a dot sets the
+     *  arrow there. These are the words printed beside the arrow for each. Null for a bond's arrow. */
+    aims: { atoms: Record<string, string>; lone: string; middle: string; away: string } | null
+  } | null
+  /** An atom dropped from the tray onto an atom on the board is bonded to it in the same move. */
+  dropBonds: boolean
 }
 
 interface ArrowView {
@@ -213,7 +236,7 @@ export class Scene {
   private readonly rubber: THREE.Mesh
   private ghost: { el: El; mesh: THREE.Mesh; startX: number; startY: number; moved: boolean } | null = null
 
-  private input: SceneInput = { s: { atoms: [], bonds: [], seq: 1 }, editable: false, selection: null, view: 'flat', specimen: false, showCounts: false, showCharges: false, shells: new Map(), refused: null, point: null, angles: [], dipoles: null, draw: null }
+  private input: SceneInput = { s: { atoms: [], bonds: [], seq: 1 }, editable: false, selection: null, view: 'flat', specimen: false, showCounts: false, showCharges: false, shells: new Map(), refused: null, point: null, angles: [], dipoles: null, draw: null, dropBonds: false }
   private insets: Insets = { top: 96, right: 16, bottom: 132, left: 16 }
   private halfW = 5.6
   private halfH = 3.5
@@ -261,6 +284,16 @@ export class Scene {
   /** A wrong net dipole that is no longer shown: the student pulled the model out of shape after
    *  drawing it, so the direction it was drawn in means something else now. */
   private wrongGone: V3 | null = null
+  /** The net dipole's aim points as they are on screen now, the dots drawn for them, and the one the arrow has snapped to. */
+  private aims: { x: number; y: number; label: string }[] = []
+  private readonly aimDots: HTMLElement[] = []
+  private aimNear = -1
+  /** The words beside the head of the arrow that is being drawn. */
+  private capTag: HTMLElement | null = null
+  /** A swipe across the bare board: the line it has drawn so far, and the bonds it has cut. */
+  private readonly cutPath = document.createElementNS(SVG_NS, 'polyline')
+  private cutPoints: { x: number; y: number }[] = []
+  private cutDone = new Set<string>()
   /** For tests: whether the arrow being drawn and the last wrong arrow are on screen, and which way a wrong net dipole points there (pixels, y down). */
   private drawnShown: { drawing: boolean; wrong: boolean; wrongWay: { x: number; y: number } | null } = { drawing: false, wrong: false, wrongWay: null }
   private pointSeen = -1
@@ -281,7 +314,7 @@ export class Scene {
   private quiet = 0
 
   // pointer
-  private press: { kind: 'atom' | 'dot' | 'bond' | 'empty' | 'orbit' | 'dom' | 'arrow'; pointerId: number; id?: string; dom?: number; x: number; y: number; moved: boolean; grab?: P2 } | null = null
+  private press: { kind: 'atom' | 'dot' | 'bond' | 'empty' | 'cut' | 'orbit' | 'dom' | 'arrow' | 'aim'; pointerId: number; id?: string; dom?: number; x: number; y: number; moved: boolean; grab?: P2 } | null = null
   private pinned: string | null = null
   private dropTarget: string | null = null
   private coarse = false
@@ -581,7 +614,12 @@ export class Scene {
       const rect = this.wrap.getBoundingClientRect()
       const inside = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom
       const p = inside ? this.boardPoint(e.clientX, e.clientY, atomRadius(g.el)) : null
-      if (p && Math.abs(p.x) <= this.halfW && Math.abs(p.y) <= this.halfH) this.cb.place(g.el, p)
+      if (p && Math.abs(p.x) <= this.halfW && Math.abs(p.y) <= this.halfH) {
+        // dropped on an atom that is already on the board: put it beside that atom and bond the two
+        const onto = this.input.dropBonds && this.liftRaw < 0.5 ? this.atomAt(e.clientX, e.clientY) : null
+        const id = this.cb.place(g.el, p)
+        if (id && onto) this.cb.bond(id, onto)
+      }
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
@@ -1737,6 +1775,65 @@ export class Scene {
     return { az: best.az, pol }
   }
 
+  /** The aim points for the net dipole, where they are on screen now, and the dots drawn for them.
+   *  One beyond each bonded atom, one beyond each lone pair of the middle atom, one toward the
+   *  middle of the bonded atoms and one straight away from it. Two that point the same way count
+   *  once, and one that points at the viewer or away is left out, because no arrow on screen can
+   *  point there. */
+  private placeAims(lift: number) {
+    const d = this.input.specimen ? null : this.input.draw
+    const center = d ? this.atoms.get(d.center) : undefined
+    const found: { x: number; y: number; label: string }[] = []
+    const words = d?.kind === 'net' ? d.aims : null
+    if (d && words && center && lift > 0.97) {
+      const ways: { dir: THREE.Vector3; far: number; label: string }[] = []
+      const add = (dir: THREE.Vector3, far: number, label: string) => {
+        if (dir.lengthSq() < 1e-6 || !label) return
+        dir.normalize()
+        if (!ways.some((w) => w.dir.angleTo(dir) < 0.3)) ways.push({ dir, far, label })
+      }
+      const sum = new THREE.Vector3()
+      for (const b of bondsOf(this.input.s, d.center)) {
+        const other = this.atoms.get(b.a === d.center ? b.b : b.a)
+        if (!other) continue
+        const v = other.pos.clone().sub(center.pos)
+        add(v.clone(), v.length() + other.r + 0.42, words.atoms[other.id] ?? '')
+        sum.add(v.normalize())
+      }
+      const open = center.r + 1.3
+      this.doms.forEach((dom) => {
+        if (dom.lone) add(v3(dom.dir), open, words.lone)
+      })
+      if (sum.length() > 0.35) {
+        add(sum.clone(), open, words.middle)
+        add(sum.clone().negate(), open, words.away)
+      }
+      const c = this.toScreen(center.pos)
+      const rc = this.pxRadius(center.pos, center.r)
+      for (const w of ways) {
+        const at = this.toScreen(center.pos.clone().addScaledVector(w.dir, w.far))
+        if (Math.hypot(at.x - c.x, at.y - c.y) < rc + 22) continue
+        if (found.some((f) => Math.hypot(f.x - at.x, f.y - at.y) < 26)) continue
+        found.push({ x: at.x, y: at.y, label: w.label })
+      }
+    }
+    this.aims = found
+    if (this.aimNear >= found.length) this.aimNear = -1
+    while (this.aimDots.length < found.length) {
+      const dot = document.createElement('span')
+      dot.className = 'mb-aim'
+      dot.setAttribute('aria-hidden', 'true')
+      this.overlay.appendChild(dot)
+      this.aimDots.push(dot)
+    }
+    this.aimDots.forEach((dot, i) => {
+      const a = found[i]
+      dot.style.opacity = a ? '1' : '0'
+      if (a) dot.style.transform = `translate(${a.x.toFixed(1)}px, ${a.y.toFixed(1)}px) translate(-50%, -50%)`
+      dot.classList.toggle('is-near', i === this.aimNear)
+    })
+  }
+
   /** The arrow a student is drawing now, and the last arrow that was drawn wrong. */
   private updateDrawn(lift: number) {
     const d = this.input.specimen ? null : this.input.draw
@@ -1745,6 +1842,9 @@ export class Scene {
     const from = press?.id ? this.atoms.get(press.id) : undefined
     const net = d?.kind === 'net'
     const start = from ?? (net && this.keyAim !== null ? center : undefined)
+    this.placeAims(lift)
+    let caption = ''
+    let capAt: { x: number; y: number } | null = null
 
     // the arrow under the pointer, or the one the arrow keys are turning
     let drawing = false
@@ -1758,11 +1858,20 @@ export class Scene {
         to = this.arrowTo
         const over = this.arrowOver ? this.atoms.get(this.arrowOver) : undefined
         if (over) {
-          // over an atom, the arrow stops at that atom's edge
+          // over an atom, the arrow stops at that atom's edge, and says which atom it points at
           const oc = this.toScreen(over.pos)
           const reach = Math.hypot(oc.x - c.x, oc.y - c.y) || 1
           const gap = this.pxRadius(over.pos, over.r) + 3
           to = { x: oc.x - ((oc.x - c.x) / reach) * gap, y: oc.y - ((oc.y - c.y) / reach) * gap }
+          caption = d.captions[over.id] ?? ''
+          capAt = { x: oc.x, y: oc.y - gap - 16 }
+        }
+        const aim = net ? this.aims[this.aimNear] : undefined
+        if (aim) {
+          // near an aim point, the net dipole snaps to it and says where that is
+          to = { x: aim.x, y: aim.y }
+          caption = aim.label
+          capAt = { x: aim.x, y: aim.y - 24 }
         }
       } else if (this.keyAim !== null) {
         const a = (this.keyAim * Math.PI) / 180
@@ -1772,6 +1881,23 @@ export class Scene {
       if (to && len > r + 6) drawing = this.placeArrow(this.drawArrow, { x: c.x + ((to.x - c.x) / len) * (r + 3), y: c.y + ((to.y - c.y) / len) * (r + 3) }, to, null, net ? 13 : 9)
     }
     if (this.drawArrow && !drawing) this.drawArrow.g.style.display = 'none'
+    // the words beside the arrow's head: what the arrow points at
+    const hover = !drawing && net ? this.aims[this.aimNear] : undefined
+    if (hover) {
+      caption = hover.label
+      capAt = { x: hover.x, y: hover.y - 24 }
+    }
+    if (caption && capAt) {
+      if (!this.capTag) {
+        this.capTag = document.createElement('span')
+        this.capTag.className = 'mb-delta is-cap'
+        this.capTag.setAttribute('aria-hidden', 'true')
+        this.overlay.appendChild(this.capTag)
+      }
+      this.capTag.textContent = caption
+      this.capTag.style.transform = `translate(${capAt.x.toFixed(1)}px, ${capAt.y.toFixed(1)}px) translate(-50%, -50%)`
+      this.capTag.style.opacity = '1'
+    } else if (this.capTag) this.capTag.style.opacity = '0'
 
     // the last wrong arrow stays where it was drawn until the next one is started
     let wrong = false
@@ -2044,6 +2170,73 @@ export class Scene {
     const c = this.toScreen(view.pos)
     return Math.hypot(clientX - rect.left - c.x, clientY - rect.top - c.y) <= this.pxRadius(view.pos, view.r) + slack
   }
+  /** The aim point under the pointer, or −1. */
+  private aimAt(clientX: number, clientY: number): number {
+    const rect = this.wrap.getBoundingClientRect()
+    const reach = this.coarse ? 22 : 15
+    let best = -1
+    let bestD = reach
+    this.aims.forEach((a, i) => {
+      const dist = Math.hypot(clientX - rect.left - a.x, clientY - rect.top - a.y)
+      if (dist < bestD) {
+        bestD = dist
+        best = i
+      }
+    })
+    return best
+  }
+  /** The aim point that an arrow from the middle atom to this point on the board points at, within 13°, or −1. */
+  private aimToward(x: number, y: number): number {
+    const d = this.input.draw
+    const center = d ? this.atoms.get(d.center) : undefined
+    if (!center) return -1
+    const c = this.toScreen(center.pos)
+    if (Math.hypot(x - c.x, y - c.y) < this.pxRadius(center.pos, center.r) + 10) return -1
+    const way = Math.atan2(y - c.y, x - c.x)
+    let best = -1
+    let least = (13 * Math.PI) / 180
+    this.aims.forEach((a, i) => {
+      const off = Math.abs(Math.atan2(Math.sin(Math.atan2(a.y - c.y, a.x - c.x) - way), Math.cos(Math.atan2(a.y - c.y, a.x - c.x) - way)))
+      if (off < least) {
+        least = off
+        best = i
+      }
+    })
+    return best
+  }
+  /** A stroke across the bare board: each bond line it crosses is cut once. */
+  private swipe(clientX: number, clientY: number) {
+    const rect = this.wrap.getBoundingClientRect()
+    const to = { x: clientX - rect.left, y: clientY - rect.top }
+    const from = this.cutPoints[this.cutPoints.length - 1]
+    if (!from || Math.hypot(to.x - from.x, to.y - from.y) < 3) return
+    this.cutPoints.push(to)
+    if (!this.cutPath.isConnected) {
+      this.cutPath.setAttribute('class', 'mb-cut')
+      this.dipoleSvg.appendChild(this.cutPath)
+    }
+    this.cutPath.setAttribute('points', this.cutPoints.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(' '))
+    // do the two segments cross?
+    const side = (p: { x: number; y: number }, q: { x: number; y: number }, r: { x: number; y: number }) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)
+    for (const b of this.input.s.bonds) {
+      if (this.cutDone.has(b.id)) continue
+      const f = this.bondFrame(b.a, b.b)
+      if (!f) continue
+      const p1 = this.toScreen(f.A.pos.clone().addScaledVector(f.dir, f.A.r * 0.9))
+      const p2 = this.toScreen(f.B.pos.clone().addScaledVector(f.dir, -f.B.r * 0.9))
+      // the bond's two ends lie on opposite sides of the stroke, and the stroke's two ends on opposite
+      // sides of the bond or right on its line (a point of the stroke can land exactly on the line)
+      const s1 = side(p1, p2, from)
+      const s2 = side(p1, p2, to)
+      if (side(from, to, p1) * side(from, to, p2) < 0 && s1 * s2 <= 0 && (s1 !== 0 || s2 !== 0)) {
+        this.cutDone.add(b.id)
+        if (!this.reduced) this.sparks.burst(f.mid, 0xff8fa3, 8, 1.6)
+        this.cb.feel?.('land')
+        this.cb.cut(b.id)
+      }
+    }
+  }
+
   /** The atom under the pointer that an arrow can start on now: any atom for a bond's arrow, the
    *  middle atom of the lifted model for the net dipole. The net dipole starts anywhere on the
    *  middle atom, also where an outer atom sits in front of it: no other atom can start that arrow. */
@@ -2109,8 +2302,12 @@ export class Scene {
     // the student has taken the model in hand: it stops turning by itself
     this.aim = null
     const arrowFrom = this.arrowStart(e.clientX, e.clientY)
+    const aim = arrowFrom ? -1 : this.aimAt(e.clientX, e.clientY)
     if (arrowFrom) {
       this.press = { ...base, kind: 'arrow', id: arrowFrom }
+      this.keyAim = null
+    } else if (aim >= 0) {
+      this.press = { ...base, kind: 'aim', dom: aim }
       this.keyAim = null
     } else if (this.liftRaw > 0.5) {
       this.press = hit?.kind === 'lobe' ? { ...base, kind: 'dom', dom: hit.dom } : { ...base, kind: 'orbit' }
@@ -2120,8 +2317,14 @@ export class Scene {
         const wrong = this.input.draw?.wrong
         if (wrong && 'dir' in wrong) this.wrongGone = wrong.dir
       }
-    } else if (!this.input.editable || !hit) this.press = { ...base, kind: 'empty' }
-    else if (hit.kind === 'atom') {
+    } else if (!this.input.editable) this.press = { ...base, kind: 'empty' }
+    else if (!hit) {
+      // a stroke that starts on the bare board cuts the bonds it crosses
+      this.press = { ...base, kind: 'cut' }
+      const rect = this.wrap.getBoundingClientRect()
+      this.cutPoints = [{ x: e.clientX - rect.left, y: e.clientY - rect.top }]
+      this.cutDone = new Set()
+    } else if (hit.kind === 'atom') {
       const p = this.positions.get(hit.id)
       const at = this.boardPoint(e.clientX, e.clientY, this.atoms.get(hit.id)?.r ?? 0.5)
       this.press = { ...base, kind: 'atom', id: hit.id, grab: p && at ? { x: at.x - p.x, y: at.y - p.y } : { x: 0, y: 0 } }
@@ -2129,7 +2332,7 @@ export class Scene {
     else if (hit.kind === 'bond') this.press = { ...base, kind: 'bond', id: hit.id }
     this.wrap.setPointerCapture(e.pointerId)
     this.wrap.classList.toggle('is-grabbing', this.press?.kind === 'atom' || this.press?.kind === 'dot' || this.press?.kind === 'dom')
-    this.wrap.classList.toggle('is-aim', this.press?.kind === 'arrow')
+    this.wrap.classList.toggle('is-aim', this.press?.kind === 'arrow' || this.press?.kind === 'aim')
   }
 
   private readonly onMove = (e: PointerEvent) => {
@@ -2138,10 +2341,12 @@ export class Scene {
     if (!p) {
       if (e.pointerType === 'mouse') {
         const arrowFrom = this.arrowStart(e.clientX, e.clientY)
-        const hit = arrowFrom ? null : this.pick(e.clientX, e.clientY)
+        const aim = arrowFrom ? -1 : this.aimAt(e.clientX, e.clientY)
+        const hit = arrowFrom || aim >= 0 ? null : this.pick(e.clientX, e.clientY)
         const can = this.liftRaw > 0.5 ? hit !== null : this.input.editable && hit !== null
         this.wrap.classList.toggle('is-hot', can)
-        this.wrap.classList.toggle('is-aim', arrowFrom !== null)
+        this.wrap.classList.toggle('is-aim', arrowFrom !== null || aim >= 0)
+        this.aimNear = aim
         this.hoverId = arrowFrom ?? (can && hit?.kind === 'atom' ? hit.id : null)
       }
       return
@@ -2163,6 +2368,7 @@ export class Scene {
       const rect = this.wrap.getBoundingClientRect()
       this.arrowTo = { x: e.clientX - rect.left, y: e.clientY - rect.top }
       this.arrowOver = this.input.draw?.kind === 'bond' && !this.onAtom(p.id, e.clientX, e.clientY) ? this.atomAt(e.clientX, e.clientY, p.id) : null
+      this.aimNear = this.input.draw?.kind === 'net' ? this.aimToward(this.arrowTo.x, this.arrowTo.y) : -1
     } else if (p.kind === 'orbit') {
       this.orbit.az -= (e.movementX || 0) * 0.008
       this.orbit.pol = Math.max(0.3, Math.min(1.62, this.orbit.pol - (e.movementY || 0) * 0.008))
@@ -2176,12 +2382,15 @@ export class Scene {
       const point = hit ?? ray.closestPointToPoint(center, new THREE.Vector3())
       const dir = point.sub(center).normalize()
       this.doms[p.dom]!.dir = [dir.x, dir.y, dir.z]
+    } else if (p.kind === 'cut') {
+      this.swipe(e.clientX, e.clientY)
     } else if (p.kind === 'atom' && p.id) {
       this.pinned = p.id
       const at = this.boardPoint(e.clientX, e.clientY, this.atoms.get(p.id)?.r ?? 0.5)
       if (at && p.grab) this.positions.set(p.id, { x: at.x - p.grab.x, y: at.y - p.grab.y })
       const over = this.pick(e.clientX, e.clientY, p.id)
       this.dropTarget = over?.kind === 'atom' ? over.id : null
+      this.cb.carry?.(p.id, e.clientX, e.clientY)
     } else if (p.kind === 'dot' && p.id) {
       const from = this.atoms.get(p.id)
       const at = this.boardPoint(e.clientX, e.clientY, from?.r ?? 0.5)
@@ -2222,12 +2431,32 @@ export class Scene {
       if (!center || !p.moved) return
       const rect = this.wrap.getBoundingClientRect()
       const c = this.toScreen(center.pos)
-      const vx = e.clientX - rect.left - c.x
-      const vy = e.clientY - rect.top - c.y
+      // an arrow let go near an aim point is the arrow to that point
+      const snap = this.aims[this.aimToward(e.clientX - rect.left, e.clientY - rect.top)]
+      const vx = (snap ? snap.x : e.clientX - rect.left) - c.x
+      const vy = (snap ? snap.y : e.clientY - rect.top) - c.y
       // an arrow has to reach out of the atom it starts on
       if (Math.hypot(vx, vy) > this.pxRadius(center.pos, center.r) + 10) this.finishNet(vx, vy)
       return
     }
+    if (p.kind === 'aim') {
+      // a tap on an aim point sets the net dipole there
+      const d = this.input.draw
+      const center = d ? this.atoms.get(d.center) : undefined
+      const to = this.aims[p.dom ?? -1]
+      if (d?.kind === 'net' && center && to) {
+        const rect = this.wrap.getBoundingClientRect()
+        const c = this.toScreen(center.pos)
+        if (Math.hypot(e.clientX - rect.left - to.x, e.clientY - rect.top - to.y) < 30) this.finishNet(to.x - c.x, to.y - c.y)
+      }
+      return
+    }
+    if (p.kind === 'cut') {
+      if (p.moved) return
+      // a tap on the bare board, as before
+    }
+    // let go over the bin: the atom comes off the board
+    if (p.kind === 'atom' && p.id && p.moved && this.cb.drop?.(p.id, e.clientX, e.clientY)) return
     if (!p.moved) {
       if (p.kind === 'atom' && p.id) this.cb.tapAtom(p.id, false)
       else if (p.kind === 'dot' && p.id) this.cb.tapAtom(p.id, false)
@@ -2258,14 +2487,20 @@ export class Scene {
   private readonly onLeave = () => {
     this.hoverId = null
     this.pointer = null
+    if (!this.press) this.aimNear = -1
   }
 
   private release(e: PointerEvent) {
     if (this.press?.kind === 'dom' && this.press.dom !== undefined && this.doms[this.press.dom]) this.doms[this.press.dom]!.pinned = false
+    // an atom that was being carried is let go, however the press ended
+    if (this.press?.kind === 'atom') this.cb.carry?.(null, e.clientX, e.clientY)
     this.press = null
     this.pinned = null
     this.dropTarget = null
     this.rubber.visible = false
+    this.cutPoints = []
+    this.cutPath.setAttribute('points', '')
+    this.aimNear = -1
     this.arrowTo = null
     this.arrowOver = null
     this.quiet = 0
@@ -2278,6 +2513,31 @@ export class Scene {
     e.preventDefault()
     this.untouched = 0
     this.orbit.zoom = Math.max(0.7, Math.min(1.6, this.orbit.zoom * Math.exp(e.deltaY * 0.0012)))
+  }
+
+  /** Where an atom is on the page right now and how big it is drawn there, for the rings and the
+   *  pointing hand that the panel draws over the board. Null for an atom that is not on the board. */
+  atomOnPage(id: string): { x: number; y: number; r: number } | null {
+    const view = this.atoms.get(id)
+    if (!view) return null
+    const rect = this.wrap.getBoundingClientRect()
+    const c = this.toScreen(view.pos)
+    return { x: rect.left + c.x, y: rect.top + c.y, r: this.pxRadius(view.pos, view.r) }
+  }
+  /** Where the middle of the flat board is on the page, at the height of a ball lying on it. */
+  boardOnPage(): { x: number; y: number } {
+    const rect = this.wrap.getBoundingClientRect()
+    const c = this.toScreen(new THREE.Vector3(0, 0.5, 0))
+    return { x: rect.left + c.x, y: rect.top + c.y }
+  }
+  /** Where each aim point for the net dipole is on the page. Empty while the net dipole is not being asked for. */
+  aimsOnPage(): { x: number; y: number }[] {
+    const rect = this.wrap.getBoundingClientRect()
+    return this.aims.map((a) => ({ x: rect.left + a.x, y: rect.top + a.y }))
+  }
+  /** True while the student has the mouse button or a finger down on the board, or is carrying an atom from the tray. */
+  get busy(): boolean {
+    return this.press !== null || this.ghost !== null
   }
 
   /** For tests driven through the page: where an atom or bond is on screen right now. */
@@ -2300,7 +2560,12 @@ export class Scene {
       const c = this.toScreen(d.pos)
       return { key: d.key, x: rect.left + c.x, y: rect.top + c.y }
     })
-    return { atoms, bonds, lobes, dots, lift: this.liftRaw, ringed: this.ringed, dipoles: this.dipolesShown, draw: { kind: this.input.draw?.kind ?? null, ...this.drawnShown }, board: { halfW: this.halfW, halfH: this.halfH } }
+    // the box on the page that holds the four corners of the board, at the height of a ball lying on it
+    const corners = [-1, 1].flatMap((sx) => [-1, 1].map((sz) => this.toScreen(new THREE.Vector3(sx * this.halfW, 0.5, sz * this.halfH))))
+    const xs = corners.map((q) => q.x)
+    const ys = corners.map((q) => q.y)
+    const px = { x: rect.left + Math.min(...xs), y: rect.top + Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) }
+    return { atoms, bonds, lobes, dots, lift: this.liftRaw, ringed: this.ringed, dipoles: this.dipolesShown, draw: { kind: this.input.draw?.kind ?? null, ...this.drawnShown }, aims: this.aimsOnPage().map((a, i) => ({ ...a, label: this.aims[i]!.label })), board: { halfW: this.halfW, halfH: this.halfH, px } }
   }
   /** For tests: the angle in degrees between two bonded atoms as seen from the center, in the 3D model. */
   debugAngles(): number[] {

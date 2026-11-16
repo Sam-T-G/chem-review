@@ -49,4 +49,7 @@ An accepted record is never rewritten. Only its "Status" and "Superseded by" lin
 | [D-0021](0021-polarity-and-orbitals-as-two-more-steps.md) | Polarity and bonding are two more steps on each guided molecule, worked the way Sam's course slides work them | provisional | Lead (the build session), reading Sam's request below | learning, lewis, chem |
 | [D-0022](0022-students-draw-the-dipole.md) | In the polar segment a student draws a line and is assessed on where the dipole points | accepted | Sam | learning, lewis |
 | [D-0023](0023-dipole-arrows-drawn-on-the-board.md) | A student drags each bond's dipole arrow from one atom to the other, then drags the net dipole out of the middle atom | provisional | The build session, reading D-0022 | learning, lewis, chem |
+| [D-0024](0024-prompts-are-noticeable-and-checks-stay-on-screen.md) | A question is made noticeable, the app shows how to act on the board, and the checks stay on screen | accepted | Sam | learning, design, lewis |
+| [D-0025](0025-one-move-controls-and-a-guided-dipole-drawing.md) | Atoms and bonds are added and removed in one move, the dipole drawing is guided, and the board can be cleared in 3D | accepted | Sam | learning, design, lewis |
+| [D-0026](0026-glow-hand-check-strip-and-aim-points.md) | A glow and a pointing hand show the next action, a strip of checks stays over the board, bonds are cut with a swipe, and the net dipole is aimed at dots | provisional | The build session, reading D-0024 and D-0025 | learning, design, lewis |
 <!-- index:end -->

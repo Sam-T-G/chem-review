@@ -44,25 +44,76 @@ const shot = async (name) => { if (SHOTS) await page.screenshot({ path: `shots/$
 // ---- real input
 const press = async (sel) => { const loc = page.locator(sel).first(); if (phone) await loc.tap(); else await loc.click(); await wait(120) }
 const tapAt = async (p) => { if (phone) await page.touchscreen.tap(p.x, p.y); else await page.mouse.click(p.x, p.y); await wait(160) }
-async function drag(from, to, hold = 0) {
+async function drag(from, to, hold = 0, during = null) {
   const steps = 14
   const at = (i) => ({ x: from.x + ((to.x - from.x) * i) / steps, y: from.y + ((to.y - from.y) * i) / steps })
   if (phone) {
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: from.x, y: from.y }] })
     for (let i = 1; i <= steps; i++) { const p = at(i); await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: p.x, y: p.y }] }); await wait(12) }
     if (hold) await wait(hold)
+    if (during) await during()
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
   } else {
     await page.mouse.move(from.x, from.y)
     await page.mouse.down()
     for (let i = 1; i <= steps; i++) { const p = at(i); await page.mouse.move(p.x, p.y); await wait(8) }
     if (hold) await wait(hold)
+    if (during) await during()
     await page.mouse.up()
   }
   await wait(520)
 }
 const centerOf = async (sel) => { const b = await page.locator(sel).first().boundingBox(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 } }
 const atomPoint = async (id) => (await points()).atoms.find((a) => a.id === id)
+/** Waits until the atoms on the board have stopped moving. After a bond the layout slides the
+ *  molecule toward the middle of the board for a few seconds, more slowly in a headless browser. */
+async function atomsAtRest() {
+  let before = (await points()).atoms
+  for (let i = 0; i < 60; i++) {
+    await wait(200)
+    const now = (await points()).atoms
+    if (now.length === before.length && now.every((a, k) => Math.hypot(a.x - before[k].x, a.y - before[k].y) < 0.8)) return
+    before = now
+  }
+}
+
+// ---- where to look next: the glow, the pointing hand, and the checks that stay over the board
+const NAME = { H: 'hydrogen', Be: 'beryllium', B: 'boron', C: 'carbon', N: 'nitrogen', O: 'oxygen', F: 'fluorine', P: 'phosphorus', S: 'sulfur', Cl: 'chlorine', Br: 'bromine', Xe: 'xenon' }
+const cueNow = () => mb(() => window.__mb.cue())
+/** The cue is of this kind (and, for a question, names this control), and a glow that is switched
+ *  on and can be seen is drawn over `sel`. The glows are read from the page itself. The layer needs
+ *  a moment after a step opens. */
+async function cued(label, kind, key = null, sel = null, glows = 1) {
+  let c = null
+  let on = sel === null
+  for (let i = 0; i < 30; i++) {
+    c = await cueNow()
+    const r = sel ? await page.locator(sel).first().boundingBox().catch(() => null) : null
+    c.halos = c.halos.filter((h) => h.opacity > 0.5 && h.w > 8 && h.h > 8)
+    on = sel === null || (!!r && c.halos.some((h) => h.x <= r.x + 2 && h.y <= r.y + 2 && h.x + h.w >= r.x + r.width - 2 && h.y + h.h >= r.y + r.height - 2))
+    if (c.cue?.kind === kind && (key === null || c.cue.key === key) && on && c.halos.length >= glows) break
+    await wait(120)
+  }
+  ok(c.cue?.kind === kind && (key === null || c.cue.key === key), `${label}: the next action is ${kind}${key ? ` ${key}` : ''} (${JSON.stringify(c.cue)})`)
+  ok(c.halos.length > 0 && on, `${label}: the place of the next action glows${sel ? ` (${sel})` : ''}`)
+  return c
+}
+/** The pointing hand acts out a drag within a few seconds. */
+async function handActs(label, carries = false) {
+  let seen = false
+  let eyes = null
+  for (let i = 0; i < 50 && !(seen && (!carries || eyes !== null)); i++) {
+    const c = await cueNow()
+    seen = seen || c.hand === 'demo'
+    if (c.carriedEyes !== null) eyes = c.carriedEyes
+    if (!(seen && (!carries || eyes !== null))) await wait(100)
+  }
+  ok(seen, `${label}: the pointing hand is on screen and acts out the drag`)
+  // the atom the hand carries is drawn like the atoms in the row: its eyes are a patch about 20 px wide, not a speck
+  if (carries) ok(eyes !== null && eyes > 12, `${label}: the atom the hand carries has its face (eyes ${eyes === null ? 'not seen' : Math.round(eyes) + ' px wide'})`)
+}
+/** The three checks that stay over the board, as their states. */
+const strip = () => mb(() => [...document.querySelectorAll('.mb-checkbar .mb-chk')].map((n) => n.getAttribute('data-state')).join(' '))
 
 // ---- drawing dipole arrows (step 6)
 /** A point on an atom that no other atom covers, nearest its middle. Null when the atom is hidden. */
@@ -85,14 +136,14 @@ async function turnModel() {
 }
 /** Draws a bond's dipole arrow with a real drag from one atom to another. The model is turned first
  *  when one of the two atoms is behind another atom. */
-async function drawArrow(fromId, toId) {
+async function drawArrow(fromId, toId, during = null) {
   for (let i = 0; i < 12; i++) {
     const atoms = (await points()).atoms
     const a = clearPoint(atoms, fromId)
     const b = clearPoint(atoms, toId)
     const A = atoms.find((x) => x.id === fromId)
     const B = atoms.find((x) => x.id === toId)
-    if (a && b && Math.hypot(A.x - B.x, A.y - B.y) > A.r + B.r + 6) { await drag(a, b); return }
+    if (a && b && Math.hypot(A.x - B.x, A.y - B.y) > A.r + B.r + 6) { await drag(a, b, during ? 200 : 0, during); return }
     await turnModel()
   }
   throw new Error(`no clear view of atoms ${fromId} and ${toId} to draw an arrow between`)
@@ -100,10 +151,10 @@ async function drawArrow(fromId, toId) {
 /** The same arrow from the keyboard: Enter on the atom it starts on, then Enter on the atom it points at. */
 async function keyArrow(fromId, toId) {
   const label = async (id) => mb((id) => { const s = window.__mb.store.getState().s; return s.atoms.find((a) => a.id === id).el }, id)
-  const NAME = { H: 'Hydrogen', C: 'Carbon', N: 'Nitrogen', O: 'Oxygen', F: 'Fluorine', S: 'Sulfur', Cl: 'Chlorine', Br: 'Bromine', P: 'Phosphorus', B: 'Boron', Xe: 'Xenon' }
   const focusHit = async (re) => { for (let i = 0; i < 80; i++) { await page.keyboard.press('Tab'); if (await mb((src) => document.activeElement?.classList.contains('mb-hit') && new RegExp(src).test(document.activeElement.getAttribute('aria-label') ?? ''), re.source)) return true } return false }
-  const from = NAME[await label(fromId)]
-  const to = NAME[await label(toId)]
+  const capital = (w) => w.charAt(0).toUpperCase() + w.slice(1)
+  const from = capital(NAME[await label(fromId)])
+  const to = capital(NAME[await label(toId)])
   ok(await focusHit(new RegExp(`^${from}\\. Press Enter to start a dipole arrow`)), `keyboard: Tab reaches ${from.toLowerCase()}, which says Enter starts an arrow there`)
   await page.keyboard.press('Enter'); await wait(200)
   ok((await state()).selection?.id !== undefined, `keyboard: Enter on ${from.toLowerCase()} starts the arrow`)
@@ -143,6 +194,21 @@ async function drawNet(opposite) {
   }
   throw new Error('no clear view of the middle atom to draw the net dipole from')
 }
+/** Sets the net dipole with a tap on an aim point: the one nearest the direction worked out here.
+ *  Falls back to a drag when no aim point lies within 25° of it. Returns how it was set. */
+async function aimNet() {
+  const n = await netOnScreen()
+  const { aims } = await points()
+  let best = null
+  let least = 25
+  for (const a of aims) {
+    const off = degreesApart({ x: a.x - n.c.x, y: a.y - n.c.y }, n)
+    if (off < least) { least = off; best = a }
+  }
+  if (!best) { await drawNet(false); return 'drag' }
+  await tapAt(best)
+  return `tap on "${best.label}"`
+}
 const degreesApart = (a, b) => (Math.acos(Math.max(-1, Math.min(1, (a.x * b.x + a.y * b.y) / ((Math.hypot(a.x, a.y) * Math.hypot(b.x, b.y)) || 1)))) * 180) / Math.PI
 /** The net dipole from the keyboard: the arrow keys turn it 15° at a time from pointing up, Enter sets it. */
 async function keyNet() {
@@ -181,7 +247,8 @@ const PROBLEMS = firstArg === 'shell' ? [] : await mb(() => {
  *  way: an electron added by hand in the check step, wrong group counts, a wrong shape, a dipole
  *  arrow drawn the wrong way round, a net dipole drawn the opposite way. `wrong.keys` draws the
  *  arrows of step 6 from the keyboard, `wrong.flat` draws a bond's arrow on the flat drawing, and
- *  `wrong.endOn` first draws the net dipole while it points at the viewer. */
+ *  `wrong.endOn` first draws the net dipole while it points at the viewer. `wrong.aim` sets the
+ *  net dipole with a tap on an aim point. */
 async function solve(p, wrong = {}) {
   console.log(`${p.id}${Object.keys(wrong).length ? ' with wrong turns' : ''}`)
   // open the picker and choose the molecule
@@ -189,6 +256,8 @@ async function solve(p, wrong = {}) {
   await press(`[data-key="pick-${p.i}"]`)
   let st = await state()
   ok(st.problem === p.i && st.step === 'count', `${p.id}: picker opens the problem at the count step`)
+  await cued(`${p.id} count`, 'ask', `count-${p.formula[0][0]}`, `[data-cue="count-${p.formula[0][0]}"]`)
+  ok(await page.locator('.mb-checkbar .mb-chk').count() === 0, `${p.id}: no checks are shown while the board holds sample atoms`)
 
   // 1. count
   for (const [el] of p.formula) for (let k = 0; k < VALENCE[el]; k++) await press(`[data-key="inc-${el}"]`)
@@ -197,19 +266,30 @@ async function solve(p, wrong = {}) {
   await page.locator('#mb-total').pressSequentially(String(total), { delay: 30 })
   await press('[data-key="total-check"]')
   ok(await page.locator('.mb-total.is-right').count() === 1, `${p.id}: total of ${total} accepted`)
+  await cued(`${p.id} count done`, 'next', null, '.mb-btn-main')
   await press('[data-key="next"]')
 
   // 2. place: answer the middle question, then drag each atom from the tray onto the board
-  if (p.formula.length > 1) await press(`[data-key="mid-${p.center}"]`)
+  if (p.formula.length > 1) {
+    await cued(`${p.id} place`, 'ask', 'middle', '[data-cue="middle"]')
+    await press(`[data-key="mid-${p.center}"]`)
+  }
+  // the three checks are over the board from here on, and none is marked wrong while the board is empty
+  ok((await strip()) === 'wait wait wait', `${p.id}: the three checks are shown over the empty board, all waiting (${await strip()})`)
+  const tray = await cued(`${p.id} place`, 'tray', null, `[data-tray="${p.center}"]`)
+  ok(tray.cue.el === p.center && tray.cue.demo === true, `${p.id}: the middle atom in the row under the board is the one to drag first`)
+  if (p.i < 2) await handActs(`${p.id} place`, true)
   const box = await page.locator('.mb-canvas-wrap').boundingBox()
   const pts0 = await points()
   // board rectangle on screen is inside the canvas box minus the chrome; aim within its middle
   const outer = p.formula.flatMap(([el, n]) => new Array(el === p.center ? n - 1 : n).fill(el))
   const ring = outer.length
-  const cx = box.x + box.width / 2
-  const cy = box.y + box.height * (phone ? 0.5 : 0.52)
-  const rx = Math.min(box.width * 0.26, 220)
-  const ry = Math.min(box.height * (phone ? 0.16 : 0.2), 150)
+  // the atoms go on an oval around the middle of the board, as the board is drawn on the page now
+  const on = (await points()).board.px
+  const cx = on.x + on.w / 2
+  const cy = on.y + on.h * 0.52
+  const rx = Math.min(on.w * 0.36, 220)
+  const ry = Math.min(on.h * 0.38, 150)
   await drag(await centerOf(`[data-tray="${p.center}"]`), { x: cx, y: cy })
   for (let k = 0; k < ring; k++) {
     const a = (k / ring) * Math.PI * 2 + 0.5
@@ -218,7 +298,19 @@ async function solve(p, wrong = {}) {
   st = await state()
   ok(st.atoms.length === ring + 1, `${p.id}: all ${ring + 1} atoms placed by dragging from the tray (got ${st.atoms.length})`)
   void pts0
+  // each atom's electron count is beside it as soon as it is on the board
+  // the count of the atom that was just dropped fades in: give it a moment
+  let badges = ''
+  for (let i = 0; i < 20; i++) {
+    badges = await mb(() => [...document.querySelectorAll('.mb-count')].map((n) => getComputedStyle(n).opacity).join(' '))
+    if (badges.split(' ').filter((o) => Number(o) > 0.9).length === ring + 1) break
+    await wait(100)
+  }
+  ok(badges.split(' ').filter((o) => Number(o) > 0.9).length === ring + 1, `${p.id}: every atom on the board shows its electron count in the place step (${badges})`)
   await press('[data-key="next"]')
+  const firstDrag = await cued(`${p.id} bond`, 'drag', null, null, 2)
+  ok(firstDrag.halos.length === 2, `${p.id}: the outer atom and the middle atom are both ringed (${firstDrag.halos.length})`)
+  if (p.i < 3) await handActs(`${p.id} bond`)
 
   // 3. bond: drag each outer atom onto the center
   const centerId = (await state()).atoms.find((a) => a.el === p.center).id
@@ -241,6 +333,10 @@ async function solve(p, wrong = {}) {
   }
   st = await state()
   ok(st.bonds.length === ring, `${p.id}: every outer atom bonded to the center (${st.bonds.length} of ${ring})`)
+  // A molecule's electron total is right as soon as its atoms are on the board. A negative ion's atoms bring
+  // fewer electrons than the ion has, and that is dealt with in the next step, so its total waits and is not marked wrong.
+  const totalNow = (await strip()).split(' ')[0]
+  ok(totalNow === (p.charge < 0 ? 'wait' : 'pass'), `${p.id}: over the board the electron total ${p.charge < 0 ? 'waits for the check step' : 'is checked off once every atom is on it'} (${await strip()})`)
   await press('[data-key="next"]')
 
   // 4. check: do what the hint says, one move at a time, until there is nothing left to fix
@@ -271,6 +367,7 @@ async function solve(p, wrong = {}) {
   ok(done.complete, `${p.id}: Lewis structure accepted (${JSON.stringify(done.issues)})`)
   ok(done.charge === p.charge, `${p.id}: charge on the board is ${p.charge}`)
   ok(await page.locator('.mb-checks li[data-state="pass"]').count() === 3, `${p.id}: all three checks show as passed`)
+  ok((await strip()) === 'pass pass pass', `${p.id}: the strip over the board shows the same three checks passed (${await strip()})`)
   await shot(`${p.id.replace(/\W/g, '')}-flat`)
   await press('[data-key="next"]')
 
@@ -331,6 +428,7 @@ async function solve(p, wrong = {}) {
   //    nonpolar bond, say whether the molecule is polar, then draw the net dipole of a polar one
   st = await state()
   ok(st.step === 'polar' && st.view === 'shape', `${p.id}: step 6 opens on the 3D model`)
+  ok((await strip()) === 'pass pass pass', `${p.id}: the three checks stay over the board on the 3D model (${await strip()})`)
   const outerKinds = [...new Set(outer)]
   const polarKinds = outerKinds.filter((el) => bondAnswer(p.center, el) !== 'nonpolar')
   const outerOf = (el) => st.atoms.find((a) => a.id !== centerId && a.el === el).id
@@ -341,6 +439,16 @@ async function solve(p, wrong = {}) {
     const answer = bondAnswer(p.center, asked)
     // an arrow runs from the atom that pulls less to the atom that pulls harder
     const [tail, head] = answer === asked ? [centerId, outerOf(asked)] : [outerOf(asked), centerId]
+    if (guard === 0) {
+      // before the first try the hand acts the drag out along a bond, and the atoms of that bond are ringed
+      const rings = 1 + outer.filter((el) => el === asked).length
+      const c = await cued(`${p.id} polar`, 'arrow', null, null, rings)
+      // the button for a bond with no arrow glows too, when it is in view in the panel
+      ok(c.halos.length === rings || c.halos.length === rings + 1, `${p.id}: the middle atom and each ${asked} atom are ringed (${c.halos.length} glows for ${rings} atoms)`)
+      // the button for no arrow glows with the atoms, where the panel shows it without scrolling
+      const inView = await mb(() => { const b = document.querySelector('[data-cue="no-arrow"]')?.getBoundingClientRect(); const v = document.querySelector('.mb-panel .mb-scroll')?.getBoundingClientRect(); return !!b && !!v && b.bottom < v.bottom - 12 && b.top > v.top + 12 })
+      if (inView) await cued(`${p.id} polar`, 'arrow', null, '[data-cue="no-arrow"]', rings + 1)
+    }
     if (wrong.bond && guard === 0) {
       // a wrong turn: an arrow that points at the atom that pulls less (on a nonpolar bond, any arrow is wrong)
       await drawArrow(head, tail)
@@ -363,7 +471,13 @@ async function solve(p, wrong = {}) {
       ok(await page.locator(`[data-key="pol-${asked}-nonpolar"]`).count() === 0, `${p.id}: the arrow drawn on the flat drawing is accepted`)
       await press('[data-key="view-shape"]')
       await wait(phone ? 2400 : 2100)
-    } else await drawArrow(tail, head)
+    } else {
+      // while the arrow is held over the atom it points at, the board says which atom that is
+      let said = null
+      await drawArrow(tail, head, async () => { said = await mb(() => { const n = document.querySelector('.mb-delta.is-cap'); return n && getComputedStyle(n).opacity === '1' ? n.textContent : '' }) })
+      const headEl = st.atoms.find((a) => a.id === head).el
+      ok(said === `points at ${NAME[headEl]}`, `${p.id}: the arrow says what it points at while it is drawn (${said})`)
+    }
   }
   ok(await page.locator('[data-act="bond-polar"]').count() === 0, `${p.id}: every kind of bond is answered (${outerKinds.map((el) => `${p.center}–${el} ${bondAnswer(p.center, el)}`).join(', ')})`)
   const arrowsWanted = outer.filter((el) => polarKinds.includes(el)).length
@@ -388,6 +502,10 @@ async function solve(p, wrong = {}) {
   if (isPolar) {
     ok(!(await page.locator('[data-key="next"]').isEnabled()), `${p.id}: the step waits for the net dipole`)
     await wait(1300) // the model turns until the net dipole lies across the screen
+    const aim = await cued(`${p.id} net dipole`, 'aim')
+    ok(aim.halos.length === 1, `${p.id}: the middle atom is ringed for the net dipole`)
+    const dots = (await points()).aims
+    ok(dots.length >= 2 && dots.every((d) => d.label.length > 0), `${p.id}: the aim points are around the model, each with its words (${dots.map((d) => d.label).join(' | ')})`)
     if (wrong.endOn) {
       // a wrong turn of the model: seen from above, this molecule's net dipole points at the viewer,
       // and an arrow drawn then is not judged
@@ -416,8 +534,12 @@ async function solve(p, wrong = {}) {
       ok(off < 12, `${p.id}: the wrong net dipole is redrawn the way it was drawn (${off.toFixed(0)}° off)`)
       await shot(`${p.id.replace(/\W/g, '')}-wrong-net`)
     }
+    // odd-numbered molecules set the net dipole with a tap on an aim point, the others with a drag
+    let how = 'drag'
     if (wrong.keys) await keyNet()
+    else if (p.i % 2 === 1 || wrong.aim) how = await aimNet()
     else await drawNet(false)
+    console.log(`  net dipole set by ${wrong.keys ? 'keyboard' : how}`)
     await wait(500)
     pts = await points()
     ok(pts.dipoles.net === true, `${p.id}: the net dipole is drawn the right way and stays on the model`)
@@ -487,10 +609,17 @@ async function extras() {
   ok(await fig.locator('.mb-sh-core').count() === 2 && await fig.locator('.mb-sh-e').count() === 4, 'count: the picture of carbon shows 2 inner and 4 outer electrons')
   ok(await cards.nth(1).locator('.mb-shells').count() === 0, 'count: the hydrogen explanation has no picture (the count of atoms was the mix-up)')
   await fig.scrollIntoViewIfNeeded()
-  await wait(250)
-  const figBox = await fig.locator('svg').boundingBox()
-  const onTop = figBox ? await mb(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('.mb-shells'), { x: figBox.x + figBox.width / 2, y: figBox.y + figBox.height / 2 }) : false
-  ok(!!figBox && figBox.width >= 70 && figBox.height >= 70 && onTop, `count: the picture is on screen and not covered (${figBox ? Math.round(figBox.width) + ' x ' + Math.round(figBox.height) : 'missing'})`)
+  // the panel may still be scrolling the new explanation into view: look until the picture has come to rest
+  let figBox = null
+  let onTop = false
+  let under = ''
+  for (let i = 0; i < 12 && !onTop; i++) {
+    await wait(250)
+    figBox = await fig.locator('svg').boundingBox()
+    under = figBox ? await mb(({ x, y }) => { const n = document.elementFromPoint(x, y); return n?.closest('.mb-shells') ? '' : `${n?.tagName}.${n?.className}` }, { x: figBox.x + figBox.width / 2, y: figBox.y + figBox.height / 2 }) : 'no box'
+    onTop = under === ''
+  }
+  ok(!!figBox && figBox.width >= 70 && figBox.height >= 70 && onTop, `count: the picture is on screen and not covered (${figBox ? Math.round(figBox.width) + ' x ' + Math.round(figBox.height) : 'missing'}${under ? ', under ' + under : ''})`)
   await shot('count-coach')
   // changing the number keeps the explanation up, so the picture can still be counted from
   await press('[data-key="dec-H"]')
@@ -623,6 +752,18 @@ async function extras() {
   st = await state()
   ok(st.atoms.length === 2, 'board: dragging an atom off the board removes it')
   ok(/×3/.test(await text('.mb-chip-n')), 'board: the removed hydrogen is back in the tray (3 left to place)')
+  // the bin: an atom carried to the Clear button comes off the board, and the button says so while the atom is carried
+  await press('[data-tray="H"]'); await wait(500)
+  st = await state()
+  const h3 = st.atoms[st.atoms.length - 1].id
+  let binOpen = null
+  await drag(await atomPoint(h3), await centerOf('[data-key="clear"]'), 150, async () => {
+    binOpen = await mb(() => { const d = document.querySelector('.mb-dock'); const b = document.querySelector('[data-key="clear"]'); return `${d.classList.contains('is-binning')}|${d.classList.contains('is-bin-hot')}|${getComputedStyle(b, '::after').content}` })
+  })
+  ok(/^true\|true\|"Drop here to take it off"$/.test(binOpen), `board: while an atom is carried the Clear button opens as a bin and says what a drop does (${binOpen})`)
+  st = await state()
+  ok(st.atoms.length === 2 && !st.atoms.some((a) => a.id === h3), 'board: an atom dropped on the bin comes off the board')
+  ok(await mb(() => !document.querySelector('.mb-dock').classList.contains('is-binning')), 'board: the bin closes when the atom is let go')
   // bond by dragging one of carbon's dots onto hydrogen
   const dot = (await points()).dots.find((d) => d.key.startsWith(`L:${c}:`))
   await drag(dot, await atomPoint(h1))
@@ -631,6 +772,23 @@ async function extras() {
   // the counter: the bond changed "In bonds" and "Unshared", so those two pop and the total stays still
   const tiles = await mb(() => [...document.querySelectorAll('.mb-tile-v b')].map((b) => getComputedStyle(b).animationName))
   ok(tiles.length === 3 && tiles[0] === 'none' && tiles[1] === 'mb-tick' && tiles[2] === 'mb-tick', `board: a new bond moves the two counter numbers that changed, and the total stays still (${tiles.join(', ')})`)
+  // a swipe across the bond's line cuts it, with no tap on the bond first
+  await atomsAtRest()
+  {
+    const a = await atomPoint(c)
+    const b = await atomPoint(h1)
+    const len = Math.hypot(b.x - a.x, b.y - a.y)
+    const mid = { x: a.x + ((b.x - a.x) * (a.r + (len - a.r - b.r) / 2)) / len, y: a.y + ((b.y - a.y) * (a.r + (len - a.r - b.r) / 2)) / len }
+    const n = { x: -(b.y - a.y) / len, y: (b.x - a.x) / len }
+    await drag({ x: mid.x + n.x * 64, y: mid.y + n.y * 64 }, { x: mid.x - n.x * 64, y: mid.y - n.y * 64 })
+    st = await state()
+    ok(st.bonds.length === 0 && st.atoms.length === 2 && st.selection === null, `board: a swipe across a bond cuts it (${st.bonds.length} bonds left)`)
+    // a stroke that crosses no bond changes nothing
+    await drag({ x: mid.x + n.x * 64, y: mid.y + n.y * 64 }, { x: mid.x - n.x * 64, y: mid.y - n.y * 64 })
+    ok((await state()).atoms.length === 2, 'board: a swipe across the bare board changes nothing')
+    await drag(await atomPoint(h1), await atomPoint(c))
+    ok((await state()).bonds.length === 1, 'board: the bond is made again by dragging hydrogen onto carbon')
+  }
   // a second bond to hydrogen is refused with the reason
   await drag(await atomPoint(h1), await atomPoint(c))
   st = await state()
@@ -689,14 +847,21 @@ async function extras() {
   }
   const fbox = await page.locator('.mb-canvas-wrap').boundingBox()
   const mid = { x: fbox.x + fbox.width / 2, y: fbox.y + fbox.height * 0.52 }
+  // an empty free board points at the first atom in the row, and the hand acts out the drag
+  await cued('free', 'tray', null, '[data-tray="H"]')
   await drag(await centerOf('[data-tray="O"]'), mid)
-  await drag(await centerOf('[data-tray="H"]'), { x: mid.x - (phone ? 90 : 190), y: mid.y - 20 })
+  ok((await cueNow()).cue === null, 'free: with an atom on the board, nothing is pointed at')
+  // an atom dropped from the row onto an atom on the board is bonded to it in the same move
+  await drag(await centerOf('[data-tray="H"]'), await atomPoint((await state()).atoms[0].id))
+  st = await state()
+  ok(st.atoms.length === 2 && st.bonds.length === 1, `free: a hydrogen dropped on oxygen is bonded to it (${st.atoms.length} atoms, ${st.bonds.length} bonds)`)
   await drag(await centerOf('[data-tray="H"]'), { x: mid.x + (phone ? 90 : 190), y: mid.y - 20 })
   st = await state()
   ok(st.atoms.length === 3, 'free: three atoms dragged from the tray')
   await sameBalls('free build (its atom ids repeat the guided board\'s)')
   const o = st.atoms.find((a) => a.el === 'O').id
-  for (const h of st.atoms.filter((a) => a.el === 'H')) await drag(await atomPoint(h.id), await atomPoint(o))
+  const bondedH = new Set(st.bonds.flatMap((b) => [b.a, b.b]))
+  for (const h of st.atoms.filter((a) => a.el === 'H' && !bondedH.has(a.id))) await drag(await atomPoint(h.id), await atomPoint(o))
   ok((await report()).complete, 'free: H2O is accepted')
   ok(await page.locator('.mb-checks li[data-state="pass"]').count() === 3, 'free: all three checks pass')
   ok(/Charge of everything on the board: 0/.test(await text('.mb-charge')), 'free: the charge reads 0')
@@ -721,6 +886,21 @@ async function extras() {
   ok(/Oxygen already has 8 electrons/.test((await state()).toast ?? ''), 'free: a ninth electron on oxygen is refused with the reason')
   await tapAt(await emptySpot())
   await noSideScroll('free build')
+  // Clear works from the 3D shape too, and brings the flat board back
+  await press('[data-key="see-shape"]')
+  await wait(2200)
+  ok((await state()).view === 'shape' && await page.locator('[data-key="clear"]').isEnabled(), 'free: the Clear button is on while the 3D shape is showing')
+  await press('[data-key="clear"]')
+  await wait(1600)
+  st = await state()
+  ok(st.atoms.length === 0 && st.view === 'flat' && (await points()).lift < 0.01, `free: Clear on the 3D shape empties the board and brings the flat board back (${st.atoms.length} atoms, ${st.view})`)
+  ok(await page.locator('[data-tray]').count() === 18, 'free: the tray is back after that')
+  // Clear switched itself off with the board empty: the focus it had moves to Undo, which brings the atoms back
+  if (!phone) ok(await mb(() => document.activeElement?.getAttribute('data-key')) === 'undo', 'free: after Clear the focus is on Undo')
+  await press('[data-key="undo"]')
+  await wait(1900)
+  st = await state()
+  ok(st.atoms.length === 3 && st.view === 'shape', `free: Undo brings the cleared atoms back, on the 3D shape they were cleared from (${st.atoms.length} atoms, ${st.view})`)
 
   // ---- two fingers: a second finger on the board must not take over a drag
   if (phone) {
@@ -807,6 +987,7 @@ async function extras() {
     arrow: /^That arrow points against the bond arrows\.$/,
     endOn: true,
     flat: true,
+    aim: true,
     hybrid: { pick: 'sp', says: /^sp goes with 2 electron groups\.$/ },
   })
   // ---- the arrows of step 6 from the keyboard, and an arrow on a nonpolar bond: formaldehyde
@@ -814,6 +995,21 @@ async function extras() {
     console.log('extras: dipole arrows from the keyboard')
     await solve(byId('CH2O'), { bond: /^Only a polar bond has a dipole arrow\.$/, keys: true })
   }
+  // ---- Clear from a finished guided molecule on the 3D model: back to the step where the atoms go on the board
+  console.log('extras: clear on the 3D model')
+  let end = await state()
+  ok(end.step === 'orbitals' && end.view === 'shape' && await page.locator('[data-key="clear"]').isEnabled(), 'clear: the Clear button is on at step 7, on the 3D model')
+  await press('[data-key="clear"]')
+  await wait(1700)
+  end = await state()
+  ok(end.atoms.length === 0 && end.step === 'place' && end.view === 'flat', `clear: the board is empty and the molecule is back at the place step (${end.atoms.length} atoms, ${end.step}, ${end.view})`)
+  ok((await strip()) === 'wait wait wait', `clear: the three checks go back to waiting (${await strip()})`)
+  await press('[data-key="undo"]')
+  await wait(1900)
+  end = await state()
+  ok(end.atoms.length > 0 && end.bonds.length > 0, 'clear: Undo brings the structure back')
+  ok(end.step === 'orbitals' && end.view === 'shape', `clear: Undo also puts the step and the 3D model back (${end.step}, ${end.view})`)
+  ok((await strip()) === 'pass pass pass' && await page.locator('[data-key="next"]').isEnabled(), 'clear: the answers are back too, and the molecule is finished again')
 }
 
 async function shell() {

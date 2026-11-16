@@ -28,9 +28,9 @@ one DOM component.
 - L4 Chemistry lives in `src/chem/`. `store.ts` only decides when a move is allowed and what to say when it is refused.
 - L5 Colors, radii and font names come from `src/theme/tokens.ts` only. [D-0015]
 - L6 Follow "Rules for motion" in `docs/design/look-and-motion.md`: reduced motion, `--now`, `ONE_SHOT`, `data-k`, and one way in and out for text (`PIECES`). [D-0010, D-0019]
-- L7 Keep `data-key`, `data-act`, `data-tray` and the `.mb-*` class names. The browser checks find things by them. [D-0013]
+- L7 Keep `data-key`, `data-act`, `data-tray`, `data-cue` and the `.mb-*` class names. The browser checks find things by them, and `cue()` in `store.ts` names the next action by its `data-cue`. [D-0013, D-0026]
 - L8 Angle labels come from the shape table or the two measured angles, never from the 3D model. [D-0008]
-- L9 The step split, the problem list, the drag gesture and the card's three parts are provisional. Work inside them can go on. Ask Sam before changing them. Steps 6 and 7 are provisional too, and so is how the dipoles are drawn. [D-0007, D-0017, D-0021, D-0023]
+- L9 The step split, the problem list, the drag gesture and the card's three parts are provisional. Work inside them can go on. Ask Sam before changing them. Steps 6 and 7 are provisional too, and so are how the dipoles are drawn and how the next action is shown. [D-0007, D-0017, D-0021, D-0023, D-0026]
 
 ## Check your work
 - `pnpm exec vitest run guide store` while you work.
