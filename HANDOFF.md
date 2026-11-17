@@ -2,6 +2,57 @@
 
 Add your entry on top, under a heading in exactly this form: `## 2026-11-13 (team) What changed`. Say what changed, what you checked and how, what you ask of other teams or of Sam, and the next step.
 
+## 2026-11-16 (lewis) Key terms are highlighted, and each opens a card with its meaning, an example and a picture
+
+**State.** Built on the branch `lewis/key-terms`, on top of 63d657d. Not committed: Sam asked for the feature and has not asked for a commit, a push or a deploy (R9).
+
+Sam asked on 2026-11-16 for key terms that a student may not know to be highlighted, so that a click on one explains it with clear examples and clarifications. D-0027 quotes him. Which words, what each card says and how it looks are this session's design (D-0028, provisional).
+
+**Changed**
+- `src/modules/lewis/guide.ts`: the key terms section at the end. `TERMS` lists 29 terms and the words that open each. `termPieces` cuts a sentence into plain text and terms. `termCard` builds a card: name, meaning, example, one thing to keep in mind, a picture and related terms. `SAMPLES` holds the 26 molecules the examples use. The 11 shape names have cards too.
+- `src/modules/lewis/ui.ts`: `rich()` turns the first use of a term on a screen into a button. The card opens beside the panel on a wide screen and as a sheet on a phone. Five kinds of picture are drawn as SVG: an atom's shells, a column of the periodic table, flat Lewis drawings, two bonded atoms with their electronegativities, and a molecule in its 3D shape.
+- `src/modules/lewis/styles.css`: the highlight, the card and the pictures.
+- `tests/terms.test.ts` (new) and the scan of every sentence in `tests/guide.test.ts`, which now reads every card for every problem.
+- `scripts/check-browser.mjs`: a `terms` run, and two checks in every molecule's run (the valence electrons card in step 1, the ΔEN card in step 6).
+- Docs: D-0027, D-0028, `docs/learning/guided-steps.md` ("Key terms"), `docs/design/look-and-motion.md`, `docs/chemistry/sources.md`, `docs/roadmap.md` (W-022), `docs/platform/verify.md`, L7 and L10 in `src/modules/lewis/AGENTS.md`.
+
+**The rule the cards follow.** A card never works on the molecule on screen (L10). Its example is another atom or molecule, picked for each problem so that no card states a number, a pick or a drawing the molecule asks for. `tests/terms.test.ts` checks that for every card with each of the twenty problems on screen.
+
+**Checked.** The entry dated 2026-11-16 for this change in `docs/verified.md` has the numbers.
+
+**Review.** A second session read the new code and reported twelve findings and two gaps in the checks. What was done about each:
+- Three cards counted an atom from the same column as an atom on screen (chlorine's 7 with fluorine on screen). Every card that gives an atom's electrons or draws all of a molecule's dots now picks its example by column, and a test holds them to it.
+- The card for more than 8 electrons named sulfur, phosphorus, chlorine and xenon, and could be reached from "formal charges" at the start of step 4. It names no atom now, and no card links to it.
+- The resonance card drew ozone, which has the nitrite ion's bond pattern, and was one link from "formal charges". It shows the nitrate ion when the molecule on screen is bent, and no card links to it.
+- The full shell card opens in step 1 from a wrong answer's card, and its note named boron. The note names no atom now. The test that said five cards open in the count step now reads every sentence the count step can show: eight cards open, and all eight are held to the rule about columns. A second test does the same for the middle-atom question.
+- "Their pushes cancel", about lone pairs, opened the card about dipoles. "Cancel" now opens it only in a sentence about dipoles or arrows.
+- "The atom it should bond to" highlighted the verb. "Bond" after "should", "to", "can", "could", "will" or "must" stays plain.
+- The polar bond card said a bond between 2 atoms of one element is nonpolar, which the app's own ozone case contradicts. It now says ΔEN is 0 and neither atom pulls harder.
+- The hybridization card left out d orbitals. It names them now.
+- After a move to a related term, a press on the first word closed the card and the word stayed marked as open. The press now brings the word's own card back.
+- The card did not follow its word when the panel scrolled. It is placed again on every scroll of the panel. No check covers this.
+- After a press on bare board the keyboard was left on nothing. It goes back to the word.
+- "Polar molecule" is never a highlighted word, only a related term of "polar". Left as it is, and a test says so.
+- Gap: the checks counted a picture's parts. They now read which atom δ−, each arrow, the formal charge and the net dipole sit on, and which line is σ.
+- Gap: the matcher was tested on typed sentences. `tests/guide.test.ts` now runs it over every sentence the guide can show.
+The fixes were read by the session that made them only.
+
+
+**Found on the way.**
+- The first version of the electronegativity cards picked its bond only by ΔEN. With chlorine trifluoride on screen the card gave chlorine's electronegativity and said fluorine has the largest, which answers step 2's question about the middle atom. The hint in step 2 highlights "electronegative", so the card was one press away. The bond is now two atoms the molecule does not have, and the note gives the trend across the periodic table without naming an element.
+- A picture inside a centered grid cell ignored `max-width: 100%`, so the two widest pictures ran past the card's edge. The cell now has one column of `minmax(0, 1fr)`.
+- The browser check measured a card while it was still growing into place. It now waits until the card's animations have finished.
+- A card check placed before the arrows of step 6 made phosphorus pentachloride fail at phone size, about every second run. An untouched 3D model starts to turn slowly after 2.5 seconds, the card took that long, and the check then dragged at atoms that were moving. The card check now comes after the arrows. The app is unchanged: a student who opens a card drags afterwards at what they see.
+
+**Asks**
+- Sam: D-0028 is provisional. The choices to look at are the list of 40 terms, the wording of each card, the examples, the blue highlight and the card's look.
+- Sam: a card teaches the general rule with another example, so a student can work out their own answer from it the way they could from a textbook. The group card, for example, shows the periodic table that the first hint of step 1 shows. Say if a card should hold more back.
+- learning, chem: the 40 cards were written and read by the session that built them. `docs/chemistry/sources.md` names one sentence that goes past its sources (ozone's two equal bonds).
+- design: a highlighted word is a button, so a term of two or three words does not break across lines.
+- platform: none of this has been on a real phone (W-003).
+
+**Next step.** Sam looks at it on localhost:8081. On his word: commit, push and deploy.
+
 ## 2026-11-16 (lewis) The next action glows, the checks stay on screen, bonds are cut with a swipe, and the net dipole has aim points
 
 **State.** Committed on 2026-11-16, on top of 292b38b, when Sam wrote "commit and push and deploy to the live link" for the second time that day. It was built on the branch `lewis/prompts-and-checks`. The push and the deploy follow this commit.

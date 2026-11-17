@@ -4,9 +4,9 @@
 // Wording rules (Sam's voice rules): plain and literal, name the atom instead of "it", say what
 // to do, no citations on screen, no lines that describe the interface.
 import { assess, type Assessment, type Issue } from '../../chem/assess'
-import { ELEMENTS, canExpand, shellMax, shellTarget, shellsOf, type El } from '../../chem/elements'
+import { ELEMENTS, EL_ORDER, canExpand, shellMax, shellTarget, shellsOf, type El } from '../../chem/elements'
 import { HYBRIDS, domainsOf, hybridFor, sigmaPi, type Hybrid } from '../../chem/orbitals'
-import { moleculePolarity, netAsSeen, type BondPolarity, type MoleculePolarity, type SeenBond } from '../../chem/polarity'
+import { bondPolarity, courseEN, moleculePolarity, netAsSeen, type BondPolarity, type MoleculePolarity, type SeenBond } from '../../chem/polarity'
 import { atomsOf, chargeWord, neutralElectrons, speciesOf, totalElectrons, type Problem } from '../../chem/problems'
 import { bestStructures, solveStar } from '../../chem/solve'
 import { addElectron, atomById, bondsOf, removeElectron, share, shellCount, type Refusal, type Structure } from '../../chem/structure'
@@ -1279,6 +1279,46 @@ export function polarityNote(m: MoleculePolarity, info: ShapeInfo | null): strin
   return m.depends ? 'The outer atoms are not all the same, and with five or six groups the answer depends on which corners they take.' : netReason(m, info)
 }
 
+// ---------------------------------------------------------------- free build: electronegativity and dipoles
+//
+// Free build asks nothing, so it shows step 6's results for whatever is on the board: each atom's
+// electronegativity, each kind of bond worked from the table, and once every shell is full, whether
+// the whole molecule is polar. Sam chose this on 2026-11-17 (D-0029).
+
+export const FREE_POLAR_WORDS = {
+  bonds: 'Bond polarity',
+  net: 'Net dipole',
+  notStar: 'Bond dipoles are added up only for molecules with one middle atom.',
+  notFull: 'Fill every shell to see whether the whole molecule is polar.',
+}
+/** One kind of bond on the free build board. `byCharge` is true for a bond between identical atoms
+ *  that unlike formal charges make polar (ozone). */
+export function freeBondLine(a: El, b: El, pol: BondPolarity, byCharge: boolean): string {
+  if (byCharge) return 'ΔEN = 0, but where the two atoms have different formal charges, the shared electrons sit closer to the atom with the negative charge.'
+  if (pol.kind === 'ionic') return `Ionic. ${subtraction(pol)}, and a ΔEN above 2.0 counts as an ionic bond. ${cap(lower(pol.negative!))} is δ− and ${lower(pol.positive!)} is δ+.`
+  return bondRight(a, b, pol)
+}
+/** The whole molecule on the free build board: polar or nonpolar, and why. */
+export function freeNetLine(m: MoleculePolarity, info: ShapeInfo | null): string {
+  return m.depends ? polarityNote(m, info) : `${m.polar ? 'Polar' : 'Nonpolar'}. ${polarityNote(m, info)}`
+}
+/** Every kind of bond on the board, each pair of elements once: the middle atom first when there is
+ *  one, otherwise the less electronegative atom first. */
+export function bondKindsOn(s: Structure): { a: El; b: El; pol: BondPolarity; byCharge: boolean }[] {
+  const m = moleculePolarity(s)
+  if (m) return m.kinds.map((k) => ({ a: k.center, b: k.terminal, pol: k.polarity, byCharge: k.polarity.tenths === 0 && m.bonds.some((x) => x.el === k.terminal && x.out !== 0) }))
+  const out: { a: El; b: El; pol: BondPolarity; byCharge: boolean }[] = []
+  for (const bond of s.bonds) {
+    const x = atomById(s, bond.a)?.el
+    const y = atomById(s, bond.b)?.el
+    if (!x || !y || out.some((k) => (k.a === x && k.b === y) || (k.a === y && k.b === x))) continue
+    const pol = bondPolarity(x, y)
+    const [a, b] = pol.positive === y ? [y, x] : [x, y]
+    out.push({ a, b, pol, byCharge: false })
+  }
+  return out
+}
+
 // ---------------------------------------------------------------- step 7: sigma and pi bonds, hybridization
 //
 // Chapter 8 slides: the first bond between two atoms is a sigma bond and the rest are pi bonds;
@@ -1485,3 +1525,712 @@ export function shapeInfoFor(s: Structure): ShapeInfo | null {
   return classify(f.bonded, f.lonePairs)
 }
 
+
+// ---------------------------------------------------------------- key terms
+//
+// A word a student may not know is highlighted where it first appears on a screen. A press on it
+// opens a card: what the word means, an example with a picture, and one more thing to keep in
+// mind (D-0027). The definitions follow the key terms of OpenStax Chemistry 2e, chapters 2, 6, 7
+// and 8, and the course's chapter 7 and 8 slides (docs/chemistry/sources.md).
+//
+// A card never works on the molecule on screen. Its example is another atom or molecule, picked
+// so that the card does not state a number or an answer the current molecule asks for (D-0028).
+
+export type BaseTermId =
+  | 'valence'
+  | 'shell'
+  | 'group'
+  | 'atomic-number'
+  | 'ion'
+  | 'lewis'
+  | 'middle'
+  | 'bond'
+  | 'multiple'
+  | 'lone-pair'
+  | 'full-shell'
+  | 'formal-charge'
+  | 'resonance'
+  | 'expanded'
+  | 'electron-group'
+  | 'shape'
+  | 'bond-angle'
+  | 'electronegativity'
+  | 'delta-en'
+  | 'polar'
+  | 'polar-bond'
+  | 'partial'
+  | 'dipole'
+  | 'net-dipole'
+  | 'cancel'
+  | 'polar-molecule'
+  | 'sigma'
+  | 'pi'
+  | 'hybridization'
+export type TermId = BaseTermId | `shape:${ShapeName}`
+
+/** A molecule or ion that a card uses as its example. None of them is a guided problem. */
+export interface Sample {
+  id: string
+  formula: [El, number][]
+  charge: number
+  /** The middle atom. For a molecule of two atoms, the one drawn on the left. */
+  center: El
+  /** Lowercase, the way it reads after "In": "hydrogen chloride", "a fluorine molecule", "the hydroxide ion". */
+  name: string
+}
+const sample = (id: string, center: El, formula: [El, number][], name: string, charge = 0): Sample => ({ id, center, formula, name, charge })
+export const SAMPLES = {
+  H2: sample('H2', 'H', [['H', 2]], 'a hydrogen molecule'),
+  F2: sample('F2', 'F', [['F', 2]], 'a fluorine molecule'),
+  O2: sample('O2', 'O', [['O', 2]], 'an oxygen molecule'),
+  N2: sample('N2', 'N', [['N', 2]], 'a nitrogen molecule'),
+  I2: sample('I2', 'I', [['I', 2]], 'an iodine molecule'),
+  HCl: sample('HCl', 'H', [['H', 1], ['Cl', 1]], 'hydrogen chloride'),
+  H2S: sample('H2S', 'S', [['H', 2], ['S', 1]], 'hydrogen sulfide'),
+  PH3: sample('PH3', 'P', [['P', 1], ['H', 3]], 'phosphine'),
+  SiH4: sample('SiH4', 'Si', [['Si', 1], ['H', 4]], 'silane'),
+  O3: sample('O3', 'O', [['O', 3]], 'ozone'),
+  NO3: sample('NO3-', 'N', [['N', 1], ['O', 3]], 'the nitrate ion', -1),
+  OH: sample('OH-', 'O', [['O', 1], ['H', 1]], 'the hydroxide ion', -1),
+  CN: sample('CN-', 'C', [['C', 1], ['N', 1]], 'the cyanide ion', -1),
+  BF4: sample('BF4-', 'B', [['B', 1], ['F', 4]], 'the tetrafluoroborate ion', -1),
+  BeCl2: sample('BeCl2', 'Be', [['Be', 1], ['Cl', 2]], 'beryllium chloride'),
+  BCl3: sample('BCl3', 'B', [['B', 1], ['Cl', 3]], 'boron trichloride'),
+  SCl2: sample('SCl2', 'S', [['S', 1], ['Cl', 2]], 'sulfur dichloride'),
+  CCl4: sample('CCl4', 'C', [['C', 1], ['Cl', 4]], 'carbon tetrachloride'),
+  NF3: sample('NF3', 'N', [['N', 1], ['F', 3]], 'nitrogen trifluoride'),
+  PF3: sample('PF3', 'P', [['P', 1], ['F', 3]], 'phosphorus trifluoride'),
+  PF5: sample('PF5', 'P', [['P', 1], ['F', 5]], 'phosphorus pentafluoride'),
+  SeF4: sample('SeF4', 'Se', [['Se', 1], ['F', 4]], 'selenium tetrafluoride'),
+  BrF3: sample('BrF3', 'Br', [['Br', 1], ['F', 3]], 'bromine trifluoride'),
+  SeF6: sample('SeF6', 'Se', [['Se', 1], ['F', 6]], 'selenium hexafluoride'),
+  IF5: sample('IF5', 'I', [['I', 1], ['F', 5]], 'iodine pentafluoride'),
+  ICl4: sample('ICl4-', 'I', [['I', 1], ['Cl', 4]], 'the tetrachloroiodate ion', -1),
+} satisfies Record<string, Sample>
+
+const SUB = '₀₁₂₃₄₅₆₇₈₉'
+const SUP: Record<string, string> = { '2': '²', '3': '³', '+': '⁺', '−': '⁻' }
+/** "H₂S", "BF₄⁻": a sample's formula inside a sentence. */
+export function formulaWord(m: Pick<Sample, 'formula' | 'charge'>): string {
+  const body = m.formula.map(([el, n]) => `${el}${n > 1 ? SUB[n] : ''}`).join('')
+  const n = Math.abs(m.charge)
+  return m.charge === 0 ? body : `${body}${n > 1 ? SUP[String(n)] : ''}${SUP[m.charge > 0 ? '+' : '−']}`
+}
+/** "hydrogen chloride, HCl," the way a sample is introduced in a sentence. */
+const named = (m: Sample) => `${m.name}, ${formulaWord(m)},`
+
+/** A sample's Lewis structure: what is on its middle atom and on each outer atom. */
+export interface Drawn {
+  center: El
+  /** Unshared electrons on the middle atom, and its formal charge. */
+  lone: number
+  fc: number
+  outer: { el: El; order: number; lone: number; fc: number }[]
+}
+/** The Lewis structure the engine finds for a sample. `form` picks one of its resonance structures. */
+export function drawingOf(m: Sample, form = 0): Drawn {
+  const atoms = m.formula.flatMap(([el, n]) => new Array<El>(n).fill(el))
+  const at = atoms.indexOf(m.center)
+  const outer = atoms.filter((_, i) => i !== at)
+  const ref = solveStar(m.center, outer, m.charge)
+  const forms = ref ? bestStructures(ref) : []
+  const sol = forms[form % Math.max(1, forms.length)]
+  if (!sol) throw new Error(`no Lewis structure for ${m.id}`)
+  return { center: m.center, lone: sol.centerLone, fc: sol.fcCenter, outer: outer.map((el, i) => ({ el, order: sol.orders[i]!, lone: sol.termLone[i]!, fc: sol.fcTerm[i]! })) }
+}
+/** How many resonance structures a sample has. */
+export function formsOf(m: Sample): number {
+  const atoms = m.formula.flatMap(([el, n]) => new Array<El>(n).fill(el))
+  const at = atoms.indexOf(m.center)
+  const ref = solveStar(m.center, atoms.filter((_, i) => i !== at), m.charge)
+  return ref ? bestStructures(ref).length : 0
+}
+/** The shape of a sample that has a middle atom, from the engine's table. */
+export function sampleShape(m: Sample): ShapeInfo {
+  const d = drawingOf(m)
+  const info = classify(d.outer.length, d.lone / 2)
+  if (!info) throw new Error(`no shape for ${m.id}`)
+  return info
+}
+
+/** What a card's picture shows. */
+export type LewisMark = 'none' | 'ion' | 'middle' | 'bond' | 'lone' | 'shell' | 'charges' | 'groups' | 'lines' | 'sigma-pi'
+export type TermPicture =
+  /** An atom's shells as rings. */
+  | { kind: 'shells'; el: El }
+  /** The main-group columns of the periodic table with these atoms marked. */
+  | { kind: 'table'; els: El[] }
+  /** Flat Lewis drawings side by side, with one thing marked. `forms` picks a resonance structure for each. */
+  | { kind: 'lewis'; samples: Sample[]; mark: LewisMark; forms?: number[]; captions?: string[] }
+  /** Two bonded atoms with their electronegativities, and what the bond between them gets. */
+  | { kind: 'pair'; a: El; b: El; sum: string | null; arrow: boolean }
+  /** A molecule in its 3D shape, with its bond dipoles, its net dipole or one bond angle. */
+  | { kind: 'model'; sample: Sample; arrows: 'none' | 'bonds' | 'net'; angle: boolean }
+
+export interface TermCard {
+  id: TermId
+  name: string
+  /** Another name the course or a textbook uses, or how a symbol is said. */
+  also: string | null
+  means: string
+  example: string
+  /** One more thing that is easy to get wrong. */
+  note: string | null
+  picture: TermPicture
+  /** What the picture shows, for a screen reader. */
+  pictureLabel: string
+  related: { id: TermId; name: string }[]
+  /** The atoms the example gives numbers for, and the molecules it draws. The tests hold these apart from the molecule on screen. */
+  about: { els: El[]; samples: Sample[] }
+}
+
+/** The headings inside a card. */
+export const TERM_WORDS = { example: 'Example', note: 'Keep in mind', related: 'Related terms', close: 'Close', opens: 'What this word means' }
+
+interface TermInfo {
+  name: string
+  also?: string
+  /** The step that first uses the word. */
+  from: StepId
+  /** Words in the app's text that open this card, as a regular expression without flags. */
+  match: string
+  related: BaseTermId[]
+}
+/** In the order the matcher tries them: a longer phrase comes before the shorter one inside it. */
+const TERMS: Record<BaseTermId, TermInfo> = {
+  valence: { name: 'Valence electrons', from: 'count', match: 'valence electrons?', related: ['shell', 'group', 'atomic-number'] },
+  'full-shell': { name: 'Full shell', also: 'Also called an octet.', from: 'check', match: 'full (?:outer )?shells?|octets?', related: ['lone-pair', 'bond'] },
+  shell: { name: 'Electron shell', from: 'count', match: '(?:outer|inner|electron) shells?|shells?', related: ['valence', 'atomic-number'] },
+  group: { name: 'Group and period', from: 'count', match: 'group numbers?|groups? \\d+(?: (?:to|and) \\d+)?|period \\d|periodic table', related: ['valence', 'shell'] },
+  'atomic-number': { name: 'Atomic number', from: 'count', match: 'atomic numbers?', related: ['valence', 'shell'] },
+  lewis: { name: 'Lewis structure', from: 'place', match: 'Lewis structures?', related: ['valence', 'bond', 'lone-pair'] },
+  middle: { name: 'Middle atom and outer atoms', from: 'place', match: 'middle atoms?|outer atoms?', related: ['lewis'] },
+  multiple: { name: 'Single, double and triple bonds', from: 'bond', match: '(?:single|double|triple) bonds?', related: ['bond', 'sigma', 'pi'] },
+  'lone-pair': { name: 'Lone pair', from: 'bond', match: 'lone pairs?|unshared electrons?', related: ['bond', 'full-shell', 'electron-group'] },
+  'formal-charge': { name: 'Formal charge', from: 'check', match: 'formal charges?', related: ['valence', 'lone-pair', 'ion'] },
+  resonance: { name: 'Resonance structures', from: 'check', match: 'resonance structures?|resonance', related: ['formal-charge', 'multiple'] },
+  expanded: { name: 'More than 8 electrons', also: 'Also called an expanded octet.', from: 'check', match: 'more than 8(?: electrons)?', related: ['full-shell', 'formal-charge', 'group'] },
+  'electron-group': { name: 'Electron group', also: 'Also called an electron domain.', from: 'shape', match: 'electron (?:groups?|domains?)', related: ['lone-pair', 'bond', 'shape'] },
+  'bond-angle': { name: 'Bond angle', from: 'shape', match: 'bond angles?', related: ['shape', 'electron-group'] },
+  electronegativity: { name: 'Electronegativity', from: 'polar', match: 'electronegativit(?:y|ies)|electronegative', related: ['delta-en', 'polar-bond', 'partial'] },
+  'delta-en': { name: 'ΔEN', also: 'Said “delta E N”. Δ stands for a difference.', from: 'polar', match: 'ΔEN', related: ['electronegativity', 'polar-bond'] },
+  'polar-bond': { name: 'Polar bond', from: 'polar', match: '(?:non)?polar bonds?', related: ['delta-en', 'dipole', 'partial', 'polar-molecule'] },
+  'polar-molecule': { name: 'Polar molecule', from: 'polar', match: '(?:non)?polar molecules?', related: ['net-dipole', 'cancel', 'polar-bond'] },
+  'net-dipole': { name: 'Net dipole', from: 'polar', match: 'net dipoles?', related: ['dipole', 'cancel', 'polar-molecule'] },
+  dipole: { name: 'Bond dipole', from: 'polar', match: 'bond dipoles?|dipole arrows?|bond arrows?|dipoles?', related: ['partial', 'polar-bond', 'net-dipole'] },
+  partial: { name: 'δ+ and δ−', also: 'Said “delta plus” and “delta minus”. They are partial charges.', from: 'polar', match: 'δ[+−]|partial charges?', related: ['polar-bond', 'dipole', 'electronegativity'] },
+  cancel: { name: 'Dipoles that cancel', from: 'polar', match: 'cancel(?:s|ed)?(?: out)?', related: ['dipole', 'net-dipole', 'polar-molecule'] },
+  sigma: { name: 'Sigma bond', also: 'Written σ.', from: 'orbitals', match: 'sigma bonds?|sigma', related: ['pi', 'multiple', 'hybridization'] },
+  pi: { name: 'Pi bond', also: 'Written π.', from: 'orbitals', match: 'pi bonds?|pi', related: ['sigma', 'multiple'] },
+  hybridization: { name: 'Hybridization', from: 'orbitals', match: 'hybridization|hybrid orbitals?', related: ['electron-group', 'sigma', 'pi'] },
+  polar: { name: 'Polar and nonpolar', from: 'polar', match: '(?:non)?polar', related: ['polar-bond', 'polar-molecule', 'electronegativity'] },
+  shape: { name: 'Shape of a molecule', from: 'shape', match: 'shapes?', related: ['electron-group', 'bond-angle', 'lone-pair'] },
+  ion: { name: 'Ion', from: 'count', match: 'ions?', related: ['valence', 'formal-charge'] },
+  bond: { name: 'Bond', from: 'bond', match: 'shared electrons|bonds?', related: ['multiple', 'lone-pair', 'lewis'] },
+}
+export const BASE_TERMS = Object.keys(TERMS) as BaseTermId[]
+export const ALL_TERMS: TermId[] = [...BASE_TERMS, ...ALL_SHAPES.map((name): TermId => `shape:${name}`)]
+
+const isShapeTerm = (id: TermId): id is `shape:${ShapeName}` => id.startsWith('shape:')
+const shapeNameOf = (id: `shape:${ShapeName}`) => id.slice(6) as ShapeName
+/** A card's heading: "Lone pair", "Trigonal pyramidal". */
+export function termName(id: TermId): string {
+  return isShapeTerm(id) ? cap(shapeNameOf(id)) : TERMS[id].name
+}
+/** The step that first uses the word. A shape's name is first read in the shape step. */
+export function termFrom(id: TermId): StepId {
+  return isShapeTerm(id) ? 'shape' : TERMS[id].from
+}
+
+/** Words every student has met by the time the Lewis structure is finished. They are highlighted
+ *  up to the check step and in free build, and left plain in the three steps after it, where the
+ *  new words are the ones a student looks for. */
+const PLAIN_AFTER_CHECK: BaseTermId[] = ['valence', 'shell', 'ion', 'lewis', 'middle', 'bond']
+/** The terms that are not highlighted in a step. */
+export function plainTerms(step: StepId | null): TermId[] {
+  return step === 'shape' || step === 'polar' || step === 'orbitals' ? PLAIN_AFTER_CHECK : []
+}
+
+const TERM_FINDER = (() => {
+  const escaped = (text: string) => text.replace(/[\\^$*+?.()|[\]{}]/g, '\\$&')
+  const list: { id: TermId; match: string }[] = [
+    // the longest shape names first, so "trigonal bipyramidal" is not read as "trigonal" plus a word
+    ...[...ALL_SHAPES].sort((a, b) => b.length - a.length).map((name) => ({ id: `shape:${name}` as TermId, match: escaped(name) })),
+    ...BASE_TERMS.map((id) => ({ id, match: TERMS[id].match })),
+  ]
+  return { ids: list.map((x) => x.id), re: new RegExp(`(?<![\\p{L}\\d])(?:${list.map((x) => `(${x.match})`).join('|')})(?![\\p{L}\\d])`, 'giu') }
+})()
+
+/** A sentence cut into plain text and the key terms in it. Every use of a term is returned; the
+ *  panel highlights the first one on a screen. */
+export function termPieces(text: string, plain: TermId[] = []): { text: string; term: TermId | null }[] {
+  const out: { text: string; term: TermId | null }[] = []
+  const push = (part: string, term: TermId | null) => {
+    if (!part) return
+    const last = out[out.length - 1]
+    if (last && last.term === null && term === null) last.text += part
+    else out.push({ text: part, term })
+  }
+  let at = 0
+  for (const m of text.matchAll(TERM_FINDER.re)) {
+    const id = TERM_FINDER.ids[m.slice(1).findIndex((g) => g !== undefined)]!
+    push(text.slice(at, m.index), null)
+    // "Bond each hydrogen atom to carbon" and "the atom it should bond to" are the verb: the term is the noun
+    const verb = id === 'bond' && (m[0] !== m[0].toLowerCase() || /\b(?:should|could|can|will|must|to) $/i.test(text.slice(0, m.index)))
+    // lone pairs' pushes cancel too: the card is about dipoles, so the word opens it only in a sentence about dipoles or arrows
+    const other = id === 'cancel' && !/dipole|arrow/i.test(text)
+    push(m[0], plain.includes(id) || verb || other ? null : id)
+    at = m.index + m[0].length
+  }
+  push(text.slice(at), null)
+  return out
+}
+
+// ---- which example a card uses
+
+const elsOfSample = (m: Sample) => m.formula.map(([el]) => el)
+/** True when none of these atoms is in the molecule on screen. */
+const clearOf = (p: Problem | null, els: El[]) => !p || !els.some((el) => elementsOf(p).includes(el))
+/** True when none of these atoms is in the same column of the periodic table as an atom of the
+ *  molecule on screen. Atoms of one column have the same number of valence electrons, so a card
+ *  that counts chlorine's would give away fluorine's. */
+const otherColumns = (p: Problem | null, els: El[]) => !p || !els.some((el) => elementsOf(p).some((mine) => ELEMENTS[mine].group === ELEMENTS[el].group))
+const firstThat = <T>(pool: T[], ok: (x: T) => boolean): T => pool.find(ok) ?? pool[0]!
+/** The first sample none of whose atoms shares a column with an atom of the molecule on screen. */
+const apart = (p: Problem | null, pool: Sample[]) => firstThat(pool, (m) => otherColumns(p, elsOfSample(m)))
+/** The first sample whose shape is not the shape of the molecule on screen. */
+const otherShape = (p: Problem | null, pool: Sample[]) => firstThat(pool, (m) => !p || sampleShape(m).shape !== p.shape)
+/** How many electron groups the middle atom of the molecule on screen has. */
+function groupsOf(p: Problem): number {
+  const sp = speciesOf(p)
+  const ref = solveStar(sp.center, sp.terminals, sp.charge)
+  const sol = ref ? bestStructures(ref)[0] : undefined
+  return sol ? sp.terminals.length + sol.centerLone / 2 : 0
+}
+/** The first sample whose middle atom has a different number of electron groups. */
+const otherGroups = (p: Problem | null, pool: Sample[]) => firstThat(pool, (m) => !p || sampleShape(m).groups !== groupsOf(p))
+/** A bond for the cards about electronegativity: two atoms that are not in the molecule on screen,
+ *  with a ΔEN that is not the ΔEN of any of its bonds. So a card never gives the electronegativity
+ *  of one of the student's atoms (step 2 asks which of them is the least electronegative), and
+ *  its subtraction is never the one step 6 asks for. */
+const PAIRS: [El, El][] = [['H', 'Cl'], ['C', 'O'], ['H', 'O'], ['S', 'O'], ['P', 'F']]
+function otherPair(p: Problem | null): [El, El] {
+  if (!p) return PAIRS[0]!
+  const mine = [...new Set(speciesOf(p).terminals)].map((el) => bondPolarity(p.center, el).tenths)
+  return firstThat(PAIRS, (pair) => clearOf(p, pair) && !mine.includes(bondPolarity(pair[0], pair[1]).tenths))
+}
+/** Two atoms of one element for the nonpolar half of an example, again not an element of the molecule on screen. */
+const samePair = (p: Problem | null): El => firstThat<El>(['F', 'H', 'Cl'], (el) => clearOf(p, [el]))
+
+/** "an" before a word that is said with a vowel first: "an oxygen atom", "an H–Cl bond" (H, F, N, S and X are said "aitch", "eff", "en", "ess", "ex"). */
+const article = (word: string) => (/^[aeiouAEFHILMNORSX]/.test(word) ? 'an' : 'a')
+const shellList = (el: El) => list(shellsOf(el).map(String))
+const innerOf = (el: El) => shellsOf(el).slice(0, -1)
+const innerWords = (el: El) => (innerOf(el).length === 1 ? 'the inner shell' : 'inner shells')
+const dotsWord = (n: number) => (n === 0 ? 'no dots' : plural(n, 'dot'))
+const atomsWord = (n: number, el: El) => plural(n, `${lower(el)} atom`)
+const angleLine = (angle: string) => (angle.includes(' and ') ? `The bond angles are ${angle}.` : `The bond angle is ${angle}.`)
+
+/** What each shape's name means, as where the atoms sit. */
+const SHAPE_MEANS: Record<ShapeName, string> = {
+  linear: 'The atoms sit in a straight line, with the middle atom between the 2 outer atoms.',
+  'trigonal planar': '3 atoms sit at the corners of a flat triangle, with the middle atom at its center.',
+  bent: '2 atoms sit on the same side of the middle atom, so the 3 atoms make a V.',
+  tetrahedral: '4 atoms sit at the corners of a pyramid that has 4 triangular faces, with the middle atom at its center.',
+  'trigonal pyramidal': '3 atoms sit at the corners of a triangle, and the middle atom sits above the center of the triangle, at the top of a pyramid.',
+  'trigonal bipyramidal': '3 atoms sit in a flat triangle around the middle atom, with 1 more atom straight above the middle atom and 1 straight below.',
+  seesaw: '2 atoms sit on a straight line through the middle atom, and 2 more sit off to one side of that line.',
+  'T-shaped': '3 atoms and the middle atom lie flat and make the letter T, with the middle atom where the 2 strokes meet.',
+  octahedral: '4 atoms sit at the corners of a flat square around the middle atom, with 1 more atom straight above the middle atom and 1 straight below.',
+  'square pyramidal': '4 atoms sit at the corners of a flat square around the middle atom, and a fifth sits straight above the middle atom.',
+  'square planar': '4 atoms sit at the corners of a flat square, with the middle atom at its center.',
+}
+/** One molecule of each shape. */
+const SHAPE_SAMPLE: Record<ShapeName, Sample> = {
+  linear: SAMPLES.BeCl2,
+  'trigonal planar': SAMPLES.BCl3,
+  bent: SAMPLES.SCl2,
+  tetrahedral: SAMPLES.CCl4,
+  'trigonal pyramidal': SAMPLES.NF3,
+  'trigonal bipyramidal': SAMPLES.PF5,
+  seesaw: SAMPLES.SeF4,
+  'T-shaped': SAMPLES.BrF3,
+  octahedral: SAMPLES.SeF6,
+  'square pyramidal': SAMPLES.IF5,
+  'square planar': SAMPLES.ICl4,
+}
+
+type CardBody = Pick<TermCard, 'means' | 'example' | 'note' | 'picture' | 'pictureLabel' | 'about'>
+
+function shapeBody(name: ShapeName): CardBody {
+  const m = SHAPE_SAMPLE[name]
+  const info = sampleShape(m)
+  const cases = shapeCases(name).map((c) => `${plural(c.bonded, 'bonded atom')} and ${pairsText(c.lonePairs)}`)
+  return {
+    means: `${SHAPE_MEANS[name]} A middle atom with ${cases.join(', or with ')}${cases.length > 1 ? ',' : ''} has this shape.`,
+    example: `The shape of ${m.name}, ${formulaWord(m)}, is ${name}. ${angleLine(info.angle)}`,
+    note: info.lonePairs > 0 || cases.length > 1 ? 'The name describes where the atoms are. The lone pairs on the middle atom take up room and are left out of the name.' : null,
+    picture: { kind: 'model', sample: m, arrows: 'none', angle: false },
+    pictureLabel: `${cap(m.name)} drawn in 3D. Its shape is ${name}.`,
+    about: { els: [], samples: [m] },
+  }
+}
+
+function baseBody(id: BaseTermId, p: Problem | null): CardBody {
+  const atom = (pool: El[]) => firstThat(pool, (el) => otherColumns(p, [el]))
+  const shells = (el: El) => ({ picture: { kind: 'shells', el } as TermPicture, pictureLabel: shellsWords(el).label, about: { els: [el], samples: [] } })
+  const lewis = (m: Sample, mark: LewisMark, label: string) => ({ picture: { kind: 'lewis', samples: [m], mark } as TermPicture, pictureLabel: label, about: { els: [], samples: [m] } })
+  const model = (m: Sample, arrows: 'none' | 'bonds' | 'net', label: string, angle = false) => ({ picture: { kind: 'model', sample: m, arrows, angle } as TermPicture, pictureLabel: label, about: { els: [], samples: [m] } })
+  const pair = (sum: boolean, arrow: boolean) => {
+    const [a, b] = otherPair(p)
+    const pol = bondPolarity(a, b)
+    const hi = pol.negative!
+    const lo = pol.positive!
+    const label = `${cap(lower(a))}, ${courseEN(a)}, bonded to ${lower(b)}, ${courseEN(b)}.${arrow ? ` An arrow along the bond points at ${lower(hi)}, which is marked δ−.` : ''}${sum ? ` ${subtraction(pol)}.` : ''}`
+    return { a, b, pol, hi, lo, name: bondName(a, b), rest: { picture: { kind: 'pair', a, b, sum: sum ? subtraction(pol) : null, arrow } as TermPicture, pictureLabel: label, about: { els: [a, b], samples: [] } } }
+  }
+
+  switch (id) {
+    case 'valence': {
+      const el = atom(['N', 'O', 'C'])
+      const sh = shellsOf(el)
+      return {
+        means: "Valence electrons are the electrons in an atom's outer shell. They are the electrons an atom uses to make bonds, and the only ones a Lewis structure shows.",
+        example: `${cap(lower(el))} has ${ELEMENTS[el].z} electrons in ${plural(sh.length, 'shell')}: ${shellList(el)}. The ${sh[sh.length - 1]} in the outer shell are its valence electrons.`,
+        note: 'The inner shells are full and take no part in bonding, so their electrons are left out of the count.',
+        ...shells(el),
+      }
+    }
+    case 'shell': {
+      const el = atom(['Cl', 'S', 'Si'])
+      const sh = shellsOf(el)
+      return {
+        means: "An atom's electrons are arranged in shells around its nucleus. The inner shells are full. The outer shell is the last one, and the electrons in it are the valence electrons.",
+        example: `${cap(lower(el))}'s ${ELEMENTS[el].z} electrons are in ${plural(sh.length, 'shell')}. The inner shells hold ${list(innerOf(el).map(String))}, and the outer shell holds ${sh[sh.length - 1]}.`,
+        note: 'The first shell is full with 2 electrons, and the second is full with 8.',
+        ...shells(el),
+      }
+    }
+    case 'group': {
+      const column = (g: number) => EL_ORDER.filter((el) => ELEMENTS[el].group === g)
+      const g = firstThat([16, 17, 15, 14], (n) => clearOf(p, column(n)))
+      const els = column(g).slice(0, 3)
+      return {
+        means: 'A group is a column of the periodic table, and a period is a row. Atoms in the same group have the same number of valence electrons.',
+        example: `${cap(list(els.map(lower)))} are ${els.length === 2 ? 'both' : 'all'} in group ${g}, and each has ${ELEMENTS[els[0]!].valence} valence electrons.`,
+        note: 'The period of an atom is the number of its shells that hold electrons. Atoms in period 2 have 2 shells, and atoms in period 3 have 3.',
+        picture: { kind: 'table', els },
+        pictureLabel: `The periodic table with ${list(els.map(lower))} marked in the column of group ${g}.`,
+        about: { els: column(g), samples: [] },
+      }
+    }
+    case 'atomic-number': {
+      const el = atom(['N', 'O', 'C'])
+      const e = ELEMENTS[el]
+      return {
+        means: 'The atomic number is the number of protons in an atom. A neutral atom has the same number of electrons, so the atomic number also counts all of its electrons.',
+        example: `${cap(lower(el))}'s atomic number is ${e.z}, so ${article(lower(el))} ${lower(el)} atom has ${e.z} electrons. ${e.z - e.valence} of them are in ${innerWords(el)}, and ${e.valence} are valence electrons.`,
+        note: 'The valence electrons are only part of that number: the electrons in the outer shell.',
+        ...shells(el),
+      }
+    }
+    case 'ion': {
+      const m = apart(p, [SAMPLES.OH, SAMPLES.BF4, SAMPLES.CN])
+      const n = Math.abs(m.charge)
+      return {
+        means: 'An ion is an atom or a group of bonded atoms that has a charge. A negative ion holds more electrons than its neutral atoms bring, and a positive ion holds fewer.',
+        example: `${cap(m.name)}, ${formulaWord(m)}, has a charge of ${chargeWord(m.charge)}. The ion holds ${plural(n, 'more electron')} than its neutral atoms bring.`,
+        note: 'The charge is written after the formula. 2− means 2 extra electrons, and 1+ means 1 electron fewer.',
+        ...lewis(m, 'ion', `The Lewis structure of ${m.name} inside brackets, with its charge outside them.`),
+      }
+    }
+    case 'lewis': {
+      const m = apart(p, [SAMPLES.HCl, SAMPLES.H2S, SAMPLES.I2, SAMPLES.PH3])
+      const d = drawingOf(m)
+      const o = d.outer[0]!
+      const n = d.outer.length
+      const dots =
+        o.el === d.center
+          ? `1 line joins the 2 ${lower(o.el)} atoms, and each has ${dotsWord(o.lone)} around it.`
+          : n === 1
+            ? `1 line joins ${lower(d.center)} and ${lower(o.el)}. ${cap(lower(o.el))} has ${dotsWord(o.lone)} around it, and ${lower(d.center)} has ${dotsWord(d.lone)}.`
+            : `${n} lines join ${lower(d.center)} to the ${atomsWord(n, o.el)}. ${cap(lower(d.center))} has ${dotsWord(d.lone)} around it, and each ${lower(o.el)} atom has ${dotsWord(o.lone)}.`
+      return {
+        means: 'A Lewis structure is a drawing of a molecule or an ion that shows its valence electrons. A line between two atoms is a bond, which is 2 shared electrons. Dots beside an atom are electrons that the atom does not share.',
+        example: `In the Lewis structure of ${named(m)} ${dots}`,
+        note: 'Only valence electrons are drawn. The electrons in the inner shells are left out.',
+        ...lewis(m, 'none', `The Lewis structure of ${m.name}.`),
+      }
+    }
+    case 'middle': {
+      const m = apart(p, [SAMPLES.CCl4, SAMPLES.NF3, SAMPLES.H2S, SAMPLES.PF3, SAMPLES.SiH4, SAMPLES.SCl2])
+      const d = drawingOf(m)
+      return {
+        means: 'The middle atom is the atom that the other atoms are bonded to. The atoms around it are the outer atoms, and each one is bonded to the middle atom only.',
+        example: `In ${named(m)} ${lower(d.center)} is the middle atom, and the ${atomsWord(d.outer.length, d.outer[0]!.el)} are the outer atoms.`,
+        note: 'Many textbooks call the middle atom the central atom, and the outer atoms the terminal atoms.',
+        ...lewis(m, 'middle', `The Lewis structure of ${m.name}, with ${lower(d.center)} in the middle.`),
+      }
+    }
+    case 'bond': {
+      const m = apart(p, [SAMPLES.H2, SAMPLES.F2])
+      return {
+        means: 'A bond is 2 electrons that two atoms share. The shared electrons count for both atoms. A bond is drawn as a line between the two atoms.',
+        example: `In ${named(m)} each ${lower(m.center)} atom puts 1 electron into the bond. The line between the atoms stands for those 2 shared electrons.`,
+        note: 'A bond made of shared electrons is called a covalent bond.',
+        ...lewis(m, 'bond', `The Lewis structure of ${m.name}, with the 2 shared electrons marked on the line.`),
+      }
+    }
+    case 'multiple':
+      return {
+        means: 'Two atoms can share 2, 4 or 6 electrons. A single bond is 2 shared electrons, a double bond is 4, and a triple bond is 6. They are drawn as 1, 2 or 3 lines.',
+        example: `${cap(SAMPLES.F2.name)}, ${formulaWord(SAMPLES.F2)}, has a single bond. ${cap(SAMPLES.O2.name)}, ${formulaWord(SAMPLES.O2)}, has a double bond. ${cap(SAMPLES.N2.name)}, ${formulaWord(SAMPLES.N2)}, has a triple bond.`,
+        note: 'A double bond is still 1 bond between 2 atoms. Both atoms count all 4 of its electrons.',
+        picture: { kind: 'lewis', samples: [SAMPLES.F2, SAMPLES.O2, SAMPLES.N2], mark: 'lines', captions: ['Single bond', 'Double bond', 'Triple bond'] },
+        pictureLabel: 'Two fluorine atoms joined by 1 line, two oxygen atoms joined by 2 lines, and two nitrogen atoms joined by 3 lines.',
+        about: { els: [], samples: [SAMPLES.F2, SAMPLES.O2, SAMPLES.N2] },
+      }
+    case 'lone-pair': {
+      const m = apart(p, [SAMPLES.HCl, SAMPLES.H2S, SAMPLES.I2, SAMPLES.PH3])
+      const d = drawingOf(m)
+      const o = d.outer[0]!
+      const heavy = d.lone > 0 ? { el: d.center, lone: d.lone } : { el: o.el, lone: o.lone }
+      const other = d.lone > 0 ? o.el : d.center
+      const rest = other === heavy.el ? '' : `, and ${d.outer.length > 1 ? `each ${lower(other)} atom` : lower(other)} has none`
+      const who = other === heavy.el ? `each ${lower(heavy.el)} atom` : lower(heavy.el)
+      return {
+        means: 'A lone pair is 2 valence electrons that stay on one atom and are not shared in a bond. A lone pair is drawn as 2 dots side by side.',
+        example: `In ${named(m)} ${who} has ${plural(heavy.lone / 2, 'lone pair')}${rest}.`,
+        note: 'A lone pair belongs to 1 atom only. The 2 electrons of a bond belong to both of its atoms.',
+        ...lewis(m, 'lone', `The Lewis structure of ${m.name}, with each lone pair circled.`),
+      }
+    }
+    case 'full-shell': {
+      const m = apart(p, [SAMPLES.HCl, SAMPLES.H2S, SAMPLES.I2, SAMPLES.PH3])
+      const d = drawingOf(m)
+      const o = d.outer[0]!
+      const heavy = d.lone > 0 ? { el: d.center, lone: d.lone, bonds: d.outer.reduce((n, x) => n + x.order, 0) } : { el: o.el, lone: o.lone, bonds: o.order }
+      const other = d.lone > 0 ? o.el : d.center
+      const who = other === heavy.el ? `each ${lower(heavy.el)} atom` : lower(heavy.el)
+      const inBonds = heavy.bonds === 1 ? `2 in ${other === heavy.el ? 'the' : 'its'} bond` : `${heavy.bonds * 2} in its ${heavy.bonds} bonds`
+      const rest = other === heavy.el ? '' : ` ${cap(d.outer.length > 1 ? `each ${lower(other)} atom` : lower(other))} has the 2 in its bond.`
+      return {
+        means: 'An atom has a full shell when 8 electrons are around it: its unshared electrons plus all the electrons in its bonds. Hydrogen is full with 2.',
+        example: `In ${named(m)} ${who} has ${heavy.lone} unshared electrons and ${inBonds}, which makes ${heavy.lone + heavy.bonds * 2}.${rest}`,
+        note: 'A few middle atoms end up with fewer than 8 electrons, and atoms from period 3 onward can hold more than 8.',
+        ...lewis(m, 'shell', `The Lewis structure of ${m.name}, with a ring around the electrons that count for ${lower(heavy.el)}.`),
+      }
+    }
+    case 'formal-charge': {
+      const m = apart(p, [SAMPLES.OH, SAMPLES.BF4, SAMPLES.CN])
+      const d = drawingOf(m)
+      const bonds = d.outer.reduce((n, x) => n + x.order, 0)
+      const v = ELEMENTS[d.center].valence
+      return {
+        means: 'Formal charge compares the valence electrons an atom brings with the electrons the drawing gives it. Take the valence electrons of the atom, subtract its unshared electrons, and subtract 1 for each bond line drawn to it.',
+        example: `In ${named(m)} ${lower(d.center)} brings ${v} valence electrons. In the drawing, ${lower(d.center)} has ${d.lone} unshared electrons and ${plural(bonds, 'bond')}: ${v} − ${d.lone} − ${bonds} = ${signed(d.fc)}.`,
+        note: 'The formal charges of all the atoms add up to the charge of the molecule or ion. The drawing with the smallest formal charges is the one to keep.',
+        ...lewis(m, 'charges', `The Lewis structure of ${m.name}, with a formal charge of ${signed(d.fc)} on ${lower(d.center)}.`),
+        about: { els: [d.center], samples: [m] },
+      }
+    }
+    case 'resonance': {
+      // ozone is bent with one double bond, as the nitrite ion is, so a bent molecule on screen gets the nitrate ion
+      const m = otherShape(p, [SAMPLES.O3, SAMPLES.NO3])
+      const n = formsOf(m)
+      const o = drawingOf(m).outer[0]!.el
+      return {
+        means: 'Some molecules and ions have more than one correct Lewis structure, with a double bond in a different place in each. Those drawings are called resonance structures. The real molecule is an average of them.',
+        example:
+          n === 2
+            ? `${cap(m.name)}, ${formulaWord(m)}, has 2 resonance structures. The double bond is on one side in the first drawing and on the other side in the second.`
+            : `${cap(m.name)}, ${formulaWord(m)}, has ${n} resonance structures. The double bond goes to a different ${lower(o)} atom in each drawing.`,
+        note: 'The molecule does not switch between the drawings. Its bonds are all the same, each in between a single bond and a double bond.',
+        picture: { kind: 'lewis', samples: new Array<Sample>(n).fill(m), mark: 'lines', forms: Array.from({ length: n }, (_, i) => i) },
+        pictureLabel: `${n} drawings of ${m.name}. The double bond is in a different place in each.`,
+        about: { els: [], samples: [m] },
+      }
+    }
+    case 'expanded': {
+      const m = SAMPLES.SeF6
+      const d = drawingOf(m)
+      const bonds = d.outer.reduce((n, x) => n + x.order, 0)
+      return {
+        means: 'An atom from period 3 onward can hold more than 8 electrons when it is the middle atom. Atoms in periods 1 and 2 never hold more than 8.',
+        example: `In ${named(m)} ${lower(d.center)} has ${plural(bonds, 'bond')}, so ${d.lone + bonds * 2} electrons are around it.`,
+        note: 'A middle atom takes more than 8 when it has more than 4 atoms to bond to, or when another bond brings the formal charges closer to 0.',
+        ...lewis(m, 'lines', `${cap(lower(d.center))} in the middle with a line to each of ${atomsWord(d.outer.length, d.outer[0]!.el)}.`),
+      }
+    }
+    case 'electron-group': {
+      const m = otherGroups(p, [SAMPLES.NF3, SAMPLES.BCl3])
+      const d = drawingOf(m)
+      const info = sampleShape(m)
+      return {
+        means: 'An electron group is one place around the middle atom where electrons are: a bond to another atom, or a lone pair. A single, double or triple bond is 1 group.',
+        example: `In ${named(m)} ${lower(d.center)} has ${plural(info.bonded, 'bonded atom')} and ${pairsText(info.lonePairs)}, which is ${plural(info.groups, 'electron group')}.`,
+        note: 'Count the groups around the middle atom only. Lone pairs on the outer atoms are not counted.',
+        ...lewis(m, 'groups', `The Lewis structure of ${m.name}, with each electron group around ${lower(d.center)} numbered.`),
+      }
+    }
+    case 'shape': {
+      const m = otherShape(p, [SAMPLES.NF3, SAMPLES.SCl2])
+      const d = drawingOf(m)
+      const info = sampleShape(m)
+      return {
+        means: 'The shape of a molecule is where its atoms sit around the middle atom. The electron groups push each other as far apart as they can get, and that decides where the atoms go. A shape is named for the atoms only.',
+        example: `In ${named(m)} ${lower(d.center)} has ${plural(info.bonded, 'bonded atom')} and ${pairsText(info.lonePairs)}. The ${info.groups} groups spread out, and the atoms make a ${info.shape} shape.`,
+        note: 'Two molecules with the same number of electron groups can have different shapes, because a lone pair takes a place and adds no atom.',
+        ...model(m, 'none', `${cap(m.name)} drawn in its ${info.shape} shape.`),
+      }
+    }
+    case 'bond-angle': {
+      const m = otherShape(p, [SAMPLES.BCl3, SAMPLES.CCl4])
+      const d = drawingOf(m)
+      const info = sampleShape(m)
+      return {
+        means: 'A bond angle is the angle between two bonds that meet at the same atom.',
+        example: `In ${named(m)} the angle between any 2 ${bondName(d.center, d.outer[0]!.el)} bonds is ${info.angle}.`,
+        note: 'Lone pairs push harder than bonds do. When the middle atom has a lone pair, its bonds are squeezed a little closer together.',
+        ...model(m, 'none', `${cap(m.name)} with the angle between 2 of its bonds marked ${info.angle}.`, true),
+      }
+    }
+    case 'electronegativity': {
+      const x = pair(false, false)
+      return {
+        means: 'Electronegativity is a number for how strongly an atom pulls the shared electrons of a bond toward itself. A larger number means a stronger pull.',
+        example: `${cap(lower(x.hi))} has an electronegativity of ${courseEN(x.hi)}, and ${lower(x.lo)} has ${courseEN(x.lo)}. In ${article(x.name)} ${x.name} bond, ${lower(x.hi)} pulls the shared electrons harder.`,
+        note: 'Electronegativity gets larger from left to right across a period of the periodic table, and smaller going down a group.',
+        ...x.rest,
+      }
+    }
+    case 'delta-en': {
+      const x = pair(true, false)
+      return {
+        means: 'ΔEN is the difference between the electronegativities of the two atoms in a bond: the larger number minus the smaller. ΔEN says how unevenly the two atoms share the electrons of the bond.',
+        example: `For ${article(x.name)} ${x.name} bond, ${subtraction(x.pol)}. That is above 0.4, so the bond is polar.`,
+        note: 'A ΔEN of 0.4 or less is a nonpolar bond. Above 0.4 and up to 2.0 is a polar bond. Above 2.0 the bond is ionic.',
+        ...x.rest,
+      }
+    }
+    case 'polar': {
+      const x = pair(false, true)
+      const same = samePair(p)
+      return {
+        means: 'Polar means the electrons are pulled toward one side, so that side is slightly negative and the other side is slightly positive. Nonpolar means the electrons are spread evenly. A bond can be polar, and a whole molecule can be polar.',
+        example: `${cap(article(x.name))} ${x.name} bond is polar, because ${lower(x.hi)} pulls the shared electrons harder than ${lower(x.lo)}. ${cap(article(same))} ${bondName(same, same)} bond is nonpolar, because the 2 ${lower(same)} atoms pull equally.`,
+        note: 'A molecule with polar bonds can still be nonpolar. That happens when its bond dipoles cancel.',
+        ...x.rest,
+      }
+    }
+    case 'polar-bond': {
+      const x = pair(true, true)
+      return {
+        means: 'In a polar bond the two atoms share the electrons unevenly, because one atom has a larger electronegativity than the other. In a nonpolar bond the two atoms share the electrons evenly.',
+        example: `In ${article(x.name)} ${x.name} bond, ${subtraction(x.pol)}, which is above 0.4, so the bond is polar. ${cap(lower(x.hi))} has the larger electronegativity, so the shared electrons sit closer to ${lower(x.hi)}.`,
+        note: 'Two atoms of the same element have the same electronegativity, so ΔEN is 0 and neither atom pulls the shared electrons harder.',
+        ...x.rest,
+      }
+    }
+    case 'partial': {
+      const x = pair(false, true)
+      return {
+        means: 'δ− marks the atom of a polar bond that the shared electrons sit closer to, which makes that atom slightly negative. δ+ marks the other atom, which is slightly positive.',
+        example: `In ${article(x.name)} ${x.name} bond, ${lower(x.hi)} has the larger electronegativity, so ${lower(x.hi)} is δ− and ${lower(x.lo)} is δ+.`,
+        note: 'A partial charge is smaller than the charge of an ion. No electron has moved from one atom to the other.',
+        ...x.rest,
+      }
+    }
+    case 'dipole': {
+      const x = pair(false, true)
+      return {
+        means: 'A bond dipole is the uneven sharing in a polar bond, drawn as an arrow along the bond. The arrow points at the δ− atom, which is the atom with the larger electronegativity. A nonpolar bond gets no arrow.',
+        example: `For ${article(x.name)} ${x.name} bond, the arrow starts at ${lower(x.lo)} and points at ${lower(x.hi)}.`,
+        note: 'The small cross at the tail of the arrow marks the δ+ end.',
+        ...x.rest,
+      }
+    }
+    case 'net-dipole':
+    case 'polar-molecule': {
+      // the bent molecule lies flat on the page, so its arrows are the easier ones to read
+      const m = otherShape(p, [SAMPLES.SCl2, SAMPLES.NF3])
+      const d = drawingOf(m)
+      const info = sampleShape(m)
+      const o = d.outer[0]!.el
+      const bondsText = `${info.bonded} ${bondName(d.center, o)}`
+      const pic = model(m, 'net', `${cap(m.name)} in its ${info.shape} shape, with an arrow on each bond that points at ${lower(o)} and one thicker arrow for the net dipole.`)
+      if (id === 'net-dipole') {
+        return {
+          means: 'The net dipole is all the bond dipoles of a molecule added together, drawn as one arrow. A molecule that has a net dipole is polar.',
+          example: `In ${named(m)} each of the ${bondsText} arrows points at ${lower(o)}. In the ${info.shape} shape the arrows all lean toward the same side, so they add up to a net dipole.`,
+          note: 'Bond dipoles are arrows, so their directions count when they are added. Arrows that point in opposite directions can cancel.',
+          ...pic,
+        }
+      }
+      return {
+        means: 'A polar molecule has a net dipole: one side of the molecule is slightly negative and the other side is slightly positive. A nonpolar molecule has no net dipole, because it has no polar bonds or because its bond dipoles cancel.',
+        example: `${cap(m.name)}, ${formulaWord(m)}, is a polar molecule. The ${bondsText} bonds are polar, and in the ${info.shape} shape their dipoles do not cancel.`,
+        note: 'Polar bonds alone do not make a molecule polar. The shape decides whether the bond dipoles cancel.',
+        ...pic,
+      }
+    }
+    case 'cancel': {
+      const m = otherShape(p, [SAMPLES.BeCl2, SAMPLES.BCl3])
+      const d = drawingOf(m)
+      const info = sampleShape(m)
+      const name = bondName(d.center, d.outer[0]!.el)
+      const how: Partial<Record<ShapeName, string>> = {
+        linear: 'point in opposite directions',
+        'trigonal planar': 'are 120° apart in a flat triangle',
+      }
+      return {
+        means: 'Bond dipoles cancel when they are the same size and are spread evenly around the middle atom. Each arrow is undone by the others, so no net dipole is left and the molecule is nonpolar.',
+        example: `In ${named(m)} the ${info.bonded} ${name} arrows are the same size and ${how[info.shape]}, so they cancel.`,
+        note: 'The outer atoms have to be the same element for this. Different outer atoms give arrows of different sizes.',
+        ...model(m, 'bonds', `${cap(m.name)} in its ${info.shape} shape, with an arrow on each bond that points at ${lower(d.outer[0]!.el)} and no net dipole.`),
+      }
+    }
+    case 'sigma':
+      return {
+        means: 'A sigma bond is the first bond between two atoms. Two orbitals overlap head on, along the line between the atoms. Every single bond is a sigma bond, and every double or triple bond has exactly 1 sigma bond in it.',
+        example: `${cap(SAMPLES.F2.name)}, ${formulaWord(SAMPLES.F2)}, has a single bond, which is 1 sigma bond. ${cap(SAMPLES.O2.name)}, ${formulaWord(SAMPLES.O2)}, has a double bond: 1 sigma bond and 1 pi bond.`,
+        note: 'Count 1 sigma bond for each pair of bonded atoms, whatever the number of lines between them.',
+        picture: { kind: 'lewis', samples: [SAMPLES.F2, SAMPLES.O2], mark: 'sigma-pi' },
+        pictureLabel: 'Two fluorine atoms joined by 1 line marked σ, and two oxygen atoms joined by 2 lines marked σ and π.',
+        about: { els: [], samples: [SAMPLES.F2, SAMPLES.O2] },
+      }
+    case 'pi':
+      return {
+        means: 'A pi bond is a second or third bond between the same two atoms. Two p orbitals overlap side by side, above and below the line between the atoms.',
+        example: `${cap(SAMPLES.O2.name)}, ${formulaWord(SAMPLES.O2)}, has a double bond: 1 sigma bond and 1 pi bond. ${cap(SAMPLES.N2.name)}, ${formulaWord(SAMPLES.N2)}, has a triple bond: 1 sigma bond and 2 pi bonds.`,
+        note: 'A pi bond is weaker than a sigma bond, and a single bond never has one.',
+        picture: { kind: 'lewis', samples: [SAMPLES.O2, SAMPLES.N2], mark: 'sigma-pi' },
+        pictureLabel: 'Two oxygen atoms joined by 2 lines marked σ and π, and two nitrogen atoms joined by 3 lines marked σ, π and π.',
+        about: { els: [], samples: [SAMPLES.O2, SAMPLES.N2] },
+      }
+    case 'hybridization': {
+      const m = otherGroups(p, [SAMPLES.BCl3, SAMPLES.BeCl2, SAMPLES.CCl4])
+      const d = drawingOf(m)
+      const info = sampleShape(m)
+      const h = hybridFor(info.groups)!
+      const c = lower(d.center)
+      return {
+        means: 'Hybridization is a model in which an atom mixes its outer orbitals into new orbitals that are all alike: an s orbital, p orbitals, and d orbitals when it has 5 or 6 electron groups. The atom makes 1 hybrid orbital for each of its electron groups, and uses them for its sigma bonds and its lone pairs.',
+        example: `In ${named(m)} ${c} has ${plural(info.groups, 'electron group')}. ${cap(c)} mixes 1 s orbital and ${plural(info.groups - 1, 'p orbital')} into ${info.groups} ${hybridLabel(h)} orbitals, so ${c} is ${hybridLabel(h)}.`,
+        note: 'A pi bond is made from p orbitals that were left out of the mix, so a double or triple bond still counts as 1 electron group.',
+        ...model(m, 'none', `${cap(m.name)} drawn in its ${info.shape} shape.`),
+      }
+    }
+  }
+}
+
+/** Everything a term's card shows. `p` is the molecule on screen, or null in free build. `step`
+ *  is the guided step the student is in: the card then links only to terms that step or an
+ *  earlier one uses. */
+export function termCard(id: TermId, p: Problem | null = null, step: StepId | null = null): TermCard {
+  const body = isShapeTerm(id) ? shapeBody(shapeNameOf(id)) : baseBody(id, p)
+  const links: TermId[] = isShapeTerm(id) ? ['shape', 'electron-group', 'bond-angle'] : TERMS[id].related
+  const stepAt = (x: StepId) => STEPS.findIndex((st) => st.id === x)
+  const related = links.filter((to) => step === null || stepAt(termFrom(to)) <= stepAt(step)).map((to) => ({ id: to, name: termName(to) }))
+  return { id, name: termName(id), also: isShapeTerm(id) ? null : (TERMS[id].also ?? null), ...body, related }
+}

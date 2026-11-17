@@ -8,6 +8,7 @@ checks. None of it touches React, React Native or Three.js.
 - `polarity.test.ts`: bond and molecular polarity, sigma and pi bonds, hybridization, with the course slides' worked examples as the expected answers. Team chem.
 - `guide.test.ts`: the guide's step rules and wording, including the scan of every sentence. Team lewis, reviewed by learning.
 - `store.test.ts`: the step flow in the Lewis module's store. Team lewis.
+- `terms.test.ts`: the key terms: which words are highlighted, what each card says, and that a card's example is never the molecule on screen. Team lewis, reviewed by learning and chem.
 - `repo.test.ts`: the repo checks, against made-up repos in a temp folder. Team platform.
 - `helpers.ts`: shared by the test files. It builds structures with the same moves the app offers.
 

@@ -52,4 +52,7 @@ An accepted record is never rewritten. Only its "Status" and "Superseded by" lin
 | [D-0024](0024-prompts-are-noticeable-and-checks-stay-on-screen.md) | A question is made noticeable, the app shows how to act on the board, and the checks stay on screen | accepted | Sam | learning, design, lewis |
 | [D-0025](0025-one-move-controls-and-a-guided-dipole-drawing.md) | Atoms and bonds are added and removed in one move, the dipole drawing is guided, and the board can be cleared in 3D | accepted | Sam | learning, design, lewis |
 | [D-0026](0026-glow-hand-check-strip-and-aim-points.md) | A glow and a pointing hand show the next action, a strip of checks stays over the board, bonds are cut with a swipe, and the net dipole is aimed at dots | provisional | The build session, reading D-0024 and D-0025 | learning, design, lewis |
+| [D-0027](0027-key-terms-open-a-card.md) | Key terms are highlighted, and a student can open each one to learn what it means, with examples | accepted | Sam | learning, design, lewis, chem |
+| [D-0028](0028-term-cards-with-an-example-on-another-molecule.md) | A highlighted word opens a card with a meaning, an example worked on another molecule, a picture and one thing to keep in mind | provisional | The build session, reading D-0027 | learning, design, lewis, chem |
+| [D-0029](0029-free-build-shows-electronegativity-and-dipoles.md) | Free build shows electronegativity, each bond's ΔEN and the dipoles, with nothing asked | accepted | Sam | lewis, learning, design |
 <!-- index:end -->

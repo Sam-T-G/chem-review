@@ -3,14 +3,21 @@
 import { assess } from '../../chem/assess'
 import { ELEMENTS, shellsOf, type El } from '../../chem/elements'
 import { GROUPS, PROBLEMS, chargeLabel, chargeWord, formulaHtml, formulaText, speciesOf, totalElectrons, type Problem } from '../../chem/problems'
-import { courseEN } from '../../chem/polarity'
+import { bondPolarity, courseEN } from '../../chem/polarity'
+import { idealDirs, type V3 } from '../../chem/repulsion'
 import { atomById, electronsOnBoard, sharedElectrons, shellCount, type Structure } from '../../chem/structure'
 import { shapeOf, type ShapeInfo, type ShapeName } from '../../chem/vsepr'
 import {
+  ALL_TERMS,
   BIN_WORDS,
+  FREE_POLAR_WORDS,
+  bondKindsOn,
+  freeBondLine,
+  freeNetLine,
   DIPOLE_WORDS,
   HYBRIDS,
   STEPS,
+  TERM_WORDS,
   aimWords,
   angleMarks,
   arrowCaption,
@@ -22,6 +29,7 @@ import {
   checkChips,
   checkCoach,
   checkRows,
+  drawingOf,
   elementsOf,
   finishedLine,
   finishedNotes,
@@ -43,14 +51,18 @@ import {
   pairWords,
   placeInstruction,
   placedCount,
+  plainTerms,
   polarity,
-  polarityNote,
+  bondName,
   profile,
+  sampleShape,
   shapeChoices,
   shapeInfoFor,
   shapeReadout,
   shellsWords,
   sigmaPiQuestion,
+  termCard,
+  termPieces,
   titleOf,
   totalSum,
   totalTally,
@@ -59,8 +71,13 @@ import {
   type Coach,
   type HowTo,
   type Hybrid,
+  type LewisMark,
+  type Sample,
   type TallyReveal,
   type StepId,
+  type TermCard,
+  type TermId,
+  type TermPicture,
 } from './guide'
 import { cssVars } from '../../theme/tokens'
 import { BALL, ballStyle } from './palette'
@@ -116,7 +133,7 @@ const ball = (el: El, extra = '') =>
   `<span class="mb-ball ${extra}" style="${ballStyle(el)};--blink:${((el.charCodeAt(0) * 37 + el.length * 11) % 50) / 10}s" aria-hidden="true"><i class="mb-eyes"></i><b>${el}</b></span>`
 const BUBBLES = '<span class="mb-bubbles" aria-hidden="true"><i></i><i></i><i></i><i></i></span>'
 const fb = (text: string | null | undefined, tone: 'info' | 'warn' | 'good') =>
-  text ? `<p class="mb-fb" role="status" data-tone="${tone}">${tone === 'good' ? ICON.check : tone === 'warn' ? ICON.cross : ''}<span>${esc(text)}</span></p>` : ''
+  text ? `<p class="mb-fb" role="status" data-tone="${tone}">${tone === 'good' ? ICON.check : tone === 'warn' ? ICON.cross : ''}<span>${rich(text)}</span></p>` : ''
 
 /** An atom's electron shells as rings around its symbol. The inner shells and their electrons
  *  are gray; the outer shell is the colored ring, with its electrons drawn like the ones on the board. */
@@ -168,11 +185,384 @@ function tallyFigure(p: Problem, reveal: TallyReveal): string {
 const coach = (c: Coach | null | undefined, p?: Problem): string => {
   if (!c) return ''
   const picture = c.show?.kind === 'shells' ? shellsFigure(c.show.el) : c.show?.kind === 'tally' && p ? tallyFigure(p, c.show.reveal) : ''
+  // a card keeps its own list of highlighted terms: a student who is stuck on it finds each word in it
+  const seen = new Set<string>()
   return `<div class="mb-fb mb-coach" role="status" data-tone="warn">
-    <p class="mb-coach-lead">${ICON.cross}<span>${esc(c.lead)}</span></p>
-    ${c.why ? `<p class="mb-coach-why">${esc(c.why)}</p>` : ''}
-    ${c.ask ? `<p class="mb-coach-ask">${esc(c.ask)}</p>` : ''}
+    <p class="mb-coach-lead">${ICON.cross}<span>${rich(c.lead, seen)}</span></p>
+    ${c.why ? `<p class="mb-coach-why">${rich(c.why, seen)}</p>` : ''}
+    ${c.ask ? `<p class="mb-coach-ask">${rich(c.ask, seen)}</p>` : ''}
     ${picture}
+  </div>`
+}
+
+// ---------------------------------------------------------------- key terms
+
+/** The terms already highlighted on the screen being built, the ones this step leaves plain, and
+ *  a running number that gives each highlighted word its own key. */
+let termsSeen = new Set<string>()
+let termsPlain: TermId[] = []
+let termsMade = 0
+/** A sentence as HTML. The first use of each key term on a screen is a button that opens the
+ *  term's card. `seen` is the set a card or a list of hints keeps for itself. */
+function rich(text: string, seen: Set<string> = termsSeen): string {
+  return termPieces(text, termsPlain)
+    .map((piece) => {
+      if (!piece.term || seen.has(piece.term)) return esc(piece.text)
+      seen.add(piece.term)
+      return `<button type="button" class="mb-term" data-term="${piece.term}" data-key="term-${termsMade++}" aria-haspopup="dialog" aria-expanded="false" title="${TERM_WORDS.opens}">${esc(piece.text)}</button>`
+    })
+    .join('')
+}
+
+const hex = (n: number) => `#${n.toString(16).padStart(6, '0')}`
+const f1 = (n: number) => String(Math.round(n * 10) / 10)
+const signedText = (n: number) => (n > 0 ? `+${n}` : `−${-n}`)
+/** How big an atom is drawn in a card's picture. */
+const picR = (el: El) => (ELEMENTS[el].period === 1 ? 12 : 16)
+const picAtom = (el: El, x: number, y: number, r = picR(el)) =>
+  `<g transform="translate(${f1(x)} ${f1(y)})"><circle class="mb-pic-atom" r="${f1(r)}" fill="${hex(BALL[el].color)}"/><text class="mb-pic-sym" y="${f1(r * 0.36)}" font-size="${f1(r * (el.length > 1 ? 0.86 : 1.02))}" fill="${BALL[el].ink}">${el}</text></g>`
+/** A small round label with a number or a sign in it. */
+const picBadge = (x: number, y: number, text: string, kind: string) => `<g class="mb-pic-badge ${kind}" transform="translate(${f1(x)} ${f1(y)})"><circle r="8.6"/><text y="3.7">${text}</text></g>`
+const picDots = (x: number, y: number, u: { x: number; y: number }) =>
+  `<circle class="mb-pic-dot" cx="${f1(x - u.y * 3.9)}" cy="${f1(y + u.x * 3.9)}" r="2.5"/><circle class="mb-pic-dot" cx="${f1(x + u.y * 3.9)}" cy="${f1(y - u.x * 3.9)}" r="2.5"/>`
+/** A dipole arrow as the board draws one: a shaft, a head, and a short cross near its tail. */
+function picArrow(x1: number, y1: number, x2: number, y2: number, kind: 'is-bond' | 'is-net'): string {
+  const len = Math.hypot(x2 - x1, y2 - y1) || 1
+  const ux = (x2 - x1) / len
+  const uy = (y2 - y1) / len
+  const head = kind === 'is-net' ? 10 : 7
+  const bx = x2 - ux * head
+  const by = y2 - uy * head
+  const cx = x1 + ux * 6
+  const cy = y1 + uy * 6
+  const w = head * 0.6
+  return `<g class="mb-pic-arrow ${kind}"><path d="M${f1(x1)} ${f1(y1)}L${f1(bx)} ${f1(by)}M${f1(cx - uy * 4.2)} ${f1(cy + ux * 4.2)}L${f1(cx + uy * 4.2)} ${f1(cy - ux * 4.2)}"/><path class="is-head" d="M${f1(x2)} ${f1(y2)}L${f1(bx - uy * w)} ${f1(by + ux * w)}L${f1(bx + uy * w)} ${f1(by - ux * w)}z"/></g>`
+}
+interface PicBox {
+  x0: number
+  x1: number
+  y0: number
+  y1: number
+}
+const picBox = (): PicBox => ({ x0: Infinity, x1: -Infinity, y0: Infinity, y1: -Infinity })
+const grow = (b: PicBox, x: number, y: number, pad: number) => {
+  b.x0 = Math.min(b.x0, x - pad)
+  b.x1 = Math.max(b.x1, x + pad)
+  b.y0 = Math.min(b.y0, y - pad)
+  b.y1 = Math.max(b.y1, y + pad)
+}
+const picFrame = (inner: string, b: PicBox, zoom = 1.2) =>
+  `<svg class="mb-pic-svg" viewBox="${f1(b.x0 - 5)} ${f1(b.y0 - 5)} ${f1(b.x1 - b.x0 + 10)} ${f1(b.y1 - b.y0 + 10)}" width="${Math.round((b.x1 - b.x0 + 10) * zoom)}" height="${Math.round((b.y1 - b.y0 + 10) * zoom)}" aria-hidden="true">${inner}</svg>`
+
+/** One flat Lewis drawing: the middle atom at the origin, each outer atom on a seat around it, and
+ *  each lone pair on a seat of its own. A molecule of two atoms lies left to right. */
+function lewisGroup(m: Sample, mark: LewisMark, form: number): { svg: string; box: PicBox } {
+  const d = drawingOf(m, form)
+  const dots = mark !== 'lines' && mark !== 'sigma-pi'
+  // a longer bond where something is marked on it
+  const L = mark === 'sigma-pi' ? 104 : mark === 'bond' ? 84 : mark === 'shell' ? 72 : 58
+  const n = d.outer.length
+  const pairs = Math.floor(d.lone / 2)
+  const k = n + pairs
+  const angles = n === 1 ? Array.from({ length: k }, (_, i) => (i * 360) / k) : k === 2 ? [180, 0] : Array.from({ length: k }, (_, i) => 90 + (i * 360) / k)
+  // lone pairs take the top seat first, and seats spread evenly when there are two
+  const loneSeats = n === 1 ? Array.from({ length: pairs }, (_, j) => j + 1) : Array.from({ length: pairs }, (_, j) => Math.round((j * k) / pairs))
+  const atomSeats = angles.map((_, i) => i).filter((i) => !loneSeats.includes(i))
+  const rc = picR(d.center)
+  const box = picBox()
+  grow(box, 0, 0, rc + 2)
+  const dir = (deg: number) => ({ x: Math.cos((deg * Math.PI) / 180), y: -Math.sin((deg * Math.PI) / 180) })
+  const pair = (cx: number, cy: number, r: number, deg: number, ring: boolean) => {
+    const u = dir(deg)
+    const px = cx + u.x * (r + 7)
+    const py = cy + u.y * (r + 7)
+    grow(box, px, py, ring ? 11 : 6.5)
+    return `${ring ? `<ellipse class="mb-pic-ring" cx="${f1(px)}" cy="${f1(py)}" rx="9.6" ry="6.2" transform="rotate(${f1(90 - deg)} ${f1(px)} ${f1(py)})"/>` : ''}${picDots(px, py, u)}`
+  }
+  let back = ''
+  let lines = ''
+  let atoms = picAtom(d.center, 0, 0)
+  let front = ''
+  let groupNo = 0
+  d.outer.forEach((o, i) => {
+    const deg = angles[atomSeats[i]!]!
+    const u = dir(deg)
+    const ro = picR(o.el)
+    const ax = u.x * L
+    const ay = u.y * L
+    grow(box, ax, ay, ro + 2)
+    const gap = mark === 'sigma-pi' ? 11 : 5
+    const from = rc + 1.5
+    const to = L - ro - 1.5
+    const mid = (from + to) / 2
+    // of a double or triple bond's lines, the one in the middle (or the lower one) is the sigma bond
+    const sigmaAt = Math.floor(o.order / 2)
+    for (let b = 0; b < o.order; b++) {
+      const off = (b - (o.order - 1) / 2) * gap
+      const ox = -u.y * off
+      const oy = u.x * off
+      lines += `<line class="mb-pic-bond" x1="${f1(u.x * from + ox)}" y1="${f1(u.y * from + oy)}" x2="${f1(u.x * to + ox)}" y2="${f1(u.y * to + oy)}"/>`
+      if (mark === 'sigma-pi') {
+        const t = mid + (b - (o.order - 1) / 2) * 20
+        front += `<g class="mb-pic-tag" transform="translate(${f1(u.x * t + ox)} ${f1(u.y * t + oy)})"><rect x="-8" y="-8" width="16" height="16" rx="5"/><text y="4.2">${b === sigmaAt ? 'σ' : 'π'}</text></g>`
+      }
+    }
+    if (mark === 'bond') front += `<ellipse class="mb-pic-ring" cx="${f1(u.x * mid)}" cy="${f1(u.y * mid)}" rx="10.5" ry="7" transform="rotate(${f1(90 - deg)} ${f1(u.x * mid)} ${f1(u.y * mid)})"/>`
+    if (mark === 'bond' || mark === 'shell') front += picDots(u.x * mid, u.y * mid, u)
+    if (mark === 'groups') front += picBadge(u.x * mid - u.y * 12, u.y * mid + u.x * 12, String(++groupNo), 'is-count')
+    if (dots) {
+      const p = Math.floor(o.lone / 2)
+      for (let j = 1; j <= p; j++) front += pair(ax, ay, ro, deg + 180 + (j * 360) / (p + 1), mark === 'lone')
+    }
+    atoms += picAtom(o.el, ax, ay)
+    if (mark === 'charges' && o.fc !== 0) {
+      front += picBadge(ax + (ro + 9) * 0.72, ay - (ro + 9) * 0.72, signedText(o.fc), 'is-charge')
+      grow(box, ax + (ro + 9) * 0.72, ay - (ro + 9) * 0.72, 10)
+    }
+  })
+  if (dots) {
+    for (const i of loneSeats) {
+      front += pair(0, 0, rc, angles[i]!, mark === 'lone')
+      if (mark === 'groups') {
+        const u = dir(angles[i]!)
+        front += picBadge(u.x * (rc + 23), u.y * (rc + 23), String(++groupNo), 'is-count')
+        grow(box, u.x * (rc + 23), u.y * (rc + 23), 10)
+      }
+    }
+  }
+  if (mark === 'middle') {
+    back += `<circle class="mb-pic-halo" r="${f1(rc + 6.5)}"/>`
+    grow(box, 0, 0, rc + 9)
+  }
+  if (mark === 'charges' && d.fc !== 0) {
+    front += picBadge((rc + 9) * 0.72, -(rc + 9) * 0.72, signedText(d.fc), 'is-charge')
+    grow(box, (rc + 9) * 0.72, -(rc + 9) * 0.72, 10)
+  }
+  if (mark === 'shell') {
+    // a ring around everything that counts for one atom: its own dots and both electrons of each of its bonds
+    const o = d.outer[0]!
+    const own = d.lone > 0
+    const u = dir(angles[atomSeats[0]!]!)
+    const hx = own ? 0 : u.x * L
+    const hy = own ? 0 : u.y * L
+    const mid = (rc + L - picR(o.el)) / 2
+    const R = (own ? mid : L - mid) + 7.5
+    const count = own ? d.lone + 2 * d.outer.reduce((sum, x) => sum + x.order, 0) : o.lone + 2 * o.order
+    back += `<circle class="mb-pic-shell" cx="${f1(hx)}" cy="${f1(hy)}" r="${f1(R)}"/>`
+    front += picBadge(hx + R * 0.72, hy - R * 0.72, String(count), 'is-count')
+    grow(box, hx, hy, R + 2)
+    grow(box, hx + R * 0.72, hy - R * 0.72, 10)
+  }
+  let svg = back + lines + atoms + front
+  if (mark === 'ion') {
+    const x0 = box.x0 - 5
+    const x1 = box.x1 + 5
+    const y0 = box.y0 - 3
+    const y1 = box.y1 + 3
+    svg += `<path class="mb-pic-bracket" d="M${f1(x0 + 6)} ${f1(y0)}H${f1(x0)}V${f1(y1)}H${f1(x0 + 6)}M${f1(x1 - 6)} ${f1(y0)}H${f1(x1)}V${f1(y1)}H${f1(x1 - 6)}"/><text class="mb-pic-charge" x="${f1(x1 + 4)}" y="${f1(y0 + 9)}">${chargeLabel(m.charge)}</text>`
+    grow(box, x0, y0, 2)
+    grow(box, x1 + 18, y1, 2)
+  }
+  return { svg, box }
+}
+
+function lewisFigure(pic: Extract<TermPicture, { kind: 'lewis' }>): string {
+  const groups = pic.samples.map((m, i) => lewisGroup(m, pic.mark, pic.forms?.[i] ?? 0))
+  if (pic.mark === 'sigma-pi') {
+    // the labels on the lines are small, so these drawings go one under the other at full size
+    let y = 0
+    let svg = ''
+    for (const g of groups) {
+      svg += `<g transform="translate(${f1(-(g.box.x0 + g.box.x1) / 2)} ${f1(y - g.box.y0)})">${g.svg}</g>`
+      y += g.box.y1 - g.box.y0 + 12
+    }
+    const half = Math.max(...groups.map((g) => (g.box.x1 - g.box.x0) / 2))
+    return picFrame(svg, { x0: -half, x1: half, y0: 0, y1: y - 12 })
+  }
+  const gap = pic.forms ? 36 : 22
+  const top = Math.min(...groups.map((g) => g.box.y0))
+  const bottom = Math.max(...groups.map((g) => g.box.y1))
+  let x = 0
+  let svg = ''
+  groups.forEach((g, i) => {
+    const dx = x - g.box.x0
+    svg += `<g transform="translate(${f1(dx)} 0)">${g.svg}</g>`
+    const caption = pic.captions?.[i]
+    if (caption) svg += `<text class="mb-pic-cap" x="${f1(dx + (g.box.x0 + g.box.x1) / 2)}" y="${f1(bottom + 15)}">${esc(caption)}</text>`
+    x += g.box.x1 - g.box.x0
+    if (i < groups.length - 1) {
+      // two drawings of the same molecule get the double arrow chemists put between resonance structures
+      if (pic.forms) svg += `<text class="mb-pic-swap" x="${f1(x + gap / 2)}" y="${f1((top + bottom) / 2 + 6)}">↔</text>`
+      x += gap
+    }
+  })
+  return picFrame(svg, { x0: 0, x1: x, y0: top, y1: bottom + (pic.captions ? 20 : 0) })
+}
+
+/** Two bonded atoms with the course table's electronegativity under each. The shared pair sits
+ *  nearer the atom that pulls harder. */
+function pairFigure(pic: Extract<TermPicture, { kind: 'pair' }>): string {
+  const pol = bondPolarity(pic.a, pic.b)
+  const L = 108
+  const ra = picR(pic.a) + 3
+  const rb = picR(pic.b) + 3
+  const hiRight = pol.negative === pic.b
+  const from = ra + 1.5
+  const to = L - rb - 1.5
+  const at = from + (to - from) * (hiRight ? 0.7 : 0.3)
+  const below = Math.max(ra, rb) + 18
+  let svg = `<line class="mb-pic-bond" x1="${f1(from)}" y1="0" x2="${f1(to)}" y2="0"/>${picDots(at, 0, { x: 1, y: 0 })}${picAtom(pic.a, 0, 0, ra)}${picAtom(pic.b, L, 0, rb)}`
+  svg += `<text class="mb-pic-num" x="0" y="${below}">${courseEN(pic.a)}</text><text class="mb-pic-num" x="${L}" y="${below}">${courseEN(pic.b)}</text>`
+  const box: PicBox = { x0: -ra - 16, x1: L + rb + 16, y0: -Math.max(ra, rb) - 3, y1: below + 5 }
+  if (pic.arrow) {
+    const y = box.y0 - 8
+    svg += picArrow(hiRight ? 8 : L - 8, y, hiRight ? L - 8 : 8, y, 'is-bond')
+    svg += `<text class="mb-pic-delta" x="${hiRight ? 0 : L}" y="${f1(y - 9)}">δ+</text><text class="mb-pic-delta" x="${hiRight ? L : 0}" y="${f1(y - 9)}">δ−</text>`
+    box.y0 = y - 24
+  }
+  if (pic.sum) {
+    svg += `<text class="mb-pic-sum" x="${L / 2}" y="${below + 22}">${esc(pic.sum)}</text>`
+    box.y1 = below + 28
+  }
+  return picFrame(svg, box)
+}
+
+const rotX = (p: V3, a: number): V3 => [p[0], p[1] * Math.cos(a) - p[2] * Math.sin(a), p[1] * Math.sin(a) + p[2] * Math.cos(a)]
+const rotY = (p: V3, a: number): V3 => [p[0] * Math.cos(a) + p[2] * Math.sin(a), p[1], -p[0] * Math.sin(a) + p[2] * Math.cos(a)]
+const rotZ = (p: V3, a: number): V3 => [p[0] * Math.cos(a) - p[1] * Math.sin(a), p[0] * Math.sin(a) + p[1] * Math.cos(a), p[2]]
+const dot3 = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+const unit3 = (a: V3): V3 => {
+  const len = Math.hypot(a[0], a[1], a[2]) || 1
+  return [a[0] / len, a[1] / len, a[2] / len]
+}
+/** The textbook seats for a shape, turned so the drawing reads well on a page: x to the right, y
+ *  up, z toward the reader. Lone pairs go to the top where the shape allows it, one bond comes
+ *  toward the reader, and the whole thing is tipped forward a little. Bonded atoms first. */
+function viewSeats(bonded: number, lonePairs: number, steep = false): V3[] {
+  const seats = idealDirs(bonded, lonePairs) ?? []
+  const n = bonded + lonePairs
+  const deg = Math.PI / 180
+  if (n <= 2) return seats
+  if (n === 3) {
+    // the three seats lie flat: turn their plane to face the reader, then put the lone pair, or the first atom, on top
+    const flat = seats.map((p) => rotX(p, -90 * deg))
+    const up = flat[lonePairs > 0 ? n - 1 : 0]!
+    const turn = Math.PI / 2 - Math.atan2(up[1], up[0])
+    return flat.map((p) => rotZ(p, turn))
+  }
+  if (n === 4) {
+    const lone = seats.slice(bonded)
+    const up = unit3(lone.length ? lone.reduce<V3>((a, p) => [a[0] + p[0], a[1] + p[1], a[2] + p[2]], [0, 0, 0]) : seats[0]!)
+    const ref = seats[lone.length ? 0 : 1]!
+    const along = dot3(ref, up)
+    const ex = unit3([ref[0] - along * up[0], ref[1] - along * up[1], ref[2] - along * up[2]])
+    const ez: V3 = [ex[1] * up[2] - ex[2] * up[1], ex[2] * up[0] - ex[0] * up[2], ex[0] * up[1] - ex[1] * up[0]]
+    const spin = (lonePairs === 2 ? 205 : 200) * deg
+    // seen from higher up when arrows are drawn beside the bonds, so the bond that comes forward is long enough for one
+    return seats.map((p) => rotX(rotY([dot3(p, ex), dot3(p, up), dot3(p, ez)], -spin), (steep ? 35 : 14) * deg))
+  }
+  // Five or six seats: the ones on the axis stay upright. The ring around the middle is turned so that no atom
+  // sits straight in front of the middle atom, and tipped far enough forward to tell front from back.
+  // With five seats a single lone pair goes to the left, and two lone pairs go to the left, front and back.
+  const spin = (n === 5 ? (lonePairs === 2 ? 0 : 300) : 30) * deg
+  return seats.map((p) => rotX(rotY(p, -spin), (n === 5 ? 28 : 30) * deg))
+}
+
+/** A molecule drawn in its 3D shape: nearer atoms larger and on top, lone pairs as pale lobes. */
+function modelFigure(pic: Extract<TermPicture, { kind: 'model' }>): string {
+  const d = drawingOf(pic.sample)
+  const info = sampleShape(pic.sample)
+  const seats = viewSeats(info.bonded, info.lonePairs, pic.arrows !== 'none' && info.lonePairs === 1)
+  const S = 62
+  const rc = picR(d.center)
+  const box = picBox()
+  grow(box, 0, 0, rc + 2)
+  const items: { z: number; svg: string }[] = [{ z: 0, svg: picAtom(d.center, 0, 0) }]
+  let over = ''
+  const sum: V3 = [0, 0, 0]
+  d.outer.forEach((o, i) => {
+    const p = seats[i]!
+    const x = p[0] * S
+    const y = -p[1] * S
+    const len = Math.hypot(x, y)
+    const u = len > 1 ? { x: x / len, y: y / len } : { x: 0, y: 1 }
+    const ro = picR(o.el) * (1 + 0.14 * p[2])
+    grow(box, x, y, ro + 2)
+    if (len > rc + ro) items.push({ z: p[2] / 2, svg: `<line class="mb-pic-bond" x1="${f1(u.x * (rc - 1))}" y1="${f1(u.y * (rc - 1))}" x2="${f1(x - u.x * (ro - 1))}" y2="${f1(y - u.y * (ro - 1))}"/>` })
+    items.push({ z: p[2], svg: picAtom(o.el, x, y, ro) })
+    const pol = bondPolarity(d.center, o.el)
+    if (pic.arrows === 'none' || pol.kind === 'nonpolar') return
+    const out = pol.negative === o.el ? 1 : -1
+    for (let k = 0; k < 3; k++) sum[k]! += p[k]! * out * pol.tenths
+    // the arrow runs beside the bond, between the two atoms, on the side that is higher on the page
+    let nx = -u.y
+    let ny = u.x
+    if (ny > 0.01 || (Math.abs(ny) <= 0.01 && nx < 0)) {
+      nx = -nx
+      ny = -ny
+    }
+    const side = 13
+    const a = rc
+    const b = len - ro * 0.75
+    if (b - a < 16) return
+    const [s, e] = out === 1 ? [a, b] : [b, a]
+    over += picArrow(u.x * s + nx * side, u.y * s + ny * side, u.x * e + nx * side, u.y * e + ny * side, 'is-bond')
+    grow(box, u.x * a + nx * side, u.y * a + ny * side, 6)
+    grow(box, u.x * b + nx * side, u.y * b + ny * side, 6)
+  })
+  for (let i = info.bonded; i < seats.length; i++) {
+    const p = seats[i]!
+    const x = p[0] * S * 0.64
+    const y = -p[1] * S * 0.64
+    grow(box, x, y, 12)
+    items.push({ z: p[2] / 2, svg: `<g transform="translate(${f1(x)} ${f1(y)}) rotate(${f1((Math.atan2(y, x) * 180) / Math.PI + 90)})"><ellipse class="mb-pic-lobe" rx="10" ry="6.6"/><circle class="mb-pic-dot" cx="-3.9" r="2.5"/><circle class="mb-pic-dot" cx="3.9" r="2.5"/></g>` })
+  }
+  if (pic.arrows === 'net') {
+    const len = Math.hypot(sum[0], sum[1])
+    if (len > 1e-6) {
+      // the sum of the bond arrows, drawn beside the molecule so that it covers no atom
+      const ux = sum[0] / len
+      const uy = -sum[1] / len
+      const px = Math.abs(ux) > Math.abs(uy) ? 0 : box.x1 + 20
+      const py = Math.abs(ux) > Math.abs(uy) ? box.y1 + 20 : (box.y0 + box.y1) / 2
+      over += picArrow(px - ux * 27, py - uy * 27, px + ux * 27, py + uy * 27, 'is-net')
+      grow(box, px - ux * 27, py - uy * 27, 8)
+      grow(box, px + ux * 27, py + uy * 27, 8)
+    }
+  }
+  if (pic.angle && d.outer.length >= 2) {
+    // the angle between the first two bonds, with the shape table's number beside it
+    const flat = (p: V3) => {
+      const len = Math.hypot(p[0], p[1]) || 1
+      return { x: p[0] / len, y: -p[1] / len }
+    }
+    const a = flat(seats[0]!)
+    const b = flat(seats[1]!)
+    const r = rc + 9
+    const mid = { x: a.x + b.x, y: a.y + b.y }
+    const ml = Math.hypot(mid.x, mid.y) || 1
+    over += `<path class="mb-pic-arc" d="M${f1(a.x * r)} ${f1(a.y * r)}A${r} ${r} 0 0 ${a.x * b.y - a.y * b.x > 0 ? 1 : 0} ${f1(b.x * r)} ${f1(b.y * r)}"/><text class="mb-pic-angle" x="${f1((mid.x / ml) * (r + 17))}" y="${f1((mid.y / ml) * (r + 17) + 4)}">${esc(info.angle)}</text>`
+    grow(box, (mid.x / ml) * (r + 17), (mid.y / ml) * (r + 17), 18)
+  }
+  return picFrame(items.sort((p, q) => p.z - q.z).map((it) => it.svg).join('') + over, box)
+}
+
+/** The picture in a term's card, with its description for a screen reader. */
+function termPicture(pic: TermPicture, label: string): string {
+  const inner =
+    pic.kind === 'shells' ? shellsFigure(pic.el) : pic.kind === 'table' ? periodicTable(new Set(pic.els), false) : pic.kind === 'lewis' ? lewisFigure(pic) : pic.kind === 'pair' ? pairFigure(pic) : modelFigure(pic)
+  return `<div class="mb-term-pic" data-pic="${pic.kind}" role="img" aria-label="${esc(label)}">${inner}</div>`
+}
+
+/** A term's card: its name, what the word means, an example with a picture, one thing to keep in mind, and the terms next to it. */
+function termCardHtml(c: TermCard): string {
+  return `<div class="mb-termcard-in">
+    <div class="mb-termcard-top"><h3 id="mb-term-name">${esc(c.name)}</h3><button type="button" class="mb-termcard-x" data-term-close data-key="term-close" aria-label="${TERM_WORDS.close}">${ICON.cross}</button></div>
+    ${c.also ? `<p class="mb-term-also">${esc(c.also)}</p>` : ''}
+    <p class="mb-term-means">${esc(c.means)}</p>
+    <section class="mb-term-ex"><h4>${TERM_WORDS.example}</h4>${termPicture(c.picture, c.pictureLabel)}<p>${esc(c.example)}</p></section>
+    ${c.note ? `<section class="mb-term-note"><h4>${TERM_WORDS.note}</h4><p>${esc(c.note)}</p></section>` : ''}
+    ${c.related.length ? `<nav class="mb-term-rel" aria-label="${TERM_WORDS.related}"><h4>${TERM_WORDS.related}</h4><div>${c.related.map((r) => `<button type="button" class="mb-term-go" data-term-go="${r.id}" data-key="term-go-${r.id}">${esc(r.name)}</button>`).join('')}</div></nav>` : ''}
   </div>`
 }
 
@@ -224,8 +614,8 @@ function rail(s: State): string {
   return `<ol class="mb-rail" aria-label="Steps" style="--n:${STEPS.length};--p:${Math.min(open, STEPS.length - 1) / (STEPS.length - 1)}">${items}</ol>`
 }
 
-/** Main-group columns of the periodic table, periods 1 to 5, with this problem's atoms marked. */
-function periodicTable(p: Problem, withValence: boolean): string {
+/** Main-group columns of the periodic table, periods 1 to 5, with the atoms in `mine` marked. */
+function periodicTable(mine: Set<string>, withValence: boolean): string {
   const groups = [1, 2, 13, 14, 15, 16, 17, 18]
   const rows = [
     ['H', '', '', '', '', '', '', 'He'],
@@ -234,7 +624,6 @@ function periodicTable(p: Problem, withValence: boolean): string {
     ['K', 'Ca', 'Ga', 'Ge', 'As', 'Se', 'Br', 'Kr'],
     ['Rb', 'Sr', 'In', 'Sn', 'Sb', 'Te', 'I', 'Xe'],
   ]
-  const mine = new Set<string>(elementsOf(p))
   const head = `<tr><th scope="row">Group</th>${groups.map((g) => `<th scope="col">${g}</th>`).join('')}</tr>`
   const val = withValence ? `<tr class="mb-pt-val"><th scope="row">Valence electrons</th>${groups.map((_, i) => `<td>${i + 1}</td>`).join('')}</tr>` : ''
   const body = rows.map((r) => `<tr><th scope="row"></th>${r.map((sym) => `<td${mine.has(sym) ? ' class="is-mine"' : ''}>${sym}</td>`).join('')}</tr>`).join('')
@@ -246,8 +635,9 @@ function hints(s: State): string {
   if (!shown.length) return ''
   const p = store.problemOf(s)
   // the periodic table goes with the hints about one atom's count; the hints about the total have no table
-  const table = s.step === 'count' && !store.totalNext(s) ? periodicTable(p, shown.length >= 2) : ''
-  return `<div class="mb-hints" data-k="hints" data-kv="">${shown.map((h) => `<p class="mb-hint">${ICON.hint}<span>${esc(h)}</span></p>`).join('')}${table}</div>`
+  const table = s.step === 'count' && !store.totalNext(s) ? periodicTable(new Set<string>(elementsOf(p)), shown.length >= 2) : ''
+  const seen = new Set<string>()
+  return `<div class="mb-hints" data-k="hints" data-kv="">${shown.map((h) => `<p class="mb-hint">${ICON.hint}<span>${rich(h, seen)}</span></p>`).join('')}${table}</div>`
 }
 
 function stepCount(s: State, p: Problem): string {
@@ -287,7 +677,7 @@ function stepCount(s: State, p: Problem): string {
           ${coach(c.totalFeedback, p)}
         </div>`
   }
-  return `<p class="mb-body">Valence electrons are the electrons in an atom's outer shell. Set the number for each atom.</p>
+  return `<p class="mb-body">${rich("Valence electrons are the electrons in an atom's outer shell. Set the number for each atom.")}</p>
     <div class="mb-rows" data-k="rows" data-kv="">${rows}</div>
     ${allRight ? '' : `<button class="mb-btn mb-btn-soft" data-act="count-check" data-key="count-check" data-cue="count-check">Check my counts</button>`}
     ${total}`
@@ -311,7 +701,7 @@ function stepPlace(s: State, p: Problem): string {
   return `${question}
     ${
       ready
-        ? `<p class="mb-body">${esc(placeInstruction(p))}</p>
+        ? `<p class="mb-body">${rich(placeInstruction(p))}</p>
            ${done ? '' : howBox(howTo('place', p))}
            ${fb(done ? `All ${of} atoms are on the board, each with its own valence electrons.` : `${placed} of ${of} atoms on the board.`, done ? 'good' : 'info')}`
         : ''
@@ -320,14 +710,14 @@ function stepPlace(s: State, p: Problem): string {
 
 function stepBond(s: State, p: Problem): string {
   const st = bondStatus(p, s.s)
-  return `<p class="mb-body">${esc(bondInstruction(p))}</p>${st.done ? '' : howBox(howTo('bond', p))}${fb(st.text, st.tone)}`
+  return `<p class="mb-body">${rich(bondInstruction(p))}</p>${st.done ? '' : howBox(howTo('bond', p))}${fb(st.text, st.tone)}`
 }
 
 function checklist(rows: CheckRow[]): string {
   return `<ul class="mb-checks" data-k="checks" data-kv="" data-cue="checks">${rows
     .map(
       (r) =>
-        `<li data-state="${r.state}"><span class="mb-mark" data-ok="${r.state === 'pass'}" data-wait="${r.state === 'wait'}">${r.state === 'pass' ? ICON.check : r.state === 'fail' ? ICON.cross : ''}</span><span>${esc(r.text)}<span class="mb-sr">${r.state === 'pass' ? ' (done)' : r.state === 'fail' ? ' (not yet)' : ''}</span></span></li>`,
+        `<li data-state="${r.state}"><span class="mb-mark" data-ok="${r.state === 'pass'}" data-wait="${r.state === 'wait'}">${r.state === 'pass' ? ICON.check : r.state === 'fail' ? ICON.cross : ''}</span><span>${rich(r.text)}<span class="mb-sr">${r.state === 'pass' ? ' (done)' : r.state === 'fail' ? ' (not yet)' : ''}</span></span></li>`,
     )
     .join('')}</ul>`
 }
@@ -335,29 +725,29 @@ function checklist(rows: CheckRow[]): string {
 function stepCheck(s: State, p: Problem): string {
   const notes = finishedNotes(p, s.s)
   const done = store.stepDone('check', s)
-  return `<p class="mb-body">Count the electrons around each atom. Shared electrons count for both atoms in the bond.</p>
+  return `<p class="mb-body">${rich('Count the electrons around each atom. Shared electrons count for both atoms in the bond.')}</p>
     ${checklist(checkRows(p, s.s))}
     ${done ? fb(`This is the Lewis structure of ${p.name}.`, 'good') : coach(checkCoach(p, s.s))}
     ${done ? '' : howBox(howTo('check', p))}
-    ${notes.map((n) => `<p class="mb-note">${esc(n)}</p>`).join('')}`
+    ${notes.map((n) => `<p class="mb-note">${rich(n)}</p>`).join('')}`
 }
 
 /** The table of what is known about the molecule. `more` adds rows under the shape's three (polarity, bonds, hybridization). */
 function readout(p: Problem | null, center: El, info: ShapeInfo, mixed: boolean, more: { label: string; value: string }[] = [], tryIt = true): string {
   const r = shapeReadout(p, center, info, mixed)
   return `<dl class="mb-readout">
-      <div><dt>Shape</dt><dd class="is-big">${esc(cap(r.shape))}</dd></div>
-      <div><dt>Electron groups</dt><dd>${esc(r.groups)}</dd></div>
-      <div><dt>Bond angle</dt><dd>${esc(r.angle)}</dd></div>
-      ${more.map((row) => `<div><dt>${esc(row.label)}</dt><dd>${esc(row.value)}</dd></div>`).join('')}
+      <div><dt>${rich('Shape')}</dt><dd class="is-big">${rich(cap(r.shape))}</dd></div>
+      <div><dt>${rich('Electron groups')}</dt><dd>${esc(r.groups)}</dd></div>
+      <div><dt>${rich('Bond angle')}</dt><dd>${esc(r.angle)}</dd></div>
+      ${more.map((row) => `<div><dt>${rich(row.label)}</dt><dd>${esc(row.value)}</dd></div>`).join('')}
     </dl>
-    ${r.why ? `<p class="mb-note">${esc(r.why)}</p>` : ''}
+    ${r.why ? `<p class="mb-note">${rich(r.why)}</p>` : ''}
     ${tryIt ? '<p class="mb-body mb-try">Drag an atom or a lone pair, then let go. The other groups move out of the way.</p>' : ''}`
 }
 
 /** The atoms of the bonds in question with the course table's electronegativity under each. */
 function enStrip(els: El[]): string {
-  return `<figure class="mb-en" data-k="en" data-kv=""><figcaption>${esc(DIPOLE_WORDS.table)}</figcaption><ul>${els
+  return `<figure class="mb-en" data-k="en" data-kv=""><figcaption>${rich(DIPOLE_WORDS.table)}</figcaption><ul>${els
     .map((el) => `<li>${ball(el, 'is-small')}<span>${esc(cap(lower(el)))}</span><b>${courseEN(el)}</b></li>`)
     .join('')}</ul></figure>`
 }
@@ -365,7 +755,7 @@ function enStrip(els: El[]): string {
 const DRAW_ICON = '<svg class="mb-draw-icon" viewBox="0 0 34 16" aria-hidden="true"><path d="M3 8h24M8 3.5v9"/><path class="is-head" d="M31.5 8l-8-4.6v9.2z"/></svg>'
 /** What the arrows on the board are. */
 function dipoleKey(net: boolean): string {
-  return `<ul class="mb-key" data-k="dipole-key" data-kv="${net}"><li><i class="is-bond"></i>${esc(DIPOLE_WORDS.bondKey)}</li>${net ? `<li><i class="is-net"></i>${esc(DIPOLE_WORDS.netKey)}</li>` : ''}</ul>`
+  return `<ul class="mb-key" data-k="dipole-key" data-kv="${net}"><li><i class="is-bond"></i>${rich(DIPOLE_WORDS.bondKey)}</li>${net ? `<li><i class="is-net"></i>${rich(DIPOLE_WORDS.netKey)}</li>` : ''}</ul>`
 }
 
 function stepPolar(s: State, p: Problem): string {
@@ -381,7 +771,7 @@ function stepPolar(s: State, p: Problem): string {
       // a polar bond is answered on the board, by drawing its arrow; a nonpolar bond with the button
       const q = bondQuestion(k.center, k.terminal)
       const none = `<button class="mb-choice" data-act="bond-polar" data-el="${k.terminal}" data-answer="nonpolar" data-key="pol-${k.terminal}-nonpolar" data-cue="no-arrow" data-state="${a?.pick === 'nonpolar' ? 'wrong' : 'idle'}">${esc(q.none)}</button>`
-      html += `<p class="mb-q">${esc(q.ask)}</p><p class="mb-body mb-sub">${esc(q.sub)}</p><p class="mb-body mb-draw">${DRAW_ICON}<span>${esc(q.draw)}</span></p><div class="mb-choices">${none}</div>${coach(a?.coach)}`
+      html += `<p class="mb-q">${rich(q.ask)}</p><p class="mb-body mb-sub">${rich(q.sub)}</p><p class="mb-body mb-draw">${DRAW_ICON}<span>${rich(q.draw)}</span></p><div class="mb-choices">${none}</div>${coach(a?.coach)}`
     }
   }
   if (asked !== null) return html
@@ -390,7 +780,7 @@ function stepPolar(s: State, p: Problem): string {
   if (net.pick === null) {
     const q = netQuestion(p)
     const chips = q.choices.map((c) => `<button class="mb-choice" data-act="net-polar" data-polar="${c.polar}" data-key="net-${c.polar ? 'polar' : 'nonpolar'}" data-state="idle">${esc(c.label)}</button>`).join('')
-    return `${html}${shown ? dipoleKey(false) : ''}<p class="mb-q">${esc(q.ask)}</p><p class="mb-body mb-sub">${esc(q.sub)}</p><div class="mb-choices" data-cue="net">${chips}</div>`
+    return `${html}${shown ? dipoleKey(false) : ''}<p class="mb-q">${rich(q.ask)}</p><p class="mb-body mb-sub">${rich(q.sub)}</p><div class="mb-choices" data-cue="net">${chips}</div>`
   }
   html += net.right ? fb(net.text, 'good') : coach(net.coach)
   if (!m.polar) return `${html}${shown ? dipoleKey(false) : ''}`
@@ -398,7 +788,7 @@ function stepPolar(s: State, p: Problem): string {
   const arrow = s.polar.arrow
   if (arrow.right) return `${html}${fb(arrow.text, 'good')}${dipoleKey(true)}`
   const q = netArrowQuestion(p)
-  return `${html}${dipoleKey(false)}<p class="mb-q">${esc(q.ask)}</p><p class="mb-body mb-draw is-net">${DRAW_ICON}<span>${esc(q.draw)}</span></p>${coach(arrow.coach)}`
+  return `${html}${dipoleKey(false)}<p class="mb-q">${rich(q.ask)}</p><p class="mb-body mb-draw is-net">${DRAW_ICON}<span>${rich(q.draw)}</span></p>${coach(arrow.coach)}`
 }
 
 function stepOrbitals(s: State, p: Problem): string {
@@ -416,14 +806,14 @@ function stepOrbitals(s: State, p: Problem): string {
           <button data-act="bond-count" data-kind="${kind}" data-d="1" data-key="inc-${kind}" aria-label="One more" ${n >= 9 ? 'disabled' : ''}>+</button>
         </div>
       </div>`
-    return `<p class="mb-q">${esc(q.ask)}</p><p class="mb-body mb-sub">${esc(q.sub)}</p>
+    return `<p class="mb-q">${rich(q.ask)}</p><p class="mb-body mb-sub">${rich(q.sub)}</p>
       <div class="mb-rows" data-k="rows" data-kv="" data-cue="bond-counts">${row('sigma', q.sigma, o.sigma)}${row('pi', q.pi, o.pi)}</div>
       <button class="mb-btn mb-btn-soft" data-act="bonds-check" data-key="bonds-check">${esc(q.check)}</button>
       ${coach(o.counts.coach)}`
   }
   if (!o.hybrid.right) {
     const chips = HYBRIDS.map((h) => `<button class="mb-choice is-num" data-act="hybrid" data-h="${h}" data-key="hyb-${h}" data-state="${o.hybrid.pick === h ? 'wrong' : 'idle'}">${esc(hybridLabel(h))}</button>`).join('')
-    return `${fb(o.counts.text, 'good')}<p class="mb-q">${esc(hybridQuestion(p.center))}</p><div class="mb-choices" data-cue="hybrid">${chips}</div>${coach(o.hybrid.coach)}`
+    return `${fb(o.counts.text, 'good')}<p class="mb-q">${rich(hybridQuestion(p.center))}</p><div class="mb-choices" data-cue="hybrid">${chips}</div>${coach(o.hybrid.coach)}`
   }
   return `${fb(o.counts.text, 'good')}${fb(o.hybrid.text, 'good')}${readout(p, p.center, info, mixedOuter(s.s), profile(p, s.s), false)}${fb(finishedLine(p), 'good')}`
 }
@@ -439,8 +829,8 @@ function stepShape(s: State, p: Problem): string {
     const groupChips = [2, 3, 4, 5, 6]
       .map((n) => `<button class="mb-choice is-num" data-act="groups" data-n="${n}" data-key="grp-${n}" data-state="${sh.groups === n ? 'wrong' : 'idle'}">${n}</button>`)
       .join('')
-    return `<p class="mb-q">How many electron groups are around ${c}?</p>
-      <p class="mb-body mb-sub">A lone pair (2 unshared electrons on one atom) is 1 group. A bond is 1 group, even a double or triple bond.</p>
+    return `<p class="mb-q">${rich(`How many electron groups are around ${c}?`)}</p>
+      <p class="mb-body mb-sub">${rich('A lone pair (2 unshared electrons on one atom) is 1 group. A bond is 1 group, even a double or triple bond.')}</p>
       <div class="mb-choices" data-cue="groups">${groupChips}</div>
       ${coach(sh.groupsCoach)}`
   }
@@ -449,7 +839,7 @@ function stepShape(s: State, p: Problem): string {
       .map((name) => `<button class="mb-choice" data-act="shape" data-name="${name}" data-key="shp-${name}" data-state="idle">${cap(name)}</button>`)
       .join('')
     return `${fb(sh.groupsFeedback, 'good')}
-      <p class="mb-q">The groups push each other as far apart as they can get. What shape do the atoms make?</p>
+      <p class="mb-q">${rich('The groups push each other as far apart as they can get. What shape do the atoms make?')}</p>
       <div class="mb-choices" data-cue="shapes">${chips}</div>`
   }
   return `${sh.pickRight ? fb(sh.pickFeedback, 'good') : coach(sh.pickCoach)}${readout(p, p.center, info, mixedOuter(s.s))}`
@@ -462,10 +852,10 @@ function freePanel(s: State): string {
   const charge = a.charge === 0 ? '0' : chargeLabel(a.charge).replace(/^([+−])$/, '1$1')
   // a middle atom from period 3 onward that holds more than 8
   const held = center ? shellCount(s.s, center.id) : 0
-  const note = a.complete && center && held > 8 ? `<p class="mb-note">${cap(lower(center.el))} has ${held} electrons around it. Atoms from period 3 onward can hold more than 8.</p>` : ''
+  const note = a.complete && center && held > 8 ? `<p class="mb-note">${rich(`${cap(lower(center.el))} has ${held} electrons around it. Atoms from period 3 onward can hold more than 8.`)}</p>` : ''
   const shapeBlock =
     s.view === 'shape' && info && center
-      ? `${readout(null, center.el, info, mixedOuter(s.s), profile(null, s.s))}${polarity(s.s) && !info.diatomic ? `<p class="mb-note">${esc(polarityNote(polarity(s.s)!, info))}</p>` : ''}`
+      ? `${readout(null, center.el, info, mixedOuter(s.s), profile(null, s.s))}`
       : `<button class="mb-btn mb-btn-soft" data-act="view" data-view="shape" data-key="see-shape" ${info ? '' : 'disabled'}>See the 3D shape</button>
          ${
            a.complete && !info && s.s.atoms.length > 1
@@ -476,10 +866,35 @@ function freePanel(s: State): string {
     ${checklist(checkRows(null, s.s))}
     ${s.s.atoms.length ? `<p class="mb-charge">Charge of everything on the board: <b>${charge}</b></p>` : ''}
     ${note}
-    ${shapeBlock}`
+    ${shapeBlock}
+    ${freePolar(s, a.complete, info)}`
+}
+
+/** Free build: each element's electronegativity, each kind of bond worked from the table, and once
+ *  every shell is full, whether the whole molecule is polar. Nothing is asked (D-0029). */
+function freePolar(s: State, complete: boolean, info: ShapeInfo | null): string {
+  if (!s.s.atoms.length) return ''
+  const els = [...new Set(s.s.atoms.map((x) => x.el))]
+  let html = enStrip(els)
+  const kinds = bondKindsOn(s.s)
+  if (!kinds.length) return html
+  html += `<h3 class="mb-h3">${esc(FREE_POLAR_WORDS.bonds)}</h3><ul class="mb-pol" data-k="free-bonds" data-kv="${kinds.map((k) => `${k.a}${k.b}`).join(' ')}">${kinds
+    .map((k) => `<li data-pol="${k.byCharge ? 'charge' : k.pol.kind}"><b>${esc(bondName(k.a, k.b))}</b><span>${rich(freeBondLine(k.a, k.b, k.pol, k.byCharge))}</span></li>`)
+    .join('')}</ul>`
+  const m = polarity(s.s)
+  html += `<h3 class="mb-h3">${esc(FREE_POLAR_WORDS.net)}</h3>`
+  // one middle atom with an odd electron has no dipoles worked out yet: that is a shell to fill, not a chain
+  if (!m) return `${html}<p class="mb-note" data-k="free-wait" data-kv="">${rich(assess(s.s).topology.kind === 'star' ? FREE_POLAR_WORDS.notFull : FREE_POLAR_WORDS.notStar)}</p>`
+  const arrows = m.bonds.some((b) => b.out !== 0)
+  if (!complete) return `${html}<p class="mb-note" data-k="free-wait" data-kv="">${rich(FREE_POLAR_WORDS.notFull)}</p>${arrows ? dipoleKey(false) : ''}`
+  return `${html}<p class="mb-body" data-k="free-net" data-kv="${m.depends ? 'depends' : m.polar}">${rich(freeNetLine(m, info))}</p>${arrows ? dipoleKey(freeNetShown(s, s.s)) : ''}`
 }
 
 function panel(s: State): string {
+  // each screen highlights a term where it first appears
+  termsSeen = new Set()
+  termsPlain = plainTerms(s.mode === 'guided' ? s.step : null)
+  termsMade = 0
   if (s.mode === 'guided' && s.pickerOpen) return `${header(s)}${picker(s)}`
   if (s.mode === 'free') {
     return `${header(s)}<div class="mb-scroll"><div class="mb-step" tabindex="-1">${freePanel(s)}</div></div>`
@@ -510,10 +925,24 @@ const showsDipoles = (s: State) => s.mode === 'guided' && (s.step === 'polar' ||
  *  answered right, and the net dipole once the student has drawn it the right way. Free build gives
  *  polarity as a row of its table and draws no arrows. */
 function dipolesFor(s: State, st: Structure): SceneInput['dipoles'] {
+  if (s.mode === 'free') {
+    // free build: every polar bond's arrow as soon as it is on the board, and the net dipole on the 3D shape of a finished polar molecule
+    const f = polarity(st)
+    if (!f) return null
+    const bonds = f.bonds.filter((b) => b.out !== 0).map((b) => ({ atomId: b.atomId, out: b.out as -1 | 1, size: b.size }))
+    return bonds.length ? { center: f.center.id, bonds, net: freeNetShown(s, st), plus: DIPOLE_WORDS.plus, minus: DIPOLE_WORDS.minus, netLabel: DIPOLE_WORDS.net } : null
+  }
   const m = showsDipoles(s) ? polarity(st) : null
   if (!m) return null
   const bonds = m.bonds.filter((b) => b.out !== 0 && s.polar.bonds[b.el]?.right).map((b) => ({ atomId: b.atomId, out: b.out as -1 | 1, size: b.size }))
   return { center: m.center.id, bonds, net: m.polar && s.polar.arrow.right, plus: DIPOLE_WORDS.plus, minus: DIPOLE_WORDS.minus, netLabel: DIPOLE_WORDS.net }
+}
+/** Free build draws the net dipole on the 3D shape of a finished polar molecule. Not when the answer
+ *  depends on which corners unlike outer atoms take. */
+function freeNetShown(s: State, st: Structure): boolean {
+  if (s.mode !== 'free' || s.view !== 'shape') return false
+  const m = polarity(st)
+  return !!m && m.polar && !m.depends && assess(st).complete
 }
 /** What a student can draw on the board now, the last arrow that was drawn wrong, and what a
  *  screen reader says for each atom an arrow can start or end on. */
@@ -601,7 +1030,7 @@ function selectionCard(s: State, st: Structure): string {
     const showCharge = s.mode === 'free' || s.step === 'check'
     return `<div class="mb-sel" data-k="selection" data-kv="${atom.id}">
       ${ball(atom.el)}
-      <div class="mb-sel-text"><b>${name}</b><span>${report && report.count > report.target && report.status === 'full' ? report.count : `${report?.count ?? 0} of ${report?.target ?? 8}`} electrons${showCharge ? `<span class="mb-sel-fc">, formal charge ${esc(formalChargeSum(st, atom.id))}</span>` : ''}</span></div>
+      <div class="mb-sel-text"><b>${name}</b><span>${report && report.count > report.target && report.status === 'full' ? report.count : `${report?.count ?? 0} of ${report?.target ?? 8}`} electrons${showCharge ? `<span class="mb-sel-fc">, formal charge ${esc(formalChargeSum(st, atom.id))}</span>` : ''}${s.mode === 'free' ? `<span class="mb-sel-fc">, electronegativity ${courseEN(atom.el)}</span>` : ''}</span></div>
       <div class="mb-sel-acts">
         <button class="mb-btn mb-btn-soft" data-act="e-plus" data-key="e-plus">+ electron</button>
         <button class="mb-btn mb-btn-soft" data-act="e-minus" data-key="e-minus">− electron</button>
@@ -615,7 +1044,7 @@ function selectionCard(s: State, st: Structure): string {
   if (!bond || !A || !B) return ''
   const kind = bond.order === 1 ? 'single' : bond.order === 2 ? 'double' : 'triple'
   return `<div class="mb-sel" data-k="selection" data-kv="${bond.id}">
-    <div class="mb-sel-text"><b>${ELEMENTS[A.el].name}–${ELEMENTS[B.el].name.toLowerCase()} ${kind} bond</b><span>${bond.order * 2} shared electrons</span></div>
+    <div class="mb-sel-text"><b>${ELEMENTS[A.el].name}–${ELEMENTS[B.el].name.toLowerCase()} ${kind} bond</b><span>${bond.order * 2} shared electrons${s.mode === 'free' ? `, ΔEN ${bondPolarity(A.el, B.el).delta}` : ''}</span></div>
     <div class="mb-sel-acts">
       <button class="mb-btn mb-btn-soft" data-act="bond-plus" data-key="bond-plus" ${bond.order >= 3 ? 'disabled' : ''}>Add a bond</button>
       <button class="mb-btn mb-btn-soft" data-act="bond-minus" data-key="bond-minus">Remove a bond</button>
@@ -710,7 +1139,9 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
       <div class="mb-dock"></div>
     </section>
     <aside class="mb-panel" aria-label="Guide"></aside>
-    <div class="mb-fx" aria-hidden="true"></div>`
+    <div class="mb-fx" aria-hidden="true"></div>
+    <div class="mb-termscrim" hidden></div>
+    <div class="mb-termcard" role="dialog" aria-modal="false" aria-labelledby="mb-term-name" tabindex="-1" hidden></div>`
   const q = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel)!
   const stage = q('.mb-stage')
   const wrap = q('.mb-canvas-wrap')
@@ -720,6 +1151,10 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
   const lastHtml: Record<string, string> = {}
   const opened = performance.now()
   const calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  const termEl = q('.mb-termcard')
+  const termScrim = q('.mb-termscrim')
+  /** The key term whose card is open, and the highlighted word it was opened from. */
+  let termOpen: { id: TermId; from: HTMLElement | null } | null = null
 
   // The atoms drawn in the panel and the tray look toward the pointer, like the ones on the board.
   let pointerAt: { x: number; y: number } | null = null
@@ -921,7 +1356,7 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
     let carry: { x: number; y: number; size: number; el: El } | null = null
     let line: { a: { x: number; y: number }; b: { x: number; y: number }; go: number } | null = null
     // the hand waits for the new step's text to arrive, and stays away while the student is acting
-    const handFree = age > 0.7 && !pressed && !scene.busy
+    const handFree = age > 0.7 && !pressed && !scene.busy && !termOpen
     const round = calm ? 1.2 : ((age - 0.7) % ROUND + ROUND) % ROUND
     const circle = (at: { x: number; y: number; r: number }, pad = 7) => glow(cueShown.halos.length, at.x - box.left - at.r - pad, at.y - box.top - at.r - pad, (at.r + pad) * 2, (at.r + pad) * 2, at.r + pad)
     const rel = (p: { x: number; y: number }) => ({ x: p.x - box.left, y: p.y - box.top })
@@ -1258,6 +1693,70 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
     }
   }
 
+  // ---- key terms: the card that opens from a highlighted word
+
+  /** The highlighted word the open card belongs to, as it is on the page now. A redraw replaces the button it was opened from. */
+  const termAnchor = () => {
+    if (!termOpen) return null
+    if (termOpen.from && root.contains(termOpen.from)) return termOpen.from
+    return regions.panel.querySelector<HTMLElement>(`.mb-term[data-term="${termOpen.id}"]`)
+  }
+  const markTerms = () => {
+    // the word is marked as open only while the card shows that word's own term (a related term may have taken its place)
+    const anchor = termAnchor()
+    for (const b of root.querySelectorAll<HTMLElement>('.mb-term')) b.setAttribute('aria-expanded', String(b === anchor && b.dataset.term === termOpen?.id))
+  }
+  /** Where the card sits. Beside the panel on a wide screen, level with its word, with a small tip
+   *  that points at the word. On a phone it is a sheet that comes up from the bottom edge. */
+  const placeTerm = () => {
+    if (!termOpen) return
+    const box = root.getBoundingClientRect()
+    const wide = box.width > 880
+    termEl.dataset.side = wide ? 'beside' : 'sheet'
+    termScrim.hidden = wide
+    if (!wide) {
+      termEl.style.left = ''
+      termEl.style.top = ''
+      return
+    }
+    const pr = regions.panel.getBoundingClientRect()
+    const ar = termAnchor()?.getBoundingClientRect()
+    const w = termEl.offsetWidth
+    const h = termEl.offsetHeight
+    const at = ar ? Math.min(Math.max(ar.top + ar.height / 2 - box.top, 24), box.height - 24) : box.height / 2
+    const top = Math.min(Math.max(12, at - 58), Math.max(12, box.height - h - 12))
+    termEl.style.left = `${Math.max(12, pr.left - box.left - w - 16)}px`
+    termEl.style.top = `${top}px`
+    termEl.style.setProperty('--tip', `${Math.min(Math.max(at - top, 26), h - 26)}px`)
+  }
+  const showTerm = (id: TermId, from: HTMLElement | null) => {
+    const s = store.getState()
+    const guided = s.mode === 'guided'
+    termEl.innerHTML = termCardHtml(termCard(id, guided ? store.problemOf(s) : null, guided ? s.step : null))
+    termEl.hidden = false
+    termEl.dataset.term = id
+    termOpen = { id, from }
+    // the card pops each time it opens or moves on to another term
+    termEl.classList.remove('is-in')
+    void termEl.offsetWidth
+    termEl.classList.add('is-in')
+    placeTerm()
+    markTerms()
+    termEl.focus({ preventScroll: true })
+  }
+  /** Close the card. `refocus` puts the keyboard back on the word the card was opened from. */
+  const hideTerm = (refocus: boolean) => {
+    if (!termOpen) return
+    const back = termAnchor()
+    termOpen = null
+    termEl.hidden = true
+    termScrim.hidden = true
+    termEl.classList.remove('is-in')
+    termEl.replaceChildren()
+    markTerms()
+    if (refocus) (back ?? regions.panel.querySelector<HTMLElement>('.mb-step'))?.focus({ preventScroll: true })
+  }
+
   let toastTimer = 0
   let toastSeen = 0
   let lastStep: string | null = null
@@ -1286,6 +1785,8 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
 
   const render = (s: State) => {
     const stepKey = `${s.mode}:${s.problem}:${s.step}`
+    // a card belongs to the step it was opened in
+    if (termOpen && lastStep !== null && stepKey !== lastStep) hideTerm(false)
     paint('top', topbar(s, !!opts.onExit))
     paint('ledger', ledger(s))
     paint('checks', checkbar(s))
@@ -1295,6 +1796,7 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
     root.dataset.mode = s.mode
     root.dataset.view = s.view
     root.dataset.step = s.mode === 'guided' ? s.step : 'free'
+    if (termOpen) markTerms()
 
     const panelChanged = lastHtml.panel !== lastPanel
     lastPanel = lastHtml.panel ?? ''
@@ -1340,7 +1842,7 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
       // an atom dropped from the tray onto another atom is bonded to it, except in the place step, where bonding is the next step
       dropBonds: s.mode === 'free' || s.step === 'bond' || s.step === 'check',
       // the net dipole runs along the same line as an angle's label, so the two are never drawn together
-      angles: shown && !showsDipoles(s) ? angleMarks(s.mode === 'guided' ? store.problemOf(s) : null, shown, mixedOuter(st)) : [],
+      angles: shown && !showsDipoles(s) && !freeNetShown(s, st) ? angleMarks(s.mode === 'guided' ? store.problemOf(s) : null, shown, mixedOuter(st)) : [],
     }
     const onAtom = document.activeElement instanceof HTMLButtonElement && document.activeElement.classList.contains('mb-hit') ? document.activeElement : null
     scene.sync(input)
@@ -1372,8 +1874,41 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
     measure()
   }
 
+  // A press anywhere outside an open card closes it, and the press still does what it would have done.
+  root.addEventListener(
+    'pointerdown',
+    (e) => {
+      const target = e.target as HTMLElement
+      if (!termOpen || termEl.contains(target) || target.closest('.mb-term, .mb-termscrim')) return
+      const word = termAnchor()
+      const inCard = termEl.contains(document.activeElement)
+      hideTerm(false)
+      // The keyboard was inside the card, which is gone now. If the press lands on something that
+      // takes the focus, it has it by the next turn. If it lands on bare page, the focus goes back
+      // to the word, so a keyboard user keeps their place.
+      if (inCard) window.setTimeout(() => (document.activeElement === document.body || document.activeElement === null ? word?.focus({ preventScroll: true }) : undefined), 0)
+    },
+    { capture: true, signal: off.signal },
+  )
   root.addEventListener('click', (e) => {
-    const t = (e.target as HTMLElement).closest<HTMLElement>('[data-act]')
+    const target = e.target as HTMLElement
+    const word = target.closest<HTMLElement>('.mb-term')
+    if (word) {
+      // a second press on the word closes its card; if the card has moved on to a related term, the press brings the word's own card back
+      if (termOpen && termAnchor() === word && termOpen.id === word.dataset.term) hideTerm(true)
+      else showTerm(word.dataset.term as TermId, word)
+      return
+    }
+    const go = target.closest<HTMLElement>('[data-term-go]')
+    if (go) {
+      showTerm(go.dataset.termGo as TermId, termOpen?.from ?? null)
+      return
+    }
+    if (target.closest('[data-term-close], .mb-termscrim')) {
+      hideTerm(true)
+      return
+    }
+    const t = target.closest<HTMLElement>('[data-act]')
     if (!t || (t as HTMLButtonElement).disabled) return
     const s = store.getState()
     const sel = s.selection
@@ -1485,6 +2020,10 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
       return
     }
     const s = store.getState()
+    if (e.key === 'Escape' && termOpen) {
+      hideTerm(true)
+      return
+    }
     if (e.key === 'Escape') {
       if (s.pickerOpen) store.togglePicker(false)
       else store.clearSelection()
@@ -1499,7 +2038,12 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
     store.typeTotal(digits === '' ? null : Number(digits))
   }, on)
 
-  const ro = new ResizeObserver(measure)
+  const ro = new ResizeObserver(() => {
+    measure()
+    placeTerm()
+  })
+  // the card stays level with its word while the panel's text scrolls under it
+  regions.panel.addEventListener('scroll', () => placeTerm(), { capture: true, passive: true, signal: off.signal })
   ro.observe(stage)
   const unsubscribe = store.subscribe(render)
   render(store.getState())
@@ -1510,6 +2054,16 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
     store,
     report: () => assess(store.getState().s, store.getState().mode === 'guided' ? speciesOf(store.problemOf()) : undefined),
     nextMove: () => nextMove(store.getState().mode === 'guided' ? store.problemOf() : null, store.getState().s),
+    /** Every key term, for a check that opens each card in turn. */
+    terms: ALL_TERMS,
+    /** Open a term's card without a word to open it from, so a check can look at every card. */
+    showTerm: (id: string) => showTerm(id as TermId, null),
+    /** The key term whose card is open, read from the page: the term, where the card is, and its heading. */
+    term: () => {
+      if (!termOpen || termEl.hidden) return null
+      const r = termEl.getBoundingClientRect()
+      return { id: termEl.dataset.term, side: termEl.dataset.side, name: termEl.querySelector('h3')?.textContent ?? '', x: r.left, y: r.top, w: r.width, h: r.height }
+    },
     /** What the glow and the pointing hand show now, read from the page itself: each glow that is
      *  switched on, where it is, and whether the hand can be seen. */
     cue: () => {

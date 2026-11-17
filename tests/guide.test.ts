@@ -8,6 +8,8 @@ import { bondPolarity } from '../src/chem/polarity'
 import { idealDirs, type V3 } from '../src/chem/repulsion'
 import { ALL_SHAPES, classify, shapeCases } from '../src/chem/vsepr'
 import {
+  ALL_TERMS,
+  BASE_TERMS,
   DIPOLE_WORDS,
   NET_SIDE,
   NET_WITHIN,
@@ -27,6 +29,10 @@ import {
   pairWords,
   placeInstruction,
   bondRight,
+  FREE_POLAR_WORDS,
+  bondKindsOn,
+  freeBondLine,
+  freeNetLine,
   bondStatus,
   boardStepDone,
   checkCoach,
@@ -38,6 +44,8 @@ import {
   finishedLine,
   finishedNotes,
   formalChargeSum,
+  termCard,
+  termPieces,
   groupFacts,
   groupsCoach,
   groupsRight,
@@ -1318,6 +1326,54 @@ describe('refusals and hints', () => {
   })
 })
 
+/** Boards that only free build can hold: aluminum fluoride (ΔEN 2.5), ozone, and ethane (two middle atoms). */
+function freeBoards(): Structure[] {
+  const alf3 = star(['Al', 'F', 'F', 'F'], [1, 1, 1]).s
+  const o3 = star(['O', 'O', 'O'], [2, 1]).s
+  let ethane = star(['C', 'C', 'H', 'H', 'H'], [1, 1, 1, 1])
+  let s = ethane.s
+  const ids = [...ethane.ids]
+  for (let i = 0; i < 3; i++) {
+    const r = addAtom(s, 'H')
+    s = r.s
+    const op = share(s, ids[1]!, r.id)
+    if (!op.ok) throw new Error(op.why)
+    s = op.s
+  }
+  return [alf3, o3, s]
+}
+
+describe('free build: electronegativity and dipoles', () => {
+  const [alf3, o3, ethane] = freeBoards()
+  it('works each kind of bond from the course table, middle atom first', () => {
+    const water = solveLikeAStudent('H2O')
+    expect(bondKindsOn(water).map((k) => [k.a, k.b, k.pol.delta])).toEqual([['O', 'H', '1.4']])
+    const k = bondKindsOn(water)[0]!
+    expect(freeBondLine(k.a, k.b, k.pol, k.byCharge)).toBe(bondRight('O', 'H', k.pol))
+  })
+  it('calls a ΔEN above 2.0 ionic (Al–F: 4.0 − 1.5 = 2.5)', () => {
+    const k = bondKindsOn(alf3!)[0]!
+    expect(k.pol.kind).toBe('ionic')
+    expect(freeBondLine(k.a, k.b, k.pol, k.byCharge)).toBe('Ionic. ΔEN = 4.0 − 1.5 = 2.5, and a ΔEN above 2.0 counts as an ionic bond. Fluorine is δ− and aluminum is δ+.')
+  })
+  it('explains ozone’s O–O dipoles by the formal charges, not by ΔEN', () => {
+    const k = bondKindsOn(o3!)
+    expect(k).toHaveLength(1)
+    expect(k[0]!.byCharge).toBe(true)
+    expect(freeBondLine(k[0]!.a, k[0]!.b, k[0]!.pol, true)).toMatch(/^ΔEN = 0, but/)
+  })
+  it('lists a chain’s bonds once per pair of elements, the less electronegative atom first', () => {
+    expect(polarity(ethane!)).toBeNull()
+    expect(bondKindsOn(ethane!).map((k) => `${k.a}–${k.b} ${k.pol.kind}`)).toEqual(['C–C nonpolar', 'H–C nonpolar'])
+  })
+  it('says polar or nonpolar for the whole molecule, with the reason', () => {
+    const water = solveLikeAStudent('H2O')
+    const co2 = solveLikeAStudent('CO2')
+    expect(freeNetLine(polarity(water)!, shapeInfoFor(water))).toMatch(/^Polar\. /)
+    expect(freeNetLine(polarity(co2)!, shapeInfoFor(co2))).toMatch(/^Nonpolar\. .*cancel\.$/)
+  })
+})
+
 describe('every sentence the guide can show', () => {
   /** Collect the copy for each problem across the states a student passes through. */
   function allCopy(): string[] {
@@ -1398,7 +1454,20 @@ describe('every sentence the guide can show', () => {
         else for (let tries = 1; tries <= 3; tries++) out.push(...parts(hybridCoach(p.center, f, h, tries)))
       }
     }
-    out.push(DIPOLE_WORDS.table, DIPOLE_WORDS.bondKey, DIPOLE_WORDS.netKey, NET_SIDE)
+    out.push(DIPOLE_WORDS.table, DIPOLE_WORDS.bondKey, DIPOLE_WORDS.netKey, NET_SIDE, ...Object.values(FREE_POLAR_WORDS))
+    // free build: every finished problem, plus the boards free build adds (an ionic bond, ozone, a chain)
+    for (const s of [...PROBLEMS.map((p) => solveLikeAStudent(p.id)), ...freeBoards()]) {
+      for (const k of bondKindsOn(s)) out.push(freeBondLine(k.a, k.b, k.pol, k.byCharge))
+      const m = polarity(s)
+      if (m) out.push(freeNetLine(m, shapeInfoFor(s)))
+    }
+    // the cards of the key terms, for free build and with each problem on screen
+    for (const p of [null, ...PROBLEMS]) {
+      for (const id of ALL_TERMS) {
+        const c = termCard(id, p)
+        out.push(c.means, c.example, c.pictureLabel, ...(c.note ? [c.note] : []), ...(c.also ? [c.also] : []))
+      }
+    }
     return [...new Set(out.filter(Boolean))]
   }
   const lines = allCopy()
@@ -1418,6 +1487,35 @@ describe('every sentence the guide can show', () => {
   it('never gives an atom feelings or uses the phrases Sam has banned', () => {
     const banned = /\b(wants?|likes?|happy|prefers?|loves?|hates?|seamless|comprehensive|robust|leverage|delve|showcase|elevate|unlock|not only|not just|more than just|think of|tells a story|simply|just)\b|that's next|let's/i
     for (const line of lines) expect(line, line).not.toMatch(banned)
+  })
+  it('highlights the key terms in the app’s own sentences, and only where the word means the term', () => {
+    const cards = new Set<string>()
+    for (const p of [null, ...PROBLEMS]) {
+      for (const id of ALL_TERMS) {
+        const c = termCard(id, p)
+        for (const line of [c.means, c.example, c.pictureLabel, c.note ?? '', c.also ?? '']) cards.add(line)
+      }
+    }
+    const found = new Set<string>()
+    for (const line of lines) {
+      if (cards.has(line)) continue
+      const pieces = termPieces(line)
+      expect(pieces.map((x) => x.text).join(''), line).toBe(line)
+      let at = 0
+      for (const x of pieces) {
+        if (x.term) {
+          found.add(x.term)
+          // "should bond", "to bond" and a capital "Bond" are the verb
+          if (x.term === 'bond' && /^bonds?$/i.test(x.text)) expect(`${line.slice(0, at)}|${x.text}`, line).not.toMatch(/(?:^|\. )\|Bond|(?:should|could|can|will|must|to) \|/)
+          // the lone pairs of xenon tetrafluoride cancel too, and that sentence is not about dipoles
+          if (x.term === 'cancel') expect(line, line).toMatch(/dipole|arrow/i)
+        }
+        at += x.text.length
+      }
+    }
+    expect(lines.filter((line) => /pushes cancel/.test(line)).length).toBeGreaterThan(0)
+    // "Bond angle" is a label in the table of results, and "polar molecule" is reached from the card for "polar"
+    expect(BASE_TERMS.filter((id) => !found.has(id))).toEqual(['bond-angle', 'polar-molecule'])
   })
   it('names the atom: no sentence starts with "It"', () => {
     for (const line of lines) expect(line, line).not.toMatch(/(^|\. )It /)

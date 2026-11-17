@@ -5,6 +5,7 @@
 // Usage: node scripts/check-browser.mjs [desktop|phone] [first problem index] [how many]
 //        node scripts/check-browser.mjs [desktop|phone] extras   (wrong answers, hints, refused moves, undo, keyboard, free build)
 //        node scripts/check-browser.mjs [desktop|phone] shell    (home screen, opening the module, the way back, saved progress)
+//        node scripts/check-browser.mjs [desktop|phone] terms    (the highlighted key terms and the card each one opens)
 // Needs the built site served on port 5210 (pnpm web:serve), or MB_URL pointing at one (the live
 // site included: MB_URL=https://sam-t-g.github.io/chem-review).
 // MB_SHOTS=1 saves screenshots to shots/.
@@ -258,6 +259,13 @@ async function solve(p, wrong = {}) {
   ok(st.problem === p.i && st.step === 'count', `${p.id}: picker opens the problem at the count step`)
   await cued(`${p.id} count`, 'ask', `count-${p.formula[0][0]}`, `[data-cue="count-${p.formula[0][0]}"]`)
   ok(await page.locator('.mb-checkbar .mb-chk').count() === 0, `${p.id}: no checks are shown while the board holds sample atoms`)
+  // a key term: "valence electrons" is highlighted, and its card explains the term with an atom this molecule does not have
+  const valenceCard = await openTerm('valence')
+  const valenceExample = ((await cardText()).split('Example')[1] ?? '').split('Keep in mind')[0]
+  const namedHere = p.formula.map(([el]) => NAME[el]).filter((n) => new RegExp(n, 'i').test(valenceExample))
+  ok(valenceCard?.id === 'valence' && valenceExample.length > 20 && namedHere.length === 0, `${p.id}: the card for "valence electrons" opens, and its example names none of this molecule's atoms (${namedHere.join()})`)
+  await closeTerm()
+  ok(await termNow() === null, `${p.id}: the card closes again`)
 
   // 1. count
   for (const [el] of p.formula) for (let k = 0; k < VALENCE[el]; k++) await press(`[data-key="inc-${el}"]`)
@@ -547,6 +555,14 @@ async function solve(p, wrong = {}) {
     ok(pts.draw.kind === null, `${p.id}: nothing is left to draw`)
   }
   ok(await page.locator('[data-key="next"]').isEnabled(), `${p.id}: step 6 is finished`)
+  // A key term: the ΔEN card works its example on another bond, with another ΔEN than any bond of this molecule.
+  // (Checked here, after the arrows are drawn: an untouched 3D model starts to turn slowly after 2.5 seconds,
+  // and a card opened before the drawing would leave the check dragging at atoms that are moving.)
+  const enCard = await openTerm('delta-en')
+  const enShown = ((await cardText()).match(/ΔEN = [\d.]+ − [\d.]+ = ([\d.]+)/) ?? [])[1]
+  const enMine = [...new Set(outer)].map((el) => (Math.abs(EN[p.center] - EN[el]) / 10).toFixed(1))
+  ok(enCard?.id === 'delta-en' && !!enShown && !enMine.includes(enShown), `${p.id}: the ΔEN card's example (${enShown}) is not the ΔEN of a bond of this molecule (${enMine.join()})`)
+  await closeTerm()
   await shot(`${p.id.replace(/\W/g, '')}-polar`)
   await press('[data-key="next"]')
 
@@ -865,10 +881,24 @@ async function extras() {
   ok((await report()).complete, 'free: H2O is accepted')
   ok(await page.locator('.mb-checks li[data-state="pass"]').count() === 3, 'free: all three checks pass')
   ok(/Charge of everything on the board: 0/.test(await text('.mb-charge')), 'free: the charge reads 0')
+  // electronegativity and dipoles, shown with nothing asked (D-0029)
+  const enRows = (await page.locator('.mb-en li').allInnerTexts()).map((x) => x.replace(/\s+/g, ' ').trim()).sort()
+  ok(enRows.join() === 'H Hydrogen 2.1,O Oxygen 3.5', `free: the electronegativity table lists oxygen 3.5 and hydrogen 2.1 (${enRows.join()})`)
+  const ohRow = (await text('.mb-pol li')).replace(/\u2060/g, '').replace(/\s+/g, ' ').trim()
+  ok(/^O–H Polar\. ΔEN = 3\.5 − 2\.1 = 1\.4\./.test(ohRow), `free: the O–H bond is worked out as polar, ΔEN 1.4 (${ohRow})`)
+  ok(/^Polar\. /.test(await text('[data-k="free-net"]')), 'free: water reads as a polar molecule')
+  let dip = (await points()).dipoles
+  for (let i = 0; i < 20 && dip.bonds < 2; i++) { await wait(250); dip = (await points()).dipoles }
+  ok(dip.wanted === 2 && dip.bonds === 2 && !dip.net, `free: both O–H arrows are on the flat drawing, and no net dipole (${JSON.stringify(dip)})`)
+  await tapAt(await atomPoint(o))
+  ok(/electronegativity 3\.5/.test(await text('.mb-sel')), 'free: a tapped oxygen shows its electronegativity')
+  await tapAt(await emptySpot())
   await shot('free-water')
   await press('[data-key="see-shape"]')
   await wait(2200)
   ok((await page.locator('.mb-readout dd.is-big').innerText()).toLowerCase() === 'bent', 'free: See the 3D shape names water bent')
+  dip = (await points()).dipoles
+  ok(dip.bonds === 2 && dip.net && dip.netDrawn, `free: on the 3D shape the net dipole is drawn too (${JSON.stringify(dip)})`)
   ok((await angles()).every((a) => a > 95 && a < 109), 'free: the H–O–H angle in the model is below 109.5')
   await shot('free-water-3d')
   ok(await page.locator('[data-tray]').count() === 0, 'free: the atom tray steps aside while the 3D shape is showing')
@@ -881,6 +911,8 @@ async function extras() {
   await press('[data-key="e-minus"]')
   ok(/1\+/.test(await text('.mb-ledger')), 'free: removing an electron shows a 1+ charge in the counter')
   ok(await page.locator('.mb-checks li[data-state="fail"]').count() >= 1, 'free: the checklist reports the short atom')
+  await page.locator('[data-k="free-wait"]').waitFor({ timeout: 3000 }).catch(() => {})
+  ok(await page.locator('[data-k="free-net"]').count() === 0 && /Fill every shell/.test(await text('[data-k="free-wait"]')), `free: with a shell short, polar or nonpolar waits (${await text('[data-k="free-wait"]')})`)
   await press('[data-key="e-plus"]')
   await press('[data-key="e-plus"]')
   ok(/Oxygen already has 8 electrons/.test((await state()).toast ?? ''), 'free: a ninth electron on oxygen is refused with the reason')
@@ -1012,6 +1044,339 @@ async function extras() {
   ok((await strip()) === 'pass pass pass' && await page.locator('[data-key="next"]').isEnabled(), 'clear: the answers are back too, and the molecule is finished again')
 }
 
+// ---- key terms: the highlighted words and the card each one opens
+const termNow = () => mb(() => window.__mb.term())
+const cardText = () => mb(() => document.querySelector('.mb-termcard')?.innerText ?? '')
+/** Ids of the words highlighted in the panel now, in reading order. */
+const highlighted = () => mb(() => [...document.querySelectorAll('.mb-panel .mb-term')].map((b) => b.dataset.term))
+/** Wait until the open card has finished popping into place: while it grows, its box on screen is not its real size. */
+const cardSettled = () =>
+  page.waitForFunction(() => { const c = document.querySelector('.mb-termcard'); return !c.hidden && Math.abs(c.getBoundingClientRect().width - c.offsetWidth) < 1 && c.getAnimations().every((a) => a.playState === 'finished') }, null, { timeout: 5000 }).catch(() => {})
+/** Open a highlighted word's card with a real press and say what the card shows. */
+async function openTerm(id) {
+  const loc = page.locator(`.mb-panel .mb-term[data-term="${id}"]`).first()
+  await loc.scrollIntoViewIfNeeded()
+  if (phone) await loc.tap(); else await loc.click()
+  await page.waitForFunction((id) => window.__mb.term()?.id === id, id, { timeout: 4000 }).catch(() => {})
+  await cardSettled()
+  return termNow()
+}
+/** Close the open card the way this screen size offers first: Escape with a keyboard, the close button on a phone. */
+async function closeTerm() {
+  if (phone) await page.locator('.mb-termcard [data-term-close]').tap(); else await page.keyboard.press('Escape')
+  await page.waitForFunction(() => window.__mb.term() === null, null, { timeout: 4000 }).catch(() => {})
+  await wait(150)
+}
+/** The card that is open is all on screen, and its picture fits inside it. */
+async function cardFits(label) {
+  const m = await mb(() => {
+    const card = document.querySelector('.mb-termcard')
+    const inner = card.querySelector('.mb-termcard-in')
+    const r = card.getBoundingClientRect()
+    const art = card.querySelector('.mb-term-pic :is(svg, table)')?.getBoundingClientRect()
+    const pic = card.querySelector('.mb-term-pic').getBoundingClientRect()
+    return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, w: innerWidth, h: innerHeight, art: art ? { w: art.width, h: art.height, left: art.left, right: art.right } : null, pic: { left: pic.left, right: pic.right }, sideways: inner.scrollWidth - inner.clientWidth }
+  })
+  ok(m.left >= -0.5 && m.right <= m.w + 0.5 && m.top >= -0.5 && m.bottom <= m.h + 0.5, `${label}: the card is all on screen (${Math.round(m.left)}, ${Math.round(m.top)} to ${Math.round(m.right)}, ${Math.round(m.bottom)})`)
+  ok(!!m.art && m.art.w > 40 && m.art.h > 20, `${label}: the card has a picture (${m.art ? `${Math.round(m.art.w)} x ${Math.round(m.art.h)}` : 'none'})`)
+  ok(!!m.art && m.art.left >= m.pic.left - 0.5 && m.art.right <= m.pic.right + 0.5 && m.sideways <= 0, `${label}: the picture fits inside the card`)
+}
+
+async function terms() {
+  const byId = (id) => PROBLEMS.find((p) => p.id === id)
+  const all = await mb(() => window.__mb.terms)
+  // the cards a student can open in the count step: from its sentences, from a wrong answer's card, or from a hint
+  const COUNT_TERMS = ['valence', 'shell', 'group', 'atomic-number', 'ion', 'lewis', 'bond', 'full-shell']
+  const COUNT_NAMES = ['Valence electrons', 'Electron shell', 'Group and period', 'Atomic number', 'Ion']
+  // every atom the app has, by its column of the periodic table: atoms in one column have the same number of valence electrons
+  const COLUMN = { hydrogen: 1, beryllium: 2, boron: 13, aluminum: 13, carbon: 14, silicon: 14, nitrogen: 15, phosphorus: 15, arsenic: 15, oxygen: 16, sulfur: 16, selenium: 16, fluorine: 17, chlorine: 17, bromine: 17, iodine: 17, krypton: 18, xenon: 18 }
+  console.log('terms: the highlighted words (methane, count step)')
+  let words = await highlighted()
+  ok(words.join() === 'valence,shell', `words: the count step highlights "valence electrons" and "outer shell" (${words.join()})`)
+  // each highlighted word is a button a pointer can reach: the element under its middle is the word itself
+  // (a step's text takes no presses while it is still arriving, so this waits for it to settle)
+  await page.waitForFunction(() => [...document.querySelectorAll('.mb-panel .mb-term')].every((b) => { const r = b.getBoundingClientRect(); return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === b }), null, { timeout: 4000 }).catch(() => {})
+  const reach = await mb(() => [...document.querySelectorAll('.mb-panel .mb-term')].map((b) => { const r = b.getBoundingClientRect(); return b.tagName === 'BUTTON' && document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === b }))
+  ok(reach.length === 2 && reach.every(Boolean), 'words: each highlighted word is a button, and nothing lies over it')
+  ok(await mb(() => document.querySelectorAll('button .mb-term, label .mb-term, h1 .mb-term, h2 .mb-term').length) === 0, 'words: no highlighted word sits inside a button, a label or a heading')
+  ok(await termNow() === null && await page.locator('.mb-termcard').isHidden(), 'card: nothing is open before a word is pressed')
+
+  console.log('terms: opening and closing a card')
+  let card = await openTerm('valence')
+  ok(card?.id === 'valence' && card.name === 'Valence electrons', `card: a press on "valence electrons" opens its card (${card?.name})`)
+  await shot('term-valence')
+  ok(card?.side === (phone ? 'sheet' : 'beside'), `card: it opens ${phone ? 'as a sheet from the bottom edge' : 'beside the panel'} (${card?.side})`)
+  await cardFits('card')
+  const look = await mb(() => {
+    const el = document.querySelector('.mb-termcard')
+    const word = document.querySelector('.mb-panel .mb-term[data-term="valence"]')
+    const panel = document.querySelector('.mb-panel').getBoundingClientRect()
+    const r = el.getBoundingClientRect()
+    return { role: el.getAttribute('role'), labelled: document.getElementById(el.getAttribute('aria-labelledby'))?.textContent, expanded: word.getAttribute('aria-expanded'), focusIn: el.contains(document.activeElement), right: r.right, panelLeft: panel.left, scrim: !document.querySelector('.mb-termscrim').hidden }
+  })
+  ok(look.role === 'dialog' && look.labelled === 'Valence electrons', 'card: it is a dialog named after the term')
+  ok(look.expanded === 'true' && look.focusIn, 'card: the word is marked as open, and the keyboard is inside the card')
+  if (phone) ok(look.scrim, 'card: the rest of the screen is dimmed behind the sheet')
+  else ok(look.right <= look.panelLeft + 1 && !look.scrim, `card: it sits beside the panel and covers none of it (${Math.round(look.right)} against ${Math.round(look.panelLeft)})`)
+  await noSideScroll('card open')
+  // the example is another atom: methane's carbon and hydrogen are not in it
+  let textNow = await cardText()
+  ok(/Nitrogen has 7 electrons in 2 shells: 2 and 5\./.test(textNow) && !/carbon|hydrogen/i.test(textNow.split('Example')[1] ?? ''), 'card: the example is nitrogen, an atom methane does not have')
+  ok(/Keep in mind/.test(textNow) && /Related terms/.test(textNow), 'card: it has an example, one thing to keep in mind, and related terms')
+  // the pointing hand stays away while a card is open, and the glow stays where the next action is
+  if (!phone) {
+    await wait(1200)
+    const c = await cueNow()
+    ok(c.hand === 'off' && c.halos.length >= 1, `card: the hand is away while the card is open, and the glow stays (${c.hand}, ${c.halos.length})`)
+  }
+  await closeTerm()
+  let back = await mb(() => ({ open: window.__mb.term(), hidden: document.querySelector('.mb-termcard').hidden, focus: document.activeElement?.dataset?.term ?? null, expanded: document.querySelector('.mb-panel .mb-term[data-term="valence"]').getAttribute('aria-expanded') }))
+  ok(back.open === null && back.hidden && back.expanded === 'false', `card: ${phone ? 'the close button' : 'Escape'} closes it`)
+  ok(back.focus === 'valence', `card: the keyboard is back on the word (${back.focus})`)
+
+  // a second press on the same word closes the card (on a phone the sheet's dimmed backdrop lies over the word)
+  if (!phone) {
+    await openTerm('shell')
+    await press('.mb-panel .mb-term[data-term="shell"]')
+    await wait(250)
+    ok(await termNow() === null, 'card: a second press on the word closes its card')
+  }
+  // the close button
+  await openTerm('shell')
+  await press('.mb-termcard [data-term-close]')
+  await wait(250)
+  ok(await termNow() === null, 'card: the close button closes it')
+  if (phone) {
+    await openTerm('shell')
+    await page.touchscreen.tap(195, 60)
+    await wait(350)
+    ok(await termNow() === null, 'card: a tap on the dimmed screen above the sheet closes it')
+    ok((await state()).step === 'count' && await mb(() => document.querySelector('[data-k="count-C"]').textContent) === '0', 'card: that tap reaches nothing behind the sheet')
+  } else {
+    // a press anywhere else closes the card, and the press still counts
+    await openTerm('shell')
+    await press('[data-key="inc-C"]')
+    await wait(250)
+    ok(await termNow() === null && await mb(() => document.querySelector('[data-k="count-C"]').textContent) === '1', 'card: a press on + for carbon closes the card and still adds 1')
+    await press('[data-key="dec-C"]')
+    // with the keyboard: Tab to the word, Enter opens, Tab stays inside the card, Escape closes and goes back to the word
+    await page.locator('.mb-step').click({ position: { x: 4, y: 4 } })
+    let on = null
+    for (let k = 0; k < 60 && on !== 'valence'; k++) {
+      await page.keyboard.press('Tab')
+      on = await mb(() => document.activeElement?.dataset?.term ?? null)
+    }
+    ok(on === 'valence', 'keyboard: Tab reaches the highlighted word')
+    await page.keyboard.press('Enter')
+    await wait(500)
+    ok((await termNow())?.id === 'valence', 'keyboard: Enter opens the card')
+    await page.keyboard.press('Tab')
+    ok(await mb(() => document.querySelector('.mb-termcard').contains(document.activeElement) && document.activeElement.hasAttribute('data-term-close')), 'keyboard: Tab goes to the close button inside the card')
+    await page.keyboard.press('Escape')
+    await wait(250)
+    ok(await termNow() === null && await mb(() => document.activeElement?.dataset?.term) === 'valence', 'keyboard: Escape closes the card and returns to the word')
+    ok((await state()).mode === 'guided' && !(await state()).pickerOpen, 'keyboard: that Escape did nothing else')
+  }
+
+  console.log('terms: related terms')
+  await openTerm('valence')
+  let chips = await page.locator('.mb-termcard .mb-term-go').allInnerTexts()
+  ok(chips.join() === 'Electron shell,Group and period,Atomic number', `related: the valence card links to the count step's other terms (${chips.join()})`)
+  await press('.mb-termcard [data-term-go="group"]')
+  await page.waitForFunction(() => window.__mb.term()?.id === 'group', null, { timeout: 4000 }).catch(() => {})
+  await cardSettled()
+  card = await termNow()
+  ok(card?.id === 'group' && card.name === 'Group and period', `related: a press on "Group and period" turns the card to that term (${card?.name})`)
+  await cardFits('related')
+  ok(await page.locator('.mb-termcard .mb-pt td.is-mine').count() === 3 && await page.locator('.mb-termcard .mb-pt-val').count() === 0, 'related: the group card marks one column of the periodic table and gives no row of valence electrons')
+  ok(await mb(() => document.querySelector('.mb-panel .mb-term[data-term="valence"]').getAttribute('aria-expanded')) === 'false', 'related: the first word is no longer marked as open, because the card shows another term')
+  if (!phone) {
+    // a press on the first word brings its own card back
+    await press('.mb-panel .mb-term[data-term="valence"]')
+    await cardSettled()
+    ok((await termNow())?.id === 'valence', 'related: a press on the first word brings its own card back')
+    await press('.mb-termcard [data-term-go="group"]')
+    await page.waitForFunction(() => window.__mb.term()?.id === 'group', null, { timeout: 4000 }).catch(() => {})
+    await cardSettled()
+  }
+  await closeTerm()
+  ok(await mb(() => document.activeElement?.dataset?.term) === 'valence', 'related: closing it puts the keyboard back on the word the first card was opened from')
+  if (!phone) {
+    // a press on bare board closes the card, and the keyboard goes back to the word
+    await openTerm('valence')
+    await tapAt(await emptySpot())
+    await wait(200)
+    ok(await termNow() === null && await mb(() => document.activeElement?.dataset?.term) === 'valence', `card: a press on the bare board closes it and the keyboard goes back to the word (${await mb(() => document.activeElement?.tagName)})`)
+  }
+  // a card belongs to its step: when the step changes under it (driven from the store here), it closes
+  await openTerm('valence')
+  await mb(() => window.__mb.store.selectProblem(1))
+  await wait(900)
+  ok(await termNow() === null, 'card: it closes when the molecule changes under it')
+  await mb(() => window.__mb.store.selectProblem(0))
+  await wait(900)
+
+  console.log('terms: a wrong answer\'s card has its own highlighted words')
+  for (let k = 0; k < 6; k++) await press('[data-key="inc-C"]') // 6 is carbon's atomic number
+  for (let k = 0; k < 1; k++) await press('[data-key="inc-H"]')
+  await press('[data-key="count-check"]')
+  await wait(1100)
+  ok(await page.locator('.mb-coach .mb-term[data-term="atomic-number"]').count() === 1, 'coach: the card about the atomic-number mix-up highlights "atomic number"')
+  card = await openTerm('atomic-number')
+  textNow = await cardText()
+  ok(card?.name === 'Atomic number' && /Nitrogen's atomic number is 7/.test(textNow), 'coach: its card explains the atomic number with nitrogen, and gives no number for carbon')
+  await closeTerm()
+
+  console.log('terms: every card, in free build')
+  await press('[data-key="mode-free"]')
+  await wait(900)
+  ok(all.length === 40, `cards: there are 40 key terms (${all.length})`)
+  let bad = []
+  for (const id of all) {
+    await mb((id) => window.__mb.showTerm(id), id)
+    await cardSettled()
+    const m = await mb(() => {
+      const card = document.querySelector('.mb-termcard')
+      const inner = card.querySelector('.mb-termcard-in')
+      const r = card.getBoundingClientRect()
+      const art = card.querySelector('.mb-term-pic :is(svg, table)')?.getBoundingClientRect()
+      const pic = card.querySelector('.mb-term-pic').getBoundingClientRect()
+      const paras = [...card.querySelectorAll('.mb-term-means, .mb-term-ex p')].map((n) => n.textContent.trim())
+      return { name: card.querySelector('h3').textContent, onScreen: r.left >= -0.5 && r.right <= innerWidth + 0.5 && r.bottom <= innerHeight + 0.5, art: !!art && art.width > 40 && art.height > 20 && art.left >= pic.left - 0.5 && art.right <= pic.right + 0.5, sideways: inner.scrollWidth - inner.clientWidth, words: paras.every((t) => t.length > 20 && !/undefined|NaN|\[object/.test(t)), label: card.querySelector('.mb-term-pic').getAttribute('aria-label') }
+    })
+    if (!(m.name && m.onScreen && m.art && m.sideways <= 0 && m.words && m.label)) bad.push(`${id}: ${JSON.stringify(m)}`)
+  }
+  ok(bad.length === 0, `cards: each of the 40 opens with a name, a meaning, an example and a picture that fits (${bad.slice(0, 2).join(' | ')})`)
+  await shot('term-last')
+  await mb(() => window.__mb.showTerm('shape:trigonal bipyramidal'))
+  await cardSettled()
+  ok((await termNow())?.name === 'Trigonal bipyramidal' && await page.locator('.mb-termcard .mb-pic-atom').count() === 6, 'cards: the trigonal bipyramidal card draws a middle atom and 5 atoms around it')
+  await mb(() => window.__mb.showTerm('multiple'))
+  await cardSettled()
+  ok((await page.locator('.mb-termcard .mb-term-go').allInnerTexts()).join() === 'Bond,Sigma bond,Pi bond', 'cards: in free build a card links to every related term')
+
+  console.log('terms: what the pictures show')
+  /** Where the atoms, labels and arrows of the open card's picture are on screen. */
+  const picture = () => mb(() => {
+    const mid = (n) => { const r = n.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 } }
+    const card = document.querySelector('.mb-termcard')
+    return {
+      atoms: [...card.querySelectorAll('.mb-pic-atom')].map((c) => ({ el: c.parentElement.querySelector('text').textContent, ...mid(c) })),
+      deltas: [...card.querySelectorAll('.mb-pic-delta')].map((t) => ({ text: t.textContent, ...mid(t) })),
+      heads: [...card.querySelectorAll('.mb-pic-arrow.is-bond .is-head')].map(mid),
+      tails: [...card.querySelectorAll('.mb-pic-arrow.is-bond')].map(mid),
+      net: [...card.querySelectorAll('.mb-pic-arrow.is-net')].map((g) => ({ head: mid(g.querySelector('.is-head')), all: mid(g) })),
+      badges: [...card.querySelectorAll('.mb-pic-badge')].map((g) => ({ text: g.querySelector('text').textContent, charge: g.classList.contains('is-charge'), ...mid(g) })),
+      tags: [...card.querySelectorAll('.mb-pic-tag text')].map((t) => t.textContent).join(''),
+    }
+  })
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y)
+  const show = async (id) => { await mb((id) => window.__mb.showTerm(id), id); await cardSettled(); return picture() }
+  let pic = await show('dipole')
+  let H = pic.atoms.find((a) => a.el === 'H')
+  let Cl = pic.atoms.find((a) => a.el === 'Cl')
+  const minus = pic.deltas.find((d) => d.text === 'δ−')
+  const plus = pic.deltas.find((d) => d.text === 'δ+')
+  ok(!!H && !!Cl && !!minus && !!plus && Math.abs(minus.x - Cl.x) < 12 && Math.abs(plus.x - H.x) < 12, 'picture: on the H–Cl bond, δ− is over chlorine and δ+ over hydrogen')
+  ok(pic.heads.length === 1 && dist(pic.heads[0], Cl) < dist(pic.heads[0], H) && dist(pic.tails[0], H) > 20, 'picture: the bond arrow points at chlorine')
+  pic = await show('pi')
+  ok(pic.tags === 'πσπσπ', `picture: the double bond's lines are π and σ, the triple bond's π, σ and π (${pic.tags})`)
+  pic = await show('sigma')
+  ok(pic.tags === 'σπσ', `picture: the single bond's line is σ, the double bond's π and σ (${pic.tags})`)
+  pic = await show('formal-charge')
+  let O = pic.atoms.find((a) => a.el === 'O')
+  H = pic.atoms.find((a) => a.el === 'H')
+  ok(pic.badges.length === 1 && pic.badges[0].charge && pic.badges[0].text === '−1' && dist(pic.badges[0], O) < dist(pic.badges[0], H), 'picture: hydroxide has −1 marked on oxygen')
+  pic = await show('full-shell')
+  ok(pic.badges.length === 1 && pic.badges[0].text === '8' && !pic.badges[0].charge, 'picture: the ring around chlorine in HCl is marked 8')
+  pic = await show('electron-group')
+  ok(pic.badges.map((b) => b.text).join('') === '1234', `picture: the four electron groups of NF₃ are numbered (${pic.badges.map((b) => b.text).join('')})`)
+  pic = await show('net-dipole')
+  const S = pic.atoms.find((a) => a.el === 'S')
+  const cls = pic.atoms.filter((a) => a.el === 'Cl')
+  ok(!!S && cls.length === 2 && pic.heads.length === 2 && pic.heads.every((h) => Math.min(...cls.map((c) => dist(h, c))) < dist(h, S)), 'picture: in SCl₂ each bond arrow points at a chlorine atom')
+  ok(pic.net.length === 1 && cls.every((c) => c.y > S.y) && pic.net[0].head.y > pic.net[0].all.y + 4, 'picture: the net dipole points from sulfur toward the side the chlorine atoms are on')
+  pic = await show('cancel')
+  const Be = pic.atoms.find((a) => a.el === 'Be')
+  ok(pic.net.length === 0 && pic.heads.length === 2 && (pic.heads[0].x - Be.x) * (pic.heads[1].x - Be.x) < 0, 'picture: in BeCl₂ the two bond arrows point in opposite directions, and no net dipole is drawn')
+  await closeTerm()
+  await press('[data-key="mode-guided"]')
+  await wait(900)
+
+  console.log('terms: no card gives a number of the molecule on screen (count step, all 20)')
+  bad = []
+  for (const p of PROBLEMS) {
+    await mb((i) => window.__mb.store.selectProblem(i), p.i)
+    await wait(60)
+    const columns = new Set(p.formula.map(([el]) => COLUMN[NAME[el]]))
+    const near = Object.keys(COLUMN).filter((name) => columns.has(COLUMN[name]))
+    for (const id of COUNT_TERMS) {
+      await mb((id) => window.__mb.showTerm(id), id)
+      const seen = await mb(() => ({ example: document.querySelector('.mb-termcard .mb-term-ex p').textContent, label: document.querySelector('.mb-termcard .mb-term-pic').getAttribute('aria-label'), symbols: [...document.querySelectorAll('.mb-termcard .mb-pic-sym, .mb-termcard .mb-sh-sym, .mb-termcard .mb-pt td.is-mine')].map((n) => n.textContent), chips: [...document.querySelectorAll('.mb-termcard .mb-term-go')].map((b) => b.textContent) }))
+      const named = near.filter((n) => new RegExp(n, 'i').test(`${seen.example} ${seen.label}`))
+      if (named.length) bad.push(`${p.id} ${id} names ${named.join()}`)
+      const drawn = seen.symbols.filter((sym) => columns.has(COLUMN[NAME[sym] ?? { Si: 'silicon', I: 'iodine', Se: 'selenium' }[sym]]))
+      if (drawn.length) bad.push(`${p.id} ${id} draws ${drawn.join()}`)
+      if (!seen.chips.every((c) => COUNT_NAMES.includes(c))) bad.push(`${p.id} ${id} links to ${seen.chips.join()}`)
+    }
+  }
+  ok(bad.length === 0, `leak: in the count step no card names or draws an atom from a column of the molecule's atoms, and no card links past the count step (${bad.slice(0, 3).join(' | ')})`)
+  // nitrite is bent with one double bond, as ozone is: its resonance card shows the nitrate ion's three drawings
+  await mb((i) => window.__mb.store.selectProblem(i), byId('NO2-').i)
+  await mb(() => window.__mb.showTerm('resonance'))
+  await cardSettled()
+  ok(/nitrate ion, NO₃⁻, has 3 resonance structures/.test(await cardText()) && await page.locator('.mb-termcard .mb-pic-swap').count() === 2 && await page.locator('.mb-termcard .mb-pic-dot').count() === 0, 'leak: with the nitrite ion on screen the resonance card shows three drawings of nitrate, as lines without dots')
+  await cardFits('resonance')
+  await mb((i) => window.__mb.store.selectProblem(i), 0)
+  await mb(() => window.__mb.showTerm('valence'))
+  await closeTerm()
+
+  console.log('terms: which words each step highlights (carbon dioxide, moved along from the store)')
+  const co2 = byId('CO2')
+  const move = (fn) => mb(fn).then(() => wait(1500))
+  await move(() => { const s = window.__mb.store; s.selectProblem(3); s.setCount('C', 4); s.setCount('O', 6); s.checkCounts(); s.typeTotal(16); s.checkTotal(); s.next(); s.pickMiddle('C'); window.__ids = [s.place('C', null), s.place('O', null), s.place('O', null)]; s.next() })
+  ok(co2 && (await state()).step === 'bond', 'steps: carbon dioxide is at the bond step')
+  words = await highlighted()
+  ok(words.includes('bond') && await mb(() => document.querySelector('.mb-panel .mb-term[data-term="bond"]').textContent) === 'bond', `steps: the bond step highlights the noun "bond" and leaves the verb at the start of the sentence plain (${words.join()})`)
+  await move(() => { const s = window.__mb.store; const [c, o1, o2] = window.__ids; s.bond(o1, c); s.bond(o2, c); s.next() })
+  words = await highlighted()
+  ok(words.includes('formal-charge') && !words.includes('full-shell'), `steps: the check step highlights "formal charges"; the row about shells names the atoms that are short, so "full shell" is not on screen yet (${words.join()})`)
+  card = await openTerm('formal-charge')
+  textNow = await cardText()
+  ok(card?.name === 'Formal charge' && /BF₄⁻/.test(textNow) && /3 − 0 − 4 = −1/.test(textNow) && !/oxygen|carbon/i.test(textNow.split('Example')[1].split('Keep in mind')[0]), 'steps: the formal charge card works its example on BF₄⁻, which shares no atom with carbon dioxide')
+  await cardFits('formal charge')
+  await closeTerm()
+  await move(() => { const s = window.__mb.store; const [c, o1, o2] = window.__ids; s.bond(o1, c); s.bond(o2, c) })
+  words = await highlighted()
+  ok(words.includes('full-shell') && words.includes('lewis'), `steps: with the structure finished, "full outer shell" and "Lewis structure" are highlighted (${words.join()})`)
+  await move(() => window.__mb.store.next())
+  words = await highlighted()
+  ok((await state()).step === 'shape' && words.includes('electron-group') && words.includes('lone-pair') && !words.includes('bond'), `steps: the shape step highlights "electron groups" and "lone pair", and "bond" is plain by now (${words.join()})`)
+  ok(!words.some((w) => w.startsWith('shape:')), 'steps: no shape is named in the text before the shape is picked')
+  await move(() => { const s = window.__mb.store; s.answerGroups(2); s.pickShape('linear') })
+  words = await highlighted()
+  ok(words.includes('shape:linear') && words.includes('bond-angle'), `steps: once the shape is picked, its name and "bond angle" are highlighted (${words.join()})`)
+  card = await openTerm('shape:linear')
+  ok(card?.name === 'Linear' && /BeCl₂/.test(await cardText()), 'steps: the card for "linear" shows beryllium chloride')
+  await closeTerm()
+  await move(() => window.__mb.store.next())
+  words = await highlighted()
+  ok((await state()).step === 'polar' && ['electronegativity', 'polar', 'delta-en'].every((w) => words.includes(w)) && !words.includes('bond'), `steps: step 6 highlights "electronegativity", "polar" and "ΔEN" (${words.join()})`)
+  card = await openTerm('delta-en')
+  textNow = await cardText()
+  ok(card?.name === 'ΔEN' && /ΔEN = 3\.0 − 2\.1 = 0\.9/.test(textNow) && !/3\.5 − 2\.5/.test(textNow), 'steps: the ΔEN card subtracts for H–Cl, never for the C–O bond the student is asked about')
+  await cardFits('ΔEN')
+  await shot('term-delta-en')
+  await closeTerm()
+  await move(() => { const s = window.__mb.store; s.answerBond('O', 'O'); s.answerNet(false); s.next() })
+  words = await highlighted()
+  ok((await state()).step === 'orbitals' && words.includes('sigma') && words.includes('pi'), `steps: step 7 highlights "sigma bonds" and "pi bonds" (${words.join()})`)
+  card = await openTerm('pi')
+  ok(card?.name === 'Pi bond' && await page.locator('.mb-termcard .mb-pic-tag').count() === 5, 'steps: the pi bond card labels each line of a double and a triple bond')
+  await closeTerm()
+  await noSideScroll('terms')
+}
+
 async function shell() {
   console.log('shell: home')
   await shot('home')
@@ -1064,6 +1429,8 @@ if (firstArg === 'shell') {
   try { await shell() } catch (e) { failed.push(`shell: ${String(e).split('\n')[0]}`); console.log(`  ERROR ${String(e).split('\n').slice(0, 3).join(' ')}`); await shot('shell-error') }
 } else if (firstArg === 'extras') {
   try { await extras() } catch (e) { failed.push(`extras: ${String(e).split('\n')[0]}`); console.log(`  ERROR ${String(e).split('\n').slice(0, 3).join(' ')}`); await shot('extras-error') }
+} else if (firstArg === 'terms') {
+  try { await terms() } catch (e) { failed.push(`terms: ${String(e).split('\n')[0]}`); console.log(`  ERROR ${String(e).split('\n').slice(0, 6).join(' ')}`); await shot('terms-error') }
 } else {
   const first = Number(firstArg)
   const list = PROBLEMS.slice(first, first + Number(countArg))

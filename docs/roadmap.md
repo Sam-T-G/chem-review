@@ -6,6 +6,7 @@ What is being worked on, what comes next, and what is waiting. The lead orders i
 
 | ID | Team | Item | Notes |
 |---|---|---|---|
+| W-022 | lewis, learning, design, chem | Key terms are highlighted, and each opens a card with its meaning, an example and a picture (D-0027, D-0028) | Built and checked on the branch `lewis/key-terms` on 2026-11-16. Not committed. A commit, a push and a deploy each need Sam's go-ahead (R9) |
 
 ## Next
 

@@ -16,7 +16,7 @@
       "name": "Lewis module",
       "does": "The Lewis structures and shapes module: the 3D board, the panel, the step flow and its state.",
       "docs": ["docs/learning/guided-steps.md", "docs/learning/wrong-answers.md", "docs/design/look-and-motion.md"],
-      "check": "pnpm exec vitest run guide store"
+      "check": "pnpm exec vitest run guide store terms"
     },
     "shell": {
       "name": "App shell",
@@ -34,7 +34,7 @@
       "name": "Learning design",
       "does": "The order students learn in, the problem list, every sentence a student reads, and what the app says when an answer is wrong. Reviews anything a student reads.",
       "docs": ["docs/learning/guided-steps.md", "docs/learning/wrong-answers.md"],
-      "check": "pnpm exec vitest run guide"
+      "check": "pnpm exec vitest run guide terms"
     },
     "platform": {
       "name": "Quality and platform",
@@ -89,6 +89,7 @@
     { "path": "src/modules/lewis/palette.ts", "team": "lewis", "review": ["design"] },
     { "path": "tests/guide.test.ts", "team": "lewis", "review": ["learning"] },
     { "path": "tests/store.test.ts", "team": "lewis" },
+    { "path": "tests/terms.test.ts", "team": "lewis", "review": ["learning", "chem"] },
     { "path": "src/app/", "team": "shell" },
     { "path": "src/shell/", "team": "shell" },
     { "path": "app.json", "team": "shell" },

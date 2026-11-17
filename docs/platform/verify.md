@@ -20,6 +20,8 @@ node scripts/check-browser.mjs desktop        # every guided problem, start to f
 node scripts/check-browser.mjs phone          # the same at 390 x 844, real touch input
 node scripts/check-browser.mjs desktop extras # wrong answers and wrong arrows, hints, refused moves, undo, the bin, cutting a bond, keyboard, free build, Clear in 3D
 node scripts/check-browser.mjs phone extras
+node scripts/check-browser.mjs desktop terms  # the highlighted key terms: every card, how one opens and closes, the keyboard, what each step highlights
+node scripts/check-browser.mjs phone terms
 node scripts/check-browser.mjs desktop shell  # home screen, opening the module, the way back, saved progress
 node scripts/check-browser.mjs phone shell
 MB_SHOTS=1 node scripts/check-browser.mjs ... # also saves screenshots to shots/
@@ -27,7 +29,7 @@ MB_SHOTS=1 node scripts/check-browser.mjs ... # also saves screenshots to shots/
 
 - A UI change is not verified until these pass at both sizes.
 - Never check a control with `.click()` or `.focus()` from script. Every action in these checks is a real pointer or key event.
-- The checks find things by `data-key`, `data-act`, `data-tray` and the `.mb-*` class names. Restyle freely and keep those names.
+- The checks find things by `data-key`, `data-act`, `data-tray`, `data-term` and the `.mb-*` class names. Restyle freely and keep those names.
 - Stop the server and close any browser you opened when you are done.
 
 ## Repo checks: `pnpm check:repo`

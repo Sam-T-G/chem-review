@@ -1,6 +1,6 @@
 # The guided steps
 
-How a guided problem teaches, as built. The direction is Sam's (D-0006). The step split, the problem list, the free build mode and the drag gesture are the build session's reading of it and wait for his yes (D-0007). Steps 6 and 7 came from his request for dipoles and the concepts in his chapter 7 and 8 slides, and putting them here as steps waits for his yes too (D-0021). He asked for the dipoles to be drawn (D-0022). How they are drawn is the build session's design and waits for his yes (D-0023). He asked for questions to be noticeable, for the app to show how to work the board, for the checks to stay on screen (D-0024), and for one-move controls and a clearer dipole drawing (D-0025). How those are built waits for his yes too (D-0026).
+How a guided problem teaches, as built. The direction is Sam's (D-0006). The step split, the problem list, the free build mode and the drag gesture are the build session's reading of it and wait for his yes (D-0007). Steps 6 and 7 came from his request for dipoles and the concepts in his chapter 7 and 8 slides, and putting them here as steps waits for his yes too (D-0021). He asked for the dipoles to be drawn (D-0022). How they are drawn is the build session's design and waits for his yes (D-0023). He asked for questions to be noticeable, for the app to show how to work the board, for the checks to stay on screen (D-0024), and for one-move controls and a clearer dipole drawing (D-0025). How those are built waits for his yes too (D-0026). He asked for key terms that a student can open to see what they mean (D-0027). Which words, what each card says and how it looks wait for his yes (D-0028).
 
 ## What Sam asked for (2026-11-12)
 
@@ -51,6 +51,17 @@ Sam asked for the indicators that serve as checks to be a persistent part of the
 - Each atom's electron count ("6 of 8") is beside it on the flat board from the place step on. Formal charges show beside the atoms from step 4 on.
 - The counter gives pairs beside its electron numbers on a wide screen: "4 pairs" in bonds, and "4 lone pairs" once every atom has a full shell. Before that an atom's unshared electrons are not all in pairs, so no number is given.
 
+## Key terms
+
+Sam asked for highlighted terms that a student can click to learn what they mean, with clear examples and clarifications (D-0027). As built (D-0028):
+
+- **40 terms have a card:** 29 terms from "valence electrons" to "hybridization", and the 11 shape names. `TERMS` in `src/modules/lewis/guide.ts` lists the words in the app's text that open each one.
+- **A term is highlighted where it first appears on a screen.** A wrong answer's card and the hints each highlight their own words. Words inside buttons, headings, the lines about gestures, the electron counter and the strip of checks stay plain. Six early words (valence electrons, shell, ion, Lewis structure, middle atom, bond) stay plain in steps 5 to 7.
+- **A press on the word opens its card:** what the term means, an example with a picture, one thing to keep in mind, and related terms. `termCard` in `src/modules/lewis/guide.ts` builds it.
+- **A card never works on the molecule on screen.** Its example is one of 26 molecules that are not guided problems (`SAMPLES`), or an atom from another column of the periodic table than the molecule's atoms. With water on screen, the valence electrons card counts nitrogen's shells. The cards about electronegativity use two atoms the molecule does not have, with another ΔEN. The cards about shape and dipoles show another shape, and the cards about electron groups and hybridization show another number of groups. `tests/terms.test.ts` checks each of these for all twenty problems.
+- **A card links only to terms the student has met.** In a guided step the related terms are the ones that step or an earlier one uses. Free build links to all of them. The cards for resonance and for more than 8 electrons open only from a sentence that uses the words: a note under the finished structure, or a hint.
+- A shape's name appears in the text only after the shape is picked, so its card cannot be opened before.
+
 ## Drawing the dipoles in step 6
 
 Sam asked for a part where a student draws a line and is assessed on where the dipole points (D-0022). What follows is how the build session built it (D-0023).
@@ -65,6 +76,8 @@ Sam asked for a part where a student draws a line and is assessed on where the d
 - Once the net dipole is asked for, the Hint button gives two hints about adding the bond arrows.
 
 The board shows the effect of every action as it happens. Free build is the same board with 18 atoms and no set problem.
+
+Free build shows step 6's results and asks nothing (D-0029, Sam's choice on 2026-11-17). Under the shape it lists the electronegativity of every element on the board, then one line per kind of bond, worked the way step 6 works it ("Polar. ΔEN = 3.5 − 2.1 = 1.4. ..."). A ΔEN above 2.0 reads "Ionic". A bond between two atoms of one element that formal charges make polar (ozone) says so in place of a ΔEN verdict. Once every shell is full, a line says whether the whole molecule is polar and why. A molecule with more than one middle atom gets the bond lines only. A tapped atom shows its electronegativity, and a tapped bond its ΔEN. Guided mode keeps those off its cards, because steps 2 and 6 ask them.
 
 ## The problems
 
