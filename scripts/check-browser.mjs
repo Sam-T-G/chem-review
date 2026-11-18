@@ -233,6 +233,19 @@ const EN = { H: 21, Be: 15, B: 20, C: 25, N: 30, O: 35, F: 40, P: 21, S: 25, Cl:
 const POLAR = new Set(['NH3', 'H2O', 'CH2O', 'HCN', 'SF4', 'ClF3', 'BrF5', 'SO2', 'NO2-'])
 const PI = { CO2: 2, CH2O: 1, HCN: 2, 'NO2-': 1, 'CO3 2-': 1, SO2: 2, 'SO4 2-': 2, 'PO4 3-': 1 }
 const HYBRID = ['sp', 'sp2', 'sp3', 'sp3d', 'sp3d2']
+/** Whether the net dipole's label is on screen and clear of the panels over the board's top. */
+const netTagClear = () => mb(() => {
+  const tag = document.querySelector('.mb-delta.is-net')
+  if (!tag || getComputedStyle(tag).opacity === '0') return { shown: false, clear: false }
+  const t = tag.getBoundingClientRect()
+  const over = ['.mb-top', '.mb-ledger', '.mb-checkbar'].filter((sel) => {
+    const el = document.querySelector(sel)
+    if (!el) return false
+    const r = el.getBoundingClientRect()
+    return r.height > 0 && t.left < r.right && t.right > r.left && t.top < r.bottom && t.bottom > r.top
+  })
+  return { shown: true, clear: over.length === 0, over, y: Math.round(t.top) }
+})
 /** The right answer for a bond: nonpolar when the two atoms differ by 0.4 or less, otherwise the atom that pulls harder. */
 const bondAnswer = (a, b) => (Math.abs(EN[a] - EN[b]) <= 4 ? 'nonpolar' : EN[a] > EN[b] ? a : b)
 const PROBLEMS = firstArg === 'shell' ? [] : await mb(() => {
@@ -563,6 +576,10 @@ async function solve(p, wrong = {}) {
   const enMine = [...new Set(outer)].map((el) => (Math.abs(EN[p.center] - EN[el]) / 10).toFixed(1))
   ok(enCard?.id === 'delta-en' && !!enShown && !enMine.includes(enShown), `${p.id}: the ΔEN card's example (${enShown}) is not the ΔEN of a bond of this molecule (${enMine.join()})`)
   await closeTerm()
+  if (isPolar) {
+    const tag = await netTagClear()
+    ok(tag.shown && tag.clear, `${p.id}: the net dipole label is on screen and clear of the panels (${JSON.stringify(tag)})`)
+  }
   await shot(`${p.id.replace(/\W/g, '')}-polar`)
   await press('[data-key="next"]')
 
@@ -900,6 +917,8 @@ async function extras() {
   dip = (await points()).dipoles
   ok(dip.bonds === 2 && dip.net && dip.netDrawn, `free: on the 3D shape the net dipole is drawn too (${JSON.stringify(dip)})`)
   ok((await angles()).every((a) => a > 95 && a < 109), 'free: the H–O–H angle in the model is below 109.5')
+  const freeTag = await netTagClear()
+  ok(freeTag.shown && freeTag.clear, `free: the net dipole label is on screen and clear of the panels (${JSON.stringify(freeTag)})`)
   await shot('free-water-3d')
   ok(await page.locator('[data-tray]').count() === 0, 'free: the atom tray steps aside while the 3D shape is showing')
   await press('[data-key="view-flat"]')

@@ -2,6 +2,21 @@
 
 Add your entry on top, under a heading in exactly this form: `## 2026-11-13 (team) What changed`. Say what changed, what you checked and how, what you ask of other teams or of Sam, and the next step.
 
+## 2026-11-17 (lewis) The net dipole label stays clear of the strip of checks on a phone
+
+Sam wrote on 2026-11-17: "fix the net dipole label on phone". On a phone the board reaches under the lower half of the strip of checks (see `measure()` in `ui.ts`), and the "net dipole" label past the arrowhead landed there, hidden.
+
+**Changed**
+- `src/modules/lewis/scene.ts`: `Insets` gains `clear`, the line where the panels over the board end. When the label past the arrowhead would sit above that line, it moves beside the arrowhead, on the side the arrow leans toward (the other side when that runs off screen), and below the line.
+- `src/modules/lewis/ui.ts`: `measure()` passes `clear`.
+- `scripts/check-browser.mjs`: `netTagClear()`; every polar molecule in step 6 and free build water check that the label is shown and overlaps none of `.mb-top`, `.mb-ledger`, `.mb-checkbar`.
+
+**Checked.** The entry dated 2026-11-17 (net dipole label) in `docs/verified.md`.
+
+**Asks.** None. The δ+ tag over an atom's electron count on the flat drawing, from the entry below, is still open.
+
+**Next step.** Sam looks at step 6 on a phone.
+
 ## 2026-11-17 (lewis) Free build shows electronegativity, each bond's ΔEN and the dipoles
 
 **State.** Built in the main checkout on the branch `lewis/key-terms`, on top of the key terms work. On 2026-11-17 Sam wrote "commit push deploy". Another session had already committed the same working tree as 63c3a57 (the snapshot that `lewis/review-modes`, `lewis/board-3d`, `lewis/exercises`, `lewis/geometry-names`, `lewis/shapes-quiz` and `chem/exercise-pool` start from), so this commit sits on top of that snapshot and holds only the docs that came after it. main moves from 63d657d through 63c3a57 to this commit, and those branches keep their history.

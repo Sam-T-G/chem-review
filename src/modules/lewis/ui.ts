@@ -1780,7 +1780,8 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
     // The board keeps clear of the dock at its resting height. The card for a selected atom can be
     // taller; it is allowed to overlap the board's edge so the board does not jump when it opens.
     if (!regions.dock.querySelector('.mb-sel')) dockRest = dr.height ? sr.bottom - dr.top : 0
-    scene.setInsets({ top, bottom: dockRest + 18, left: 14, right: 14 })
+    const clear = Math.max(lr.height ? lr.bottom : 0, cr.height ? cr.bottom : 0, tr.bottom) - sr.top
+    scene.setInsets({ top, bottom: dockRest + 18, left: 14, right: 14, clear })
   }
 
   const render = (s: State) => {

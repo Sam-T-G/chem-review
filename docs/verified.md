@@ -2,6 +2,18 @@
 
 Dated entries, newest first. Each says what was run, on which build, by whom, and what it did not cover. Add an entry when you verify something a reader would otherwise have to take on trust. A claim with no entry here has not been checked.
 
+## 2026-11-17: the net dipole label stays clear of the strip of checks on a phone (build session, team lewis)
+
+Run in the main checkout on `main` at c8f14ad with the change uncommitted. Load average 23 to 29 on 14 cores the whole time (`uptime`), from other sessions' browser checks.
+
+- `pnpm verify` exits 0: 455 unit tests, `check-repo: ok`, the production web build.
+- Browser, real input, against that build on port 5210. The new check (`netTagClear`) passed everywhere it ran: each polar molecule in step 6 and free build water, at both sizes. It reads the label's box against `.mb-top`, `.mb-ledger` and `.mb-checkbar`.
+  - All 20 molecules with touch at 390 x 844: 1197 passed, 8 failed, all of them drawing the bond arrows on PCl5 and XeF4. Those two alone: 58 and 66 checks, 0 failed.
+  - All 20 with a mouse: 1257 passed, 2 failed ("lift finished" at 0.97 and 0.96). Alone, CH4 still failed at 0.99 once more. `setInsets` then stopped re-fitting the camera when only `clear` changes, and CH4 alone passed 62 checks.
+  - The extras with touch: 267 passed, 0 failed. With a mouse: 351 passed, 1 failed ("Flat drawing puts the model back on the board", read 1.6 s after the press). The same run on the code before this change failed that check and one more (347 passed, 2 failed), so the miss is the load, not this change.
+- Looked at by the session: `shots/phone-H2O-polar.png`, the label sits beside the arrowhead below the strip.
+- Not checked: a real phone (W-003), Safari's engine (W-012), a full desktop run at normal load.
+
 ## 2026-11-17: free build shows electronegativity, each bond's ΔEN and the dipoles, with the key terms (build session, team lewis)
 
 Run in the main checkout on the branch `lewis/key-terms`, on the working tree that holds both the key terms (D-0028) and the free build dipoles (D-0029), before the commit.

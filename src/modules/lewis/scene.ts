@@ -106,6 +106,9 @@ export interface Insets {
   right: number
   bottom: number
   left: number
+  /** Where the panels over the board's top end. On a phone the board reaches under part of the
+   *  strip of checks (`top` is above this), but a label there would be hidden. */
+  clear: number
 }
 
 const COLOR = { electron: 0xffc93c, electronGlow: 0xff9d00, ink: 0x3a3358, bond: 0x7467c2, bondSel: 0x5a4daa, board: 0xcfebdb, boardEdge: 0xb5dcc6, ring: 0x7467c2, drop: 0xffb81f, lobe: 0xffe08a }
@@ -237,7 +240,7 @@ export class Scene {
   private ghost: { el: El; mesh: THREE.Mesh; startX: number; startY: number; moved: boolean } | null = null
 
   private input: SceneInput = { s: { atoms: [], bonds: [], seq: 1 }, editable: false, selection: null, view: 'flat', specimen: false, showCounts: false, showCharges: false, shells: new Map(), refused: null, point: null, angles: [], dipoles: null, draw: null, dropBonds: false }
-  private insets: Insets = { top: 96, right: 16, bottom: 132, left: 16 }
+  private insets: Insets = { top: 96, right: 16, bottom: 132, left: 16, clear: 96 }
   private halfW = 5.6
   private halfH = 3.5
   private boardKey = ''
@@ -409,10 +412,10 @@ export class Scene {
   // ------------------------------------------------------------------ public
 
   setInsets(insets: Insets) {
-    const same = (Object.keys(insets) as (keyof Insets)[]).every((k) => Math.abs(insets[k] - this.insets[k]) < 2)
-    if (same) return
-    this.insets = insets
-    this.fit()
+    // `clear` only places labels, so a change to it alone does not move the camera.
+    const same = (['top', 'right', 'bottom', 'left'] as const).every((k) => Math.abs(insets[k] - this.insets[k]) < 2)
+    this.insets = same ? { ...this.insets, clear: insets.clear } : insets
+    if (!same) this.fit()
   }
 
   sync(input: SceneInput) {
@@ -1702,7 +1705,21 @@ export class Scene {
         if (net) {
           const len = Math.hypot(to.x - from.x, to.y - from.y) || 1
           this.netTag.textContent = d.netLabel
-          this.netTag.style.transform = `translate(${(to.x + ((to.x - from.x) / len) * 16).toFixed(1)}px, ${(to.y + ((to.y - from.y) / len) * 16).toFixed(1)}px) translate(-50%, -50%)`
+          let tx = to.x + ((to.x - from.x) / len) * 16
+          let ty = to.y + ((to.y - from.y) / len) * 16
+          // Past the arrowhead the label can land under the panels over the board's top (on a
+          // phone, the strip of checks). Then it sits beside the arrowhead, on the side the arrow
+          // leans toward, and below the panels.
+          const tw = this.netTag.offsetWidth
+          const th = this.netTag.offsetHeight
+          if (ty - th / 2 < this.insets.clear + 4) {
+            const side = to.x - from.x >= 0 ? 1 : -1
+            tx = to.x + side * (tw / 2 + 14)
+            ty = Math.max(to.y, this.insets.clear + 4 + th / 2)
+            const W = this.wrap.clientWidth
+            if (tx + tw / 2 > W - 8 || tx - tw / 2 < 8) tx = to.x - side * (tw / 2 + 14)
+          }
+          this.netTag.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) translate(-50%, -50%)`
         }
       }
     }
