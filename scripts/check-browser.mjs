@@ -4,7 +4,7 @@
 //
 // Usage: node scripts/check-browser.mjs [desktop|phone] [first problem index] [how many]
 //        node scripts/check-browser.mjs [desktop|phone] extras   (wrong answers, hints, refused moves, undo, keyboard, free build)
-//        node scripts/check-browser.mjs [desktop|phone] shell    (home screen, opening the module, the way back, saved progress)
+//        node scripts/check-browser.mjs [desktop|phone] shell    (home screen, the three cards and their routes, the way back, saved progress)
 //        node scripts/check-browser.mjs [desktop|phone] terms    (the highlighted key terms and the card each one opens)
 // Needs the built site served on port 5210 (pnpm web:serve), or MB_URL pointing at one (the live
 // site included: MB_URL=https://sam-t-g.github.io/chem-review).
@@ -36,7 +36,7 @@ const failed = []
 const ok = (cond, label) => { if (cond) passed++; else { failed.push(label); console.log(`  FAIL ${label}`) } }
 const wait = (ms) => page.waitForTimeout(ms)
 const mb = (fn, arg) => page.evaluate(fn, arg)
-const state = () => mb(() => { const s = window.__mb.store.getState(); return { step: s.step, mode: s.mode, problem: s.problem, atoms: s.s.atoms, bonds: s.s.bonds, view: s.view, toast: s.toast?.text ?? null, selection: s.selection } })
+const state = () => mb(() => { const s = window.__mb.store.getState(); return { step: s.step, mode: s.mode, problem: s.problem, atoms: s.s.atoms, bonds: s.s.bonds, view: s.view, groupsView: s.groupsView, toast: s.toast?.text ?? null, selection: s.selection } })
 const report = () => mb(() => { const a = window.__mb.report(); return { complete: a.complete, issues: a.issues, atoms: a.atoms, electrons: a.electrons, topology: a.topology, charge: a.charge } })
 const points = () => mb(() => window.__mb.scene.debugPoints())
 const angles = () => mb(() => window.__mb.scene.debugAngles())
@@ -121,7 +121,12 @@ const strip = () => mb(() => [...document.querySelectorAll('.mb-checkbar .mb-chk
 function clearPoint(atoms, id) {
   const a = atoms.find((x) => x.id === id)
   const others = atoms.filter((x) => x.id !== id)
-  const free = (q) => others.every((o) => Math.hypot(o.x - q.x, o.y - q.y) > o.r + 9)
+  // The board gives a touch 10 to 12 px of slack around an atom and takes the atom nearer the viewer
+  // (`pick` and `atomAt` in scene.ts), so on the phone size a point has to stand further clear of every
+  // other atom than that. At 9 px a press on sulfur in SF6 could land on a fluorine in front of it,
+  // and the arrow then ran from fluorine to fluorine, which the board ignores.
+  const margin = phone ? 14 : 9
+  const free = (q) => others.every((o) => Math.hypot(o.x - q.x, o.y - q.y) > o.r + margin)
   if (free(a)) return { x: a.x, y: a.y }
   for (const f of [0.35, 0.6]) for (let k = 0; k < 12; k++) {
     const q = { x: a.x + a.r * f * Math.cos((k * Math.PI) / 6), y: a.y + a.r * f * Math.sin((k * Math.PI) / 6) }
@@ -432,8 +437,9 @@ async function solve(p, wrong = {}) {
     const said = await text('.mb-coach')
     // a molecular geometry picked for the electron geometry: the card lists all five electron geometries and picks none of them out
     if (w.five) ok(FIVE.every((g) => new RegExp(`\\b${g}\\b`, 'i').test(said)) && !/the molecular geometry/i.test(said), `${p.id}: the card for ${w.pick} lists all five electron geometries and does not say which is the molecular geometry (${said.replace(/\s+/g, ' ')})`)
-    // the first miss holds the answer back; the second gives the rule for every count (D-0033)
+    // the first miss holds the answer back; the second hands back the count and a smaller question, never the rule (COPY2-2)
     else if (missed === 0) ok(!new RegExp(`\\b${geometry}\\b`, 'i').test(said), `${p.id}: the first miss does not give the electron geometry away`)
+    else if (missed === 1) ok(!/\b[2-6] is (linear|trigonal planar|tetrahedral|trigonal bipyramidal|octahedral)\b/.test(said), `${p.id}: the second miss does not give the rule (${said.replace(/\s+/g, ' ')})`)
     missed++
     if (w.rings) {
       let ringed = 0
@@ -487,7 +493,15 @@ async function solve(p, wrong = {}) {
   const scroll = await mb(() => document.documentElement.scrollWidth - window.innerWidth)
   ok(scroll <= 0, `${p.id}: no sideways scroll`)
   ok(await page.locator('[data-key="next"]').isEnabled(), `${p.id}: the shape step leads on to the polar bonds`)
+  // the switch between the two geometries is offered on step 5's lifted model when the middle atom has a
+  // lone pair, and a pick of "Molecular geometry" ends with this step: steps 6 and 7 draw every electron group
+  const hasSwitch = await page.locator('[data-key="groups-atoms"]').count() === 1
+  if (hasSwitch) {
+    await press('[data-key="groups-atoms"]')
+    ok((await state()).groupsView === 'atoms', `${p.id}: on step 5's model the switch shows the molecular geometry`)
+  }
   await press('[data-key="next"]')
+  ok((await state()).groupsView === 'all' && await page.locator('[data-key="groups-atoms"]').count() === 0, `${p.id}: step 6 draws every electron group again and has no switch (${(await state()).groupsView})`)
 
   // 6. polar bonds: draw each polar bond's dipole arrow on the model, press the button for a
   //    nonpolar bond, say whether the molecule is polar, then draw the net dipole of a polar one
@@ -1098,8 +1112,8 @@ async function extras() {
       { n: 4, says: /^4 counts every shared pair as its own group\.$/, rings: 4, shot: 'groups-coach' },
       { n: 6, says: /^6 counts the lone pairs on the outer atoms\.$/, rings: 4 },
     ],
-    geometry: [{ pick: 'tetrahedral', says: /^Tetrahedral is the electron geometry for 4 electron groups, which counts each shared pair of a double or triple bond as its own group\.$/, rings: 4, shot: 'geometry-coach' }],
-    shape: { pick: 'bent', says: /Bent is the molecular geometry for 2 atoms and 1 or 2 lone pairs/ },
+    geometry: [{ pick: 'tetrahedral', says: /^Tetrahedral is the electron geometry for 4 electron groups\. You get 4 by counting each double bond as 2 groups\.$/, rings: 4, shot: 'geometry-coach' }],
+    shape: { pick: 'bent', says: /Bent is the molecular geometry for 2 bonded atoms and 1 or 2 lone pairs/ },
     bond: /^That arrow points at carbon\.$/,
     net: /polar, and the dipoles still cancel[\s\S]*Carbon dioxide is nonpolar\./,
     sigma: /^4 counts every line as a sigma bond\.$/,
@@ -1493,52 +1507,111 @@ async function terms() {
   await noSideScroll('terms')
 }
 
+/** The three cards on the home screen, as they read now. */
+const CARDS = [
+  { id: 'lewis', title: /Lewis structures and shapes/, route: '/lewis', mode: 'guided', word: 'molecules', page: 'Lewis structures and shapes' },
+  { id: 'shapes', title: /^Shapes quiz/, route: '/shapes', mode: 'shapes', word: 'shapes', page: 'Shapes quiz' },
+  { id: 'exercises', title: /^Exercises/, route: '/exercises', mode: 'exercise', word: 'molecules', page: 'Exercises' },
+]
+const cardLink = (c) => page.getByRole('link', { name: c.title })
+const homeCardText = async (c) => (await cardLink(c).innerText()).replace(/\s+/g, ' ')
+/** Opens a card with a real tap or click, after checking that a press on its middle lands on it. */
+async function openCard(c) {
+  const link = cardLink(c)
+  await link.scrollIntoViewIfNeeded()
+  const b = await link.boundingBox()
+  const p = { x: b.x + b.width / 2, y: b.y + b.height / 2 }
+  const hit = await mb(({ x, y, name }) => { const n = document.elementFromPoint(x, y); const a = n?.closest('a'); return a && (a.getAttribute('aria-label') ?? '').startsWith(name) ? '' : `${n?.tagName}.${n?.className}` }, { ...p, name: c.page })
+  ok(hit === '', `home: a press on the middle of the ${c.page} card reaches it${hit ? ` (it lands on ${hit})` : ''}`)
+  await tapAt(p)
+  await page.waitForFunction(() => !!window.__mb, null, { timeout: 15000 })
+}
+async function goBack(label) {
+  const b = await page.locator('[data-key="exit"]').boundingBox()
+  const p = { x: b.x + b.width / 2, y: b.y + b.height / 2 }
+  const hit = await mb(({ x, y }) => { const n = document.elementFromPoint(x, y); return n?.closest('[data-key="exit"]') ? '' : `${n?.tagName}.${n?.className}` }, p)
+  ok(hit === '', `${label}: a press on the back button reaches it${hit ? ` (it lands on ${hit})` : ''}`)
+  await tapAt(p)
+  await page.waitForFunction(() => !window.__mb, null, { timeout: 10000 })
+  ok(new URL(page.url()).pathname === `${folder}/`, `${label}: the back button returns to the home screen (${page.url()})`)
+  ok(await page.locator('.mb-canvas').count() === 0, `${label}: the board is taken down`)
+  await page.waitForTimeout(300)
+}
+
 async function shell() {
   console.log('shell: home')
   await shot('home')
   ok((await page.title()) === 'Chem Review', `home: the page title is Chem Review (${await page.title()})`)
   ok(await page.getByRole('heading', { name: 'Chem Review' }).count() === 1, 'home: the app name is a heading')
-  const card = page.getByRole('link', { name: /Lewis structures and shapes/ })
-  ok(await card.count() === 1, 'home: one module card, and it is a link')
-  ok(/20 molecules/.test(await card.innerText()) && !/finished/.test(await card.innerText()), 'home: the card says 20 molecules, with nothing finished yet')
+  ok(await page.getByRole('link').count() === 3, `home: three cards, each a link (${await page.getByRole('link').count()})`)
+  const totals = {}
+  for (const c of CARDS) {
+    ok(await cardLink(c).count() === 1, `home: one ${c.page} card`)
+    const m = (await homeCardText(c)).match(new RegExp(`(\\d+) ${c.word}`))
+    totals[c.id] = m ? Number(m[1]) : 0
+    ok(!!m && totals[c.id] > 0 && !/finished/.test(await homeCardText(c)), `home: the ${c.page} card counts its ${c.word}, with nothing finished yet (${await homeCardText(c)})`)
+  }
+  ok(totals.lewis === 20, `home: the Lewis card says 20 molecules (${totals.lewis})`)
   await noSideScroll('home')
-  if (phone) await card.tap(); else await card.click()
-  await page.waitForFunction(() => !!window.__mb, null, { timeout: 15000 })
-  ok(new URL(page.url()).pathname === `${folder}/lewis`, `home: the card opens /lewis (${page.url()})`)
-  ok(await page.locator('.mb-canvas').count() === 1, 'module: the board is on screen')
-  ok((await page.title()) === 'Lewis structures and shapes', `module: the page title names the module (${await page.title()})`)
-  const fonts = await mb(() => document.fonts.check('900 20px "Nunito Variable"'))
-  ok(fonts, 'module: the Nunito variable font is loaded')
-  const vars = await mb(() => getComputedStyle(document.querySelector('.mb')).getPropertyValue('--grape-deep').trim())
-  ok(vars === '#5a4daa', `module: colors come from the shared tokens (--grape-deep is ${vars})`)
+
+  console.log('shell: each card opens its own screen, and the way back works')
+  for (const c of CARDS) {
+    await openCard(c)
+    ok(new URL(page.url()).pathname === `${folder}${c.route}`, `${c.id}: the card opens ${c.route} (${page.url()})`)
+    ok(await page.locator('.mb-canvas').count() === 1, `${c.id}: the board is on screen`)
+    ok((await page.title()) === c.page, `${c.id}: the page title is ${c.page} (${await page.title()})`)
+    const st = await state()
+    ok(st.mode === c.mode, `${c.id}: the module opens on ${c.mode} (${st.mode})`)
+    ok(await page.locator(`[data-key="mode-${c.mode}"]`).getAttribute('aria-selected') === 'true', `${c.id}: its tab is the marked one`)
+    if (c.id === 'lewis') {
+      const fonts = await mb(() => document.fonts.check('900 20px "Nunito Variable"'))
+      ok(fonts, 'module: the Nunito variable font is loaded')
+      const vars = await mb(() => getComputedStyle(document.querySelector('.mb')).getPropertyValue('--grape-deep').trim())
+      ok(vars === '#5a4daa', `module: colors come from the shared tokens (--grape-deep is ${vars})`)
+    }
+    await noSideScroll(c.id)
+    await goBack(c.id)
+  }
 
   console.log('shell: finish methane, then go back')
+  await openCard(CARDS[0])
   const list = await mb(() => { const s = window.__mb.store; const p = s.problemOf(); return { i: s.getState().problem, id: p.id, formula: p.formula, charge: p.charge, center: p.center, shape: p.shape } })
   PROBLEMS.push(list)
   await solve(list)
-  await press('[data-key="exit"]')
-  await page.waitForFunction(() => !window.__mb, null, { timeout: 10000 })
-  ok(new URL(page.url()).pathname === `${folder}/`, `back: the back button returns to the home screen (${page.url()})`)
-  ok(await page.locator('.mb-canvas').count() === 0, 'back: the board is taken down')
-  await page.waitForTimeout(300)
-  ok(/1 of 20 molecules finished/.test(await page.getByRole('link', { name: /Lewis structures and shapes/ }).innerText()), 'back: the card now says 1 of 20 molecules finished')
+  await goBack('back')
+  ok(new RegExp(`1 of ${totals.lewis} molecules finished`).test(await homeCardText(CARDS[0])), `back: the Lewis card now says 1 of ${totals.lewis} molecules finished (${await homeCardText(CARDS[0])})`)
+  ok(!/finished/.test(await homeCardText(CARDS[1])) && !/finished/.test(await homeCardText(CARDS[2])), 'back: a finished guided molecule counts on the Lewis card only')
   await shot('home-progress')
+
+  // A finished shape and a finished exercise are recorded under their own cards. Finishing them for
+  // real is the shapes quiz's and the exercises' own checks; here the module reports one of each the
+  // way their parts do (store.markSolved with the part's prefix), and the home screen has to file it.
+  console.log('shell: a finished shape and a finished exercise raise their own cards')
+  for (const [c, id] of [[CARDS[1], 'shape:check-board'], [CARDS[2], 'ex:check-board']]) {
+    await openCard(c)
+    await mb((x) => window.__mb.store.markSolved(x), id)
+    await wait(300)
+    await goBack(`${c.id} progress`)
+    ok(new RegExp(`1 of ${totals[c.id]} ${c.word} finished`).test(await homeCardText(c)), `${c.id}: its card now says 1 of ${totals[c.id]} ${c.word} finished (${await homeCardText(c)})`)
+  }
+  ok(new RegExp(`1 of ${totals.lewis} molecules finished`).test(await homeCardText(CARDS[0])), `progress: the Lewis card still says 1 of ${totals.lewis}`)
 
   console.log('shell: reload, reopen')
   await page.reload({ waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
-  ok(/1 of 20 molecules finished/.test(await page.getByRole('link', { name: /Lewis structures and shapes/ }).innerText()), 'reload: the finished count is still there')
-  const again = page.getByRole('link', { name: /Lewis structures and shapes/ })
-  if (phone) await again.tap(); else await again.click()
-  await page.waitForFunction(() => !!window.__mb, null, { timeout: 15000 })
+  for (const c of CARDS) ok(new RegExp(`1 of ${totals[c.id]} ${c.word} finished`).test(await homeCardText(c)), `reload: the ${c.page} card still says 1 finished (${await homeCardText(c)})`)
+  await openCard(CARDS[0])
   await press('[data-key="picker"]')
   ok(await page.locator('.mb-pick-done').count() === 1, 'reopen: the picker ticks methane as finished')
   await press('[data-key="picker-close"]')
-  // straight to the module by its address, then back: with no history, the back button still goes home
-  await page.goto(`${base}/lewis`, { waitUntil: 'networkidle' })
-  await page.waitForFunction(() => !!window.__mb, null, { timeout: 15000 })
-  ok(true, 'address: /lewis opens the module directly')
-  await noSideScroll('module')
+  // straight to each screen by its address, then back: with no history, the back button still goes home
+  for (const c of CARDS) {
+    await page.goto(`${base}${c.route}`, { waitUntil: 'networkidle' })
+    await page.waitForFunction(() => !!window.__mb, null, { timeout: 15000 })
+    ok((await state()).mode === c.mode, `address: ${c.route} opens the module on ${c.mode}`)
+    await goBack(`address ${c.route}`)
+  }
+  await noSideScroll('home again')
 }
 
 if (firstArg === 'shell') {

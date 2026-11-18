@@ -2,6 +2,7 @@
 // next-molecule rule and what is saved. Wording is in exercise-words.test.ts.
 import { describe, expect, it } from 'vitest'
 import { EXERCISES, EXERCISE_SETS, referenceStructure } from '../src/chem/exercises'
+import { alsoAngles } from '../src/chem/vsepr'
 import { lower } from '../src/modules/lewis/guide'
 import { readTenths, readWhole, sheetOf, ANGLES, NO_ANGLE } from '../src/modules/lewis/exercise/sheet'
 import {
@@ -19,7 +20,9 @@ import {
   goTo,
   netOpen,
   nextAt,
+  openingExercise,
   pickAngle,
+  pickAt,
   pickBond,
   pickDirection,
   pickGeometry,
@@ -33,7 +36,7 @@ import {
   typeValence,
   type ExerciseState,
 } from '../src/modules/lewis/exercise/state'
-import { directionLabel } from '../src/modules/lewis/exercise/words'
+import { directionChip, directionLabel } from '../src/modules/lewis/exercise/words'
 import { PART_IDS } from '../src/modules/lewis/store'
 import { EMPTY, addElectron, removeElectron } from '../src/chem/structure'
 import { star } from './helpers'
@@ -106,6 +109,96 @@ describe('every molecule in the pool', () => {
       const others = p.formula.map(([el]) => el).filter((el) => el !== 'H')
       expect(Math.min(...others.map((el) => EN[el]!)), p.id).toBe(EN[p.center])
     }
+  })
+})
+
+describe('the picks a sheet offers (review round 1)', () => {
+  it('never offers an angle the molecule really has as a wrong bond angle pick, and still offers 5 (CHEMWORDS-1)', () => {
+    for (const p of ALL) {
+      const sh = sheetOf(p)
+      const also = alsoAngles(sh.info.bonded, sh.info.lonePairs)
+      expect(sh.angleChoices.filter((a) => a !== sh.angle && also.includes(a)), p.id).toEqual([])
+      expect(sh.angleChoices.length, p.id).toBe(5)
+    }
+    // worked by hand: PCl5 has 90° and 120° and 180° (axial to axial) between its bonds; SF6 and XeF4 have 180° across the octahedron
+    expect(sheetFor('PCl5').angleChoices).not.toContain('180°')
+    expect(sheetFor('PCl5').angleChoices).not.toContain('120°')
+    expect(sheetFor('SF6').angleChoices).not.toContain('180°')
+    expect(sheetFor('XeF4').angleChoices).not.toContain('180°')
+  })
+  it('offers "along 1 bond" only for a kind of bond that is polar (CHEMWORDS-4)', () => {
+    for (const p of ALL) {
+      const sh = sheetOf(p)
+      for (const c of sh.directions?.choices ?? []) {
+        if (c.kind !== 'one') continue
+        expect(sh.bonds.find((k) => k.b === c.el)?.polar, `${p.id}: ${directionLabel(sh, c)}`).toBe(true)
+      }
+    }
+    // C–H is 2.5 − 2.1 = 0.4 on the course table: nonpolar, so there is no C–H dipole to follow
+    expect(sheetFor('CH2Cl2').directions!.choices.map((c) => c.id)).not.toContain('one-H')
+  })
+  it('never words the accepted direction by the lone pairs, and still judges it within 35° (CHEMWORDS-9)', () => {
+    for (const p of ALL) {
+      const sh = sheetOf(p)
+      if (!sh.directions) continue
+      const right = sh.directions.choices.find((c) => c.id === sh.directions!.right)!
+      expect(right.kind, `${p.id}: ${directionLabel(sh, right)}`).not.toMatch(/^lone/)
+    }
+    // water, the hydronium ion and the amide ion: the net dipole runs from the hydrogen atoms out through the middle atom,
+    // the worksheet's "up through oxygen"
+    for (const [id, center, h] of [['H2O', 'oxygen', 2], ['H3O+', 'oxygen', 3], ['NH2-', 'nitrogen', 2]] as const) {
+      const sh = sheetFor(id)
+      const right = sh.directions!.choices.find((c) => c.id === sh.directions!.right)!
+      expect(right.kind, id).toBe('from')
+      expect(directionChip(sh, right), id).toBe(`Away from the ${h} hydrogen atoms`)
+      expect(directionLabel(sh, right, true), id).toBe(`away from the ${h} hydrogen atoms, through the ${center} atom`)
+    }
+  })
+  it('never offers a wrong direction within 45° of the net dipole, and never "along 1 bond" when a bond of that kind lies along it (FE-1)', () => {
+    const cos45 = Math.cos(Math.PI / 4)
+    const dot = (a: number[], b: number[]) => a[0]! * b[0]! + a[1]! * b[1]! + a[2]! * b[2]!
+    for (const p of ALL) {
+      const sh = sheetOf(p)
+      if (!sh.directions) continue
+      const net = sh.directions.net
+      for (const c of sh.directions.choices) {
+        if (c.id === sh.directions.right) continue
+        expect(dot(c.dir, net), `${p.id}: ${directionLabel(sh, c)}`).toBeLessThanOrEqual(cos45 + 1e-9)
+        for (const b of c.kind === 'one' ? c.bonds ?? [] : []) expect(dot(b, net), `${p.id}: ${directionLabel(sh, c)}, one of its bonds`).toBeLessThanOrEqual(cos45 + 1e-9)
+      }
+    }
+    // worked by hand: a T-shape's 2 axial dipoles cancel and a square pyramid's 4 base dipoles cancel, so the net
+    // dipole runs along the one bond left (the equatorial I–Cl bond, the apical I–Cl or Cl–F bond)
+    for (const id of ['ICl3', 'ICl5', 'ClF5']) expect(sheetFor(id).directions!.choices.map((c) => c.kind), id).not.toContain('one')
+  })
+  it('says "outer" when the middle atom\'s element is also an outer atom (CHEMWORDS-7)', () => {
+    const sh = sheetFor('O3')
+    const right = sh.directions!.choices.find((c) => c.id === sh.directions!.right)!
+    expect(directionChip(sh, right)).toBe('Toward the 2 outer oxygen atoms')
+  })
+})
+
+describe('the picker and the first molecule (review round 1)', () => {
+  it('keeps the sheet when the molecule already on screen is picked (CODE-3)', () => {
+    const sh = sheetFor('PCl3')
+    const st = checkValence(typeValence(pcl3(), '26'), sh)
+    expect(pickAt(st, st.at)).toBe(st)
+    const other = pickAt(st, 0 === st.at ? 1 : 0)
+    expect(other.at).not.toBe(st.at)
+    expect(other.valence.right).toBe(false)
+  })
+  it('opens on the first unfinished molecule once the saved list is known, and only while nothing is answered (CODE-6)', () => {
+    const order = poolOrder()
+    const first = EXERCISES[order[0]!]!
+    const fresh = freshExercise()
+    expect(openingExercise(fresh, [])).toBe(fresh)
+    expect(openingExercise(fresh, [savedId(first)]).at).toBe(order[1])
+    expect(openingExercise(fresh, [savedId(first), savedId(EXERCISES[order[1]!]!)]).at).toBe(order[2])
+    // a sheet with an answer on it stays where it is
+    const started = typeValence(fresh, '8')
+    expect(openingExercise(started, [savedId(first)])).toBe(started)
+    // every molecule finished: stay on the first
+    expect(openingExercise(fresh, EXERCISES.map(savedId))).toBe(fresh)
   })
 })
 

@@ -185,7 +185,8 @@ describe('guided steps', () => {
     // each miss gets a new number, so the board rings the groups it is about once per answer
     store.pickGeometry('octahedral')
     expect(store.getState().shape.geometryCoach!.n).toBeGreaterThan(miss.geometryCoach!.n)
-    expect(store.getState().shape.geometryCoach!.ask).toMatch(/^The electron geometry follows the number of electron groups/)
+    // the second miss hands back the count and a smaller question, never the rule (COPY2-2)
+    expect(store.getState().shape.geometryCoach!.ask).toMatch(/^Carbon has 4 bonded atoms and no lone pairs, which is 4 electron groups\. Which of these 5 electron geometries/)
     store.pickGeometry('tetrahedral')
     expect(store.getState().shape).toMatchObject({ geometry: 'tetrahedral', geometryRight: true, geometryTries: 2, geometryCoach: null, geometryFeedback: 'The electron geometry is tetrahedral: 4 electron groups around carbon.' })
     // a right pick is final, and the hints start again for the next question

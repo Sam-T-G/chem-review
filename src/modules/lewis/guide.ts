@@ -296,7 +296,7 @@ function totalIdea(p: Problem, answer: number): Coach {
   }
   const atoms = atomsOf(p).length
   const charge = p.charge === 0 ? '' : p.charge < 0 ? `, then add ${n} for the charge` : `, then take ${n} away for the charge`
-  return { lead: `The total is not ${answer}.`, why: totalMethod(p), ask: `Add up what all ${atoms} atoms bring${charge}.` }
+  return { lead: `The total is not ${answer}.`, why: totalMethod(p), ask: `Add up what ${atoms === 2 ? 'both atoms' : `all ${atoms} atoms`} bring${charge}.` }
 }
 
 /** What to say about a wrong total, with a picture of the atoms and what each one brings. The
@@ -806,13 +806,18 @@ export interface GroupFacts {
   bondPairs: number
   /** Lone pairs on the outer atoms, which are not groups around the middle atom. */
   outerPairs: number
+  /** Double and triple bonds on the middle atom, so a card names the kind of bond the molecule has. */
+  doubles: number
+  triples: number
 }
 export function groupFacts(s: Structure): GroupFacts | null {
   const a = assess(s)
   if (a.topology.kind !== 'star') return null
   const d = centerDomains(s, a.topology.center)
   const outerPairs = a.topology.terminals.reduce((n, id) => n + Math.floor((atomById(s, id)?.lone ?? 0) / 2), 0)
-  return { bonded: d.bonds.length, lonePairs: d.lonePairs, groups: d.bonds.length + d.lonePairs, bondPairs: d.bonds.reduce((n, b) => n + b.order, 0), outerPairs }
+  const doubles = d.bonds.filter((b) => b.order === 2).length
+  const triples = d.bonds.filter((b) => b.order === 3).length
+  return { bonded: d.bonds.length, lonePairs: d.lonePairs, groups: d.bonds.length + d.lonePairs, bondPairs: d.bonds.reduce((n, b) => n + b.order, 0), outerPairs, doubles, triples }
 }
 
 const pairsText = (n: number) => (n === 0 ? 'no lone pairs' : plural(n, 'lone pair'))
@@ -875,9 +880,20 @@ export function geometryQuestion(center: El): { ask: string; sub: string } {
   const c = lower(center)
   return { ask: `What is the electron geometry around ${c}?`, sub: `The electron geometry is how every electron group around ${c} is spread out, lone pairs included. The groups push each other as far apart as they can get.` }
 }
+/** Where the lone pairs go when the corners are not alike, for the second hint of the molecular
+ *  geometry: in the flat triangle of a trigonal bipyramid, and on opposite corners of an octahedron
+ *  when there are 2 (section 7.6). Empty where every corner is alike. It names no molecular geometry. */
+function lonePairCorners(groups: number, lonePairs: number): string {
+  if (groups === 5 && lonePairs > 0) return `${lonePairs === 1 ? 'The lone pair takes 1' : lonePairs === 3 ? 'The 3 lone pairs take all 3' : `The ${lonePairs} lone pairs take ${lonePairs}`} of the 3 corners in the flat triangle. `
+  if (groups === 6 && lonePairs === 2) return 'The 2 lone pairs take 2 corners on opposite sides. '
+  return ''
+}
+/** The name over the picks of step 5's two questions. On a phone the picks fill the panel and the
+ *  question scrolls out of view, so the picks carry the name of what is asked. */
+export const PICKS_NAME = { geometry: 'Electron geometry', shapes: 'Molecular geometry' } as const
 export function shapeQuestion(center: El): { ask: string; sub: string } {
   // the line is the same for every molecule: "lone pairs on nitrogen" would tell methane's student that carbon has some
-  return { ask: `What is the molecular geometry around ${lower(center)}?`, sub: 'The molecular geometry names where the atoms are. Lone pairs still take up room, and they are left out of the name.' }
+  return { ask: `What is the molecular geometry around ${lower(center)}?`, sub: 'To name the molecular geometry, look only at where the atoms sit. The lone pairs still take up room, but they are left out of the name.' }
 }
 
 /** Four molecular geometries to pick from: the right one, the electron geometry if it differs,
@@ -915,11 +931,11 @@ export function shapeFeedback(center: El, info: ShapeInfo, pick: ShapeName): { r
   const c = lower(center)
   if (info.diatomic) {
     // two atoms: no middle atom and no groups to count around one, so nothing is argued from them
-    if (pick === 'linear') return { right: true, text: TWO_ATOMS_RIGHT, coach: null }
+    if (pick === 'linear') return { right: true, text: TWO_ATOMS_SHAPE_RIGHT, coach: null }
     const two: Coach = { lead: `${cap(pick)} does not fit a molecule of 2 atoms.`, why: TWO_ATOMS_WHY, ask: 'The molecular geometry is linear.' }
     return { right: false, text: coachText(two), coach: two }
   }
-  const has = `${plural(info.bonded, 'atom')} and ${pairsText(info.lonePairs)}`
+  const has = `${plural(info.bonded, 'bonded atom')} and ${pairsText(info.lonePairs)}`
   if (pick === info.shape) return { right: true, text: `The molecular geometry is ${info.shape}: ${has} around ${c}.`, coach: null }
   const answer = `The molecular geometry is ${info.shape}.`
   const corners = `The ${info.groups} electron groups point to the corners of ${GEOMETRY_NOUN[info.geometry]}`
@@ -928,8 +944,8 @@ export function shapeFeedback(center: El, info: ShapeInfo, pick: ShapeName): { r
     // the electron geometry: every group, lone pairs included
     coach = {
       lead: `${cap(pick)} is the electron geometry: all ${info.groups} electron groups around ${c}, lone pairs included.`,
-      why: `${corners}, and ${info.lonePairs === 1 ? '1 corner holds a lone pair' : `${info.lonePairs} corners hold lone pairs`}. The molecular geometry names only where the atoms are.`,
-      ask: answer,
+      why: `${corners}, and ${info.lonePairs === 1 ? '1 corner holds a lone pair' : `${info.lonePairs} corners hold lone pairs`}.`,
+      ask: `Leave out ${info.lonePairs === 1 ? 'the corner that holds the lone pair' : `the ${info.lonePairs} corners that hold lone pairs`}, and the ${plural(info.bonded, 'bonded atom')} make a ${info.shape} molecular geometry.`,
     }
   } else if (info.lonePairs > 0 && pick === classify(info.bonded, 0)?.shape) {
     // the molecular geometry these atoms would have with no lone pairs: the lone pairs were left out
@@ -949,7 +965,7 @@ export function shapeFeedback(center: El, info: ShapeInfo, pick: ShapeName): { r
     // bent and linear each come from two counts of lone pairs: "2 atoms and 1 or 2 lone pairs"
     const cases = shapeCases(pick)
     const pairs = cases.length === 1 ? pairsText(cases[0]!.lonePairs) : `${cases.map((k) => k.lonePairs).join(' or ')} lone pairs`
-    coach = { lead: `${cap(pick)} is the molecular geometry for ${plural(cases[0]!.bonded, 'atom')} and ${pairs} around the middle atom.`, why: `${cap(c)} has ${has} around it.`, ask: answer }
+    coach = { lead: `${cap(pick)} is the molecular geometry for ${plural(cases[0]!.bonded, 'bonded atom')} and ${pairs} around the middle atom.`, why: `${cap(c)} has ${has}.`, ask: answer }
   }
   return { right: false, text: coachText(coach), coach }
 }
@@ -957,12 +973,19 @@ export function shapeFeedback(center: El, info: ShapeInfo, pick: ShapeName): { r
 /** The electron geometry for each number of electron groups (section 7.6). */
 const GEOMETRY_FOR: Record<number, Geometry> = { 2: 'linear', 3: 'trigonal planar', 4: 'tetrahedral', 5: 'trigonal bipyramidal', 6: 'octahedral' }
 const groupsOfGeometry = (g: Geometry) => Number(Object.keys(GEOMETRY_FOR).find((n) => GEOMETRY_FOR[Number(n)] === g))
-/** The rule that turns a count of groups into an electron geometry: the second miss gives it, and so does the second hint. */
+/** The rule that turns a count of groups into an electron geometry. With the count on screen it is
+ *  the answer, so only the third miss gives it, as the reason for the answer (COPY2-2). */
 const GEOMETRY_RULE = 'The electron geometry follows the number of electron groups: 2 is linear, 3 is trigonal planar, 4 is tetrahedral, 5 is trigonal bipyramidal and 6 is octahedral.'
 
 /** The five electron geometries, in the order of the shape table: 2 to 6 electron groups. */
 export function geometryChoices(): Geometry[] {
   return ['linear', 'trigonal planar', 'tetrahedral', 'trigonal bipyramidal', 'octahedral']
+}
+/** The smaller question the second miss and the second hint hand back: which of the five spreads
+ *  this many groups apart. It lists all five, so it names no answer. */
+const geometryAsk = (groups: number) => {
+  const names = geometryChoices()
+  return `Which of these 5 electron geometries spreads ${plural(groups, 'electron group')} as far apart as they can get: ${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}?`
 }
 const isGeometry = (name: ShapeName): name is Geometry => (Object.values(GEOMETRY_FOR) as ShapeName[]).includes(name)
 /** The picks for the electron geometry in the guided steps: the five electron geometries, and with
@@ -988,17 +1011,35 @@ export function geometryPicks(info: ShapeInfo): ShapeName[] {
 }
 /** A molecule of two atoms (an exercise can be one). Its `groups` counts around one of its atoms,
  *  so no line about it gives a count of groups or a middle atom. */
-const TWO_ATOMS_RIGHT = 'Linear: a molecule of 2 atoms always sits on a straight line.'
+/** The straight line is the reason for the molecular geometry only. The electron geometry of 2
+ *  atoms is linear because the course gives it the same name (D-0033, CHEM2-4), so that line states
+ *  the name and gives no reason drawn from where the atoms sit. */
+const TWO_ATOMS_SHAPE_RIGHT = 'The molecular geometry is linear: 2 atoms always sit on a straight line.'
 const TWO_ATOMS_WHY = '2 atoms always sit on a straight line, whatever lone pairs they have.'
+const TWO_ATOMS_GEOMETRY_RIGHT = 'The electron geometry is linear: for a molecule of 2 atoms it is given the same name as the molecular geometry.'
 export function geometryRight(center: El, info: ShapeInfo): string {
-  if (info.diatomic) return TWO_ATOMS_RIGHT
+  if (info.diatomic) return TWO_ATOMS_GEOMETRY_RIGHT
   return `The electron geometry is ${info.geometry}: ${plural(info.groups, 'electron group')} around ${lower(center)}.`
 }
 
+/** What the board says about the middle atom's bonds, when there is a board. `doubles` and
+ *  `triples` let the card name the kind of bond the molecule has; without them it says both. */
+type BoardBonds = Pick<GroupFacts, 'bondPairs'> & Partial<Pick<GroupFacts, 'doubles' | 'triples'>>
+
+/** "each double bond as 2 groups", "the triple bond as 3 groups": the bonds counted once per shared pair. */
+function multipleCounted(f: BoardBonds): { counted: string; pairs: string } {
+  const d = f.doubles ?? 0
+  const t = f.triples ?? 0
+  if (d > 0 && t === 0) return { counted: `${d === 1 ? 'the double bond' : 'each double bond'} as 2 groups`, pairs: 'The 2 shared pairs of a double bond' }
+  if (t > 0 && d === 0) return { counted: `${t === 1 ? 'the triple bond' : 'each triple bond'} as 3 groups`, pairs: 'The 3 shared pairs of a triple bond' }
+  return { counted: 'every shared pair of a bond as a group', pairs: 'The shared pairs of a double or triple bond' }
+}
+
 /** The wrong idea an electron geometry pick most likely came from. `f` is the board's count of
- *  shared pairs; without it (the shapes quiz has no board) a double bond counted twice is not
- *  told apart from any other miscount. */
-function geometryIdea(center: El, info: ShapeInfo, pick: ShapeName, f: Pick<GroupFacts, 'bondPairs'> | null): Coach {
+ *  shared pairs; without it (the shapes quiz has no board) a double bond counted twice and a full
+ *  shell read as 4 groups are not told apart from any other miscount. The generic card is marked
+ *  `generic`, so the second miss can put the count in place of its reason. */
+function geometryIdea(center: El, info: ShapeInfo, pick: ShapeName, f: BoardBonds | null): Coach & { generic?: true } {
   const c = lower(center)
   const lp = info.lonePairs
   if (!isGeometry(pick)) {
@@ -1024,26 +1065,65 @@ function geometryIdea(center: El, info: ShapeInfo, pick: ShapeName, f: Pick<Grou
   }
   if (f && f.bondPairs > info.bonded && n === f.bondPairs + lp) {
     // each shared pair of a double or triple bond counted as a group
+    const m = multipleCounted(f)
     return {
-      lead: `${cap(pick)} is the electron geometry for ${plural(n, 'electron group')}, which counts each shared pair of a double or triple bond as its own group.`,
-      why: 'The pairs in a double or triple bond sit between the same 2 atoms, so the whole bond is 1 electron group.',
+      lead: `${cap(pick)} is the electron geometry for ${plural(n, 'electron group')}. You get ${n} by counting ${m.counted}.`,
+      why: `${m.pairs} sit between the same 2 atoms, so the whole bond is 1 electron group.`,
       ask: `Count each bond on ${c} once, then pick again.`,
       show: { kind: 'groups', which: 'multiple' },
     }
   }
-  return { lead: `${cap(pick)} is the electron geometry for ${plural(n, 'electron group')}.`, why: `${cap(c)} has ${plural(info.groups, 'electron group')} around it.`, ask: `Pick the electron geometry for ${plural(info.groups, 'electron group')}.` }
+  if (n === info.groups + 1) {
+    // the middle atom counted as one of its own groups (the same idea groupsIdea names for the count)
+    return {
+      lead: `${cap(pick)} is the electron geometry for ${plural(n, 'electron group')}. You get ${n} by counting ${c} as a group too.`,
+      why: `The electron groups are the bonds and lone pairs around ${c}, and ${c} itself is not one of them.`,
+      ask: `Count only the bonded atoms and lone pairs around ${c}, then pick again.`,
+      show: { kind: 'groups', which: 'all' },
+    }
+  }
+  const electrons = f ? 2 * (f.bondPairs + lp) : 0
+  if (f && pick === 'tetrahedral' && info.groups !== 4 && electrons !== 8) {
+    // a full shell of 8 read as 4 groups: true only when every bond is single, and this middle atom
+    // has another number of electrons around it
+    return {
+      lead: 'Tetrahedral is the electron geometry for 4 electron groups, the count for a middle atom with 8 electrons when all its bonds are single bonds.',
+      why: `${cap(c)} has ${electrons} electrons around it, in ${plural(info.bonded, 'bond')}${lp > 0 ? ` and ${pairsText(lp)}` : ''}, so ${c} has ${plural(info.groups, 'electron group')}.`,
+      ask: `Pick the electron geometry for ${plural(info.groups, 'electron group')}.`,
+      show: { kind: 'groups', which: 'all' },
+    }
+  }
+  return { lead: `${cap(pick)} is the electron geometry for ${plural(n, 'electron group')}.`, why: `${cap(c)} has ${plural(info.groups, 'electron group')} around it.`, ask: `Pick the electron geometry for ${plural(info.groups, 'electron group')}.`, generic: true }
 }
 
 /** What to say about a pick for the electron geometry: the arrangement of every electron group
- *  around the middle atom, lone pairs included. The student picks until it is right (D-0033): the
- *  first miss names the wrong idea, the second gives the rule, the third gives the answer.
+ *  around the middle atom, lone pairs included. The student picks until it is right (D-0033). The
+ *  first miss names the wrong idea. The second keeps that idea and hands back a smaller question:
+ *  the count as bonded atoms and lone pairs, and which of the five names spreads that many groups
+ *  apart. The third gives the answer with the rule as its reason, and the move to make. No hint or
+ *  earlier miss gives the rule, because with the count on screen the rule is the answer (COPY2-2).
  *  `tries` counts this miss; `f` is what the board holds, when there is a board. */
-export function geometryFeedback(center: El, info: ShapeInfo, pick: ShapeName, tries = 1, f: Pick<GroupFacts, 'bondPairs'> | null = null): { right: boolean; text: string; coach: Coach | null } {
+export function geometryFeedback(center: El, info: ShapeInfo, pick: ShapeName, tries = 1, f: BoardBonds | null = null): { right: boolean; text: string; coach: Coach | null } {
   if (pick === info.geometry) return { right: true, text: geometryRight(center, info), coach: null }
-  const idea: Coach = info.diatomic
-    ? { lead: `${cap(pick)} does not fit a molecule of 2 atoms.`, why: `${TWO_ATOMS_WHY.slice(0, -1)}, so the electron geometry and the molecular geometry have the same name.`, ask: 'Pick the name for 2 atoms on a straight line.' }
-    : geometryIdea(center, info, pick, f)
-  const coach: Coach = tries >= 3 ? { lead: geometryRight(center, info), why: '', ask: '' } : tries === 2 && !info.diatomic ? { lead: idea.lead, why: idea.why, ask: GEOMETRY_RULE } : idea
+  let coach: Coach
+  if (info.diatomic) {
+    // two atoms: the electron geometry takes the molecular geometry's name. The first two misses ask
+    // a smaller question with no "straight line" in it; the third gives the answer (COPY2-6, CHEM2-4).
+    const lead = `${cap(pick)} does not fit a molecule of 2 atoms.`
+    coach =
+      tries >= 3
+        ? { lead, why: 'The 2 atoms sit on a straight line, so the molecular geometry is linear, and the electron geometry is given as linear too.', ask: 'Pick Linear.' }
+        : { lead, why: 'A molecule of 2 atoms has the same name for its electron geometry as for its molecular geometry.', ask: 'Which name fits 2 atoms joined by a bond?' }
+  } else {
+    const { generic, ...idea } = geometryIdea(center, info, pick, f)
+    const c = lower(center)
+    if (tries >= 3) {
+      coach = { lead: idea.lead, why: GEOMETRY_RULE, ask: `${cap(c)} has ${plural(info.groups, 'electron group')}, so the electron geometry is ${info.geometry}. Pick ${cap(info.geometry)}.` }
+    } else if (tries === 2) {
+      const count = `${cap(c)} has ${plural(info.bonded, 'bonded atom')} and ${pairsText(info.lonePairs)}, which is ${plural(info.groups, 'electron group')}.`
+      coach = { lead: idea.lead, why: generic ? '' : idea.why, ask: `${count} ${geometryAsk(info.groups)}` }
+    } else coach = idea
+  }
   return { right: false, text: coachText(coach), coach }
 }
 
@@ -1211,7 +1291,7 @@ const POINT: Partial<Record<ShapeName, string>> = {
 const isIon = (p: Problem | null) => !!p && p.charge !== 0
 /** The whole-molecule question. An ion is asked about its bond dipoles; a molecule is asked for the word. */
 export function netQuestion(p: Problem): { ask: string; sub: string; choices: { polar: boolean; label: string }[] } {
-  const sub = 'Each polar bond is an arrow that points at its δ− atom. The arrows cancel when the same atoms sit evenly around the middle atom.'
+  const sub = 'Each polar bond has a dipole, drawn as an arrow that points at its δ− atom. The arrows cancel when the same atoms sit evenly around the middle atom.'
   return isIon(p)
     ? { ask: `Do the bond dipoles in ${p.name} cancel?`, sub, choices: [{ polar: false, label: 'They cancel' }, { polar: true, label: 'They do not cancel' }] }
     : { ask: `Is ${p.name} polar or nonpolar?`, sub, choices: [{ polar: true, label: 'Polar' }, { polar: false, label: 'Nonpolar' }] }
@@ -1241,7 +1321,11 @@ function netReason(m: MoleculePolarity, info: ShapeInfo | null): string {
       ? `ΔEN for ${bondName(k.center, k.terminal)} is ${k.polarity.delta}, which is a nonpolar bond, so there are no bond dipoles to add up.`
       : 'None of the bonds is polar, so there are no bond dipoles to add up.'
   }
-  if (m.why === 'charges') return 'The atoms are the same, so ΔEN is 0, but the formal charges are not the same. The electrons sit closer to the atoms with the negative formal charge, and in this molecular geometry those dipoles do not cancel.'
+  if (m.why === 'charges') {
+    // ozone: the two arrows are the same size (sources.md, polarity), so the bent molecular geometry is why they do not cancel
+    const shape = info ? `the molecular geometry is ${info.shape}, so ` : ''
+    return `The atoms are the same, so ΔEN is 0, but the formal charges are not the same. The electrons sit closer to the atoms with the negative formal charge, and ${shape}those dipoles do not cancel.`
+  }
   if (m.why === 'cancel') {
     const where = info ? POINT[info.shape] : undefined
     // no bond is polar by ΔEN, and the dipoles that unlike formal charges make are the ones that cancel (the triiodide ion)
@@ -1255,13 +1339,17 @@ function netReason(m: MoleculePolarity, info: ShapeInfo | null): string {
   }
   // unlike bonds
   if (polar.length === 1 && flat.length >= 1) {
-    return `${cap(theBonds(polar[0]!))} ${isAre(polar)} polar and ${list(flat.map(theBonds))} ${isAre(flat)} nonpolar, so nothing cancels ${dipolesOf(polar[0]!)}.`
+    // one polar bond: nothing can cancel it. Two or more of one kind cancel each other in part, and what is left is the net dipole (CHEMWORDS-8)
+    const k = polar[0]!
+    return `${cap(theBonds(k))} ${isAre(polar)} polar and ${list(flat.map(theBonds))} ${isAre(flat)} nonpolar, so ${k.count === 1 ? `nothing cancels ${dipolesOf(k)}` : `${dipolesOf(k)} add up to a net dipole`}.`
   }
   return 'The bond dipoles are not all the same size, so they do not cancel.'
 }
-/** "Water is polar." / "The bond dipoles in the nitrite ion do not cancel." */
+/** "Water is polar." / "The bond dipoles in the nitrite ion do not cancel." An ion with no polar
+ *  bonds has no bond dipoles to cancel, so its verdict says it has no net dipole (CHEMWORDS-6). */
 function netVerdict(p: Problem | null, m: MoleculePolarity): string {
   if (!p) return m.polar ? 'This molecule is polar.' : 'This molecule is nonpolar.'
+  if (isIon(p) && m.why === 'no-polar-bonds') return `${cap(p.name)} has no net dipole.`
   if (isIon(p)) return m.polar ? `The bond dipoles in ${p.name} do not cancel.` : `The bond dipoles in ${p.name} cancel.`
   return `${cap(p.name)} is ${m.polar ? 'polar' : 'nonpolar'}.`
 }
@@ -1276,6 +1364,8 @@ export function netFeedback(p: Problem, m: MoleculePolarity, info: ShapeInfo | n
   if (m.why === 'cancel') lead = `${cap(theBonds(polarKinds[0]!))} ${isAre(polarKinds.slice(0, 1))} polar, and the dipoles still cancel.`
   else if (m.why === 'no-polar-bonds') lead = `${cap(p.name)} has no polar bonds.`
   else if (m.why === 'shape') lead = 'Bond dipoles cancel only when the bonds are spread evenly around the middle atom.'
+  // ozone: the student read "same atoms" as nonpolar. Its two arrows are the same size, so the size is not the reason (CHEMWORDS-3)
+  else if (m.why === 'charges') lead = 'A bond between 2 atoms of the same element can still be polar.'
   else lead = 'Bond dipoles cancel only when they are the same size.'
   const coach: Coach = { lead, why: reason, ask: verdict }
   return { right: false, text: coachText(coach), coach }
@@ -1404,6 +1494,7 @@ export const NET_SIDE = 'The net dipole pointed toward you or away from you, so 
 /** One line for the readout: "Polar", "Nonpolar", or for an ion whether its bond dipoles cancel.
  *  `charged` says the board holds an ion, for free build, where there is no problem to ask. */
 export function polarityWord(p: Problem | null, m: MoleculePolarity, charged = isIon(p)): string {
+  if (charged && m.why === 'no-polar-bonds') return 'No bond dipoles'
   if (charged) return m.polar ? 'The bond dipoles do not cancel' : 'The bond dipoles cancel'
   if (m.depends) return 'Depends on where the unlike atoms sit'
   return m.polar ? 'Polar' : 'Nonpolar'
@@ -1644,8 +1735,16 @@ export function hintsFor(step: StepId, p: Problem, s: Structure, totalNext = fal
   const f = groupFacts(s)
   if (!f) return []
   const has = `${cap(c)} has ${plural(f.bonded, 'bonded atom')} and ${pairsText(f.lonePairs)}.`
-  if (shapeAt === 'geometry') return [`Each electron group around ${c} is a bonded atom or a lone pair, and the groups spread as far apart as they can.`, GEOMETRY_RULE]
-  if (shapeAt === 'molecular') return ['The molecular geometry names where the atoms are. Start from the electron geometry, then leave out the corners that hold lone pairs.', has]
+  // no hint for the electron geometry gives the rule: with the count on screen the rule is the answer (COPY2-2)
+  if (shapeAt === 'geometry') return [`Each electron group around ${c} is a bonded atom or a lone pair, and the groups spread as far apart as they can.`, geometryAsk(f.groups)]
+  if (shapeAt === 'molecular') {
+    const info = shapeInfoFor(s)
+    const corners =
+      info && f.lonePairs > 0
+        ? `The ${f.groups} electron groups around ${c} point to the corners of ${GEOMETRY_NOUN[info.geometry]}. ${lonePairCorners(f.groups, f.lonePairs)}Which molecular geometry has atoms at the other ${plural(f.bonded, 'corner')}?`
+        : has
+    return ['To name the molecular geometry, start from the electron geometry, then leave out the corners that hold lone pairs.', corners]
+  }
   return [`Count the atoms bonded to ${c}, then the lone pairs on ${c}.`, has]
 }
 
@@ -2060,8 +2159,9 @@ function shapeBody(name: ShapeName, p: Problem | null): CardBody {
   // five of the names are electron geometries too: the arrangement of all the groups
   const groups = Object.keys(GEOMETRY_FOR).find((n) => GEOMETRY_FOR[Number(n)] === name)
   const notes = [
-    groups ? `${cap(name)} is also the electron geometry of a middle atom with ${groups} electron groups, lone pairs included.` : '',
-    info.lonePairs > 0 || cases.length > 1 ? 'A molecular geometry names where the atoms are. The lone pairs on the middle atom take up room and are left out of the name.' : '',
+    // 2 groups around a middle atom leave no room for a lone pair, so "lone pairs included" is left off linear (COPY2-15)
+    groups ? `${cap(name)} is also the electron geometry of a middle atom with ${groups} electron groups${groups === '2' ? '' : ', lone pairs included'}.` : '',
+    info.lonePairs > 0 || cases.length > 1 ? 'A molecular geometry is named for where the atoms sit. The lone pairs on the middle atom take up room and are left out of the name.' : '',
   ].filter(Boolean)
   return {
     means: `${SHAPE_MEANS[name]} A middle atom with ${cases.join(', or with ')}${cases.length > 1 ? ',' : ''} has this molecular geometry.`,
@@ -2257,7 +2357,8 @@ function baseBody(id: BaseTermId, p: Problem | null): CardBody {
       return {
         means: 'An atom from period 3 onward can hold more than 8 electrons when it is the middle atom. Atoms in periods 1 and 2 never hold more than 8.',
         example: `In ${named(m)} ${lower(d.center)} has ${plural(bonds, 'bond')}, so ${d.lone + bonds * 2} electrons are around it.`,
-        note: 'A middle atom takes more than 8 when it has more than 4 atoms to bond to, or when another bond brings the formal charges closer to 0.',
+        // the third way is the electron count itself: XeF2, ClF3, SF4 and XeF4 have all formal charges 0 and 4 or fewer atoms (CHEM2-1)
+        note: 'A middle atom ends up with more than 8 in three ways: it has more than 4 atoms to bond to, an extra bond brings the formal charges closer to 0, or electrons are left over once every outer atom is full, and they go on the middle atom as lone pairs.',
         ...lewis(m, 'lines', `${cap(lower(d.center))} in the middle with a line to each of ${atomsWord(d.outer.length, d.outer[0]!.el)}.`),
       }
     }
@@ -2280,7 +2381,7 @@ function baseBody(id: BaseTermId, p: Problem | null): CardBody {
       return {
         means: 'The electron geometry is how all the electron groups around the middle atom are spread out, lone pairs included. The groups push each other as far apart as they can get, so the number of groups sets the electron geometry.',
         example: `In ${named(m)} ${c} has ${plural(info.bonded, 'bonded atom')} and ${pairsText(info.lonePairs)}, which is ${plural(info.groups, 'electron group')}. The electron geometry is ${info.geometry}, and the molecular geometry is ${info.shape}.`,
-        note: 'The electron geometry and the molecular geometry have the same name only when the middle atom has no lone pairs.',
+        note: 'The electron geometry and the molecular geometry have the same name only when the middle atom has no lone pairs. A molecule of 2 atoms has no middle atom, and both of its geometries are given the same name.',
         ...model(m, 'none', `${cap(m.name)} drawn in 3D, with ${plural(info.groups, 'electron group')} around ${c}: ${plural(info.bonded, 'bonded atom')} and ${pairsText(info.lonePairs)}.`),
       }
     }
@@ -2291,9 +2392,9 @@ function baseBody(id: BaseTermId, p: Problem | null): CardBody {
       const info = sampleShape(m)
       const outer = d.outer[0]!.el
       return {
-        means: 'The molecular geometry is where the atoms sit around the middle atom. The electron groups push each other as far apart as they can get, and that sets where the atoms go. The name describes the atoms only.',
+        means: 'The molecular geometry is where the atoms sit around the middle atom. The electron groups push each other as far apart as they can get, and that sets where the atoms go. The lone pairs take up room and are left out of the name.',
         example: `In ${named(m)} ${lower(d.center)} has ${plural(info.bonded, 'bonded atom')} and ${pairsText(info.lonePairs)}. The ${info.groups} electron groups point to the corners of ${GEOMETRY_NOUN[info.geometry]}, and the ${atomsWord(info.bonded, outer)} sit at ${info.bonded} of them, so the molecular geometry is ${info.shape}.`,
-        note: 'Two molecules with the same electron geometry can have different molecular geometries, because a lone pair takes a place and adds no atom.',
+        note: 'Two molecules with the same electron geometry can have different molecular geometries, because a lone pair takes up one of the corners and has no atom there.',
         ...model(m, 'none', `${cap(m.name)} drawn in 3D. Its molecular geometry is ${info.shape}.`),
       }
     }
@@ -2304,7 +2405,9 @@ function baseBody(id: BaseTermId, p: Problem | null): CardBody {
       return {
         means: 'A bond angle is the angle between two bonds that meet at the same atom.',
         example: `In ${named(m)} the angle between any 2 ${bondName(d.center, d.outer[0]!.el)} bonds is ${info.angle}.`,
-        note: 'Lone pairs push harder than bonds do. When the middle atom has a lone pair, its bonds are squeezed a little closer together.',
+        // square planar keeps 90° and linear with 3 lone pairs keeps 180° (section 7.6), so the note says "usually" (COPY-8). It names
+        // no molecular geometry and no angle: the card can open in step 5 before the molecular geometry is picked (FG-1).
+        note: 'Lone pairs push harder than bonds do, so a lone pair on the middle atom usually squeezes the bonds a little closer together. When the lone pairs are spread evenly around the middle atom, their pushes balance and the bond angle stays the same.',
         ...model(m, 'none', `${cap(m.name)} with the angle between 2 of its bonds marked ${info.angle}.`, true),
       }
     }
@@ -2399,7 +2502,8 @@ function baseBody(id: BaseTermId, p: Problem | null): CardBody {
       return {
         means: 'Bond dipoles cancel when they are the same size and are spread evenly around the middle atom. Each arrow is undone by the others, so no net dipole is left and the molecule is nonpolar.',
         example: `In ${named(m)} the ${info.bonded} ${name} arrows are the same size and ${how[info.shape]}, so they cancel.`,
-        note: 'The outer atoms have to be the same element for this. Different outer atoms give arrows of different sizes.',
+        // free build says the same for PCl3F2: with 5 or 6 groups it depends on which corners the unlike atoms take (CHEM2-3)
+        note: 'Different outer atoms give arrows of different sizes, so those arrows usually do not cancel. They can still cancel when the atoms of each element are spread evenly around the middle atom, such as 2 atoms of one element on opposite sides.',
         ...model(m, 'bonds', `${cap(m.name)} drawn in 3D, with an arrow on each bond that points at ${lower(d.outer[0]!.el)} and no net dipole.`),
       }
     }
@@ -2434,7 +2538,9 @@ function baseBody(id: BaseTermId, p: Problem | null): CardBody {
       return {
         means: 'Hybridization is a model in which an atom mixes its outer orbitals into new orbitals that are all alike: an s orbital, p orbitals, and d orbitals when it has 5 or 6 electron groups. The atom makes 1 hybrid orbital for each of its electron groups, and uses them for its sigma bonds and its lone pairs.',
         example: `In ${named(m)} ${c} has ${plural(info.groups, 'electron group')}. ${cap(c)} mixes 1 s orbital and ${plural(info.groups - 1, 'p orbital')} into ${info.groups} ${hybridLabel(h)} orbitals, so ${c} is ${hybridLabel(h)}.`,
-        note: 'A pi bond is made from p orbitals that were left out of the mix, so a double or triple bond still counts as 1 electron group.',
+        // sulfate (sp³, 2 pi bonds) and sulfur dioxide (sp², 2 pi bonds) have more pi bonds than p orbitals left over, so the
+        // claim about where pi bonds come from is narrowed to period 2 middle atoms (CHEM2-2)
+        note: 'A double or triple bond still counts as 1 electron group, because only its sigma bond uses a hybrid orbital. For a middle atom from period 2, the pi bonds use p orbitals that were left out of the mix.',
         ...model(m, 'none', `${cap(m.name)} drawn in 3D. Its molecular geometry is ${info.shape}.`),
       }
     }
@@ -2451,3 +2557,13 @@ export function termCard(id: TermId, p: Problem | null = null, step: StepId | nu
   const related = links.filter((to) => step === null || stepAt(termFrom(to)) <= stepAt(step)).map((to) => ({ id: to, name: termName(to) }))
   return { id, name: termName(id), also: isShapeTerm(id) ? null : (TERMS[id].also ?? null), ...body, related }
 }
+
+// ---------------------------------------------------------------- the board's own controls (package BOARD)
+
+/** The switch on the lifted 3D model, shown when the middle atom has a lone pair. `all` draws the
+ *  lone pairs with the atoms, `atoms` fades the lone pairs out. */
+export const GROUPS_VIEW_WORDS = {
+  label: 'What the 3D model shows',
+  all: 'Electron geometry',
+  atoms: 'Molecular geometry',
+} as const

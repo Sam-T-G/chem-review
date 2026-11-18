@@ -25,7 +25,7 @@ if (SHOTS) mkdirSync(SHOT_DIR, { recursive: true })
 // rows as tests/exercise-pool.ts). The check works the first molecule of the picker that is here.
 // [total, electron geometry, molecular geometry, bond angle, {outer atom: [ΔEN, polar]}, polar, direction]
 const ANSWERS = {
-  H2O: [8, 'tetrahedral', 'bent', 'less than 109.5°', { H: ['1.4', true] }, true, 'toward the 2 lone pairs'],
+  H2O: [8, 'tetrahedral', 'bent', 'less than 109.5°', { H: ['1.4', true] }, true, 'away from the 2 hydrogen atoms'],
   CH2Cl2: [20, 'tetrahedral', 'tetrahedral', '109.5°', { H: ['0.4', false], Cl: ['0.5', true] }, true, 'toward the 2 chlorine atoms'],
   SiCl4: [32, 'tetrahedral', 'tetrahedral', '109.5°', { Cl: ['1.2', true] }, false, null],
   PCl3: [26, 'tetrahedral', 'trigonal pyramidal', 'less than 109.5°', { Cl: ['0.9', true] }, true, 'toward the 3 chlorine atoms'],
@@ -144,10 +144,32 @@ async function cued(label, key) {
 /** No highlighted key term on the sheet opens a card that terms.ts keeps plain. */
 async function termsSafe(label) {
   const bad = await mb(() => {
-    const plain = new Set((document.querySelector('.ex-sheet')?.getAttribute('data-ex-plain') ?? '').split(' '))
+    // ids such as "shape:trigonal planar" hold a space, so the list is split on "|"
+    const plain = new Set((document.querySelector('.ex-sheet')?.getAttribute('data-ex-plain') ?? '').split('|'))
     return [...document.querySelectorAll('.mb-panel .mb-term')].map((b) => b.getAttribute('data-term')).filter((id) => plain.has(id))
   })
   ok(bad.length === 0, `${label}: no highlighted term opens a card kept plain (${bad.join(' ')})`)
+}
+
+/** Opens a live key term on the sheet with a real press and reads the card's links: none may lead to a
+ *  term the sheet keeps plain (the module drops them through Part.blockedTerms). Then closes the card. */
+async function cardLinksSafe(label) {
+  const live = await mb(() => {
+    const plain = new Set((document.querySelector('.ex-sheet')?.getAttribute('data-ex-plain') ?? '').split('|'))
+    return [...document.querySelectorAll('.mb-panel .mb-term')].map((b) => b.getAttribute('data-term')).filter((id) => id && !plain.has(id))
+  })
+  ok(live.length > 0, `${label}: at least one key term on the sheet opens a card (${live.length})`)
+  if (!live.length) return
+  await hit(`.mb-panel .mb-term[data-term="${live[0]}"]`, `key term ${live[0]}`)
+  const card = await mb(() => {
+    const el = document.querySelector('.mb-termcard')
+    const plain = new Set((document.querySelector('.ex-sheet')?.getAttribute('data-ex-plain') ?? '').split('|'))
+    const links = [...(el?.querySelectorAll('[data-term-go]') ?? [])].map((b) => b.getAttribute('data-term-go'))
+    return { open: !!el && !el.hidden, links, bad: links.filter((id) => plain.has(id)) }
+  })
+  ok(card.open, `${label}: the ${live[0]} card opens`)
+  ok(card.bad.length === 0, `${label}: the ${live[0]} card links to no plain term (links ${card.links.join(', ')}; plain among them: ${card.bad.join(', ')})`)
+  await hit('[data-key="term-close"]', 'close the key term card')
 }
 
 async function work() {
@@ -176,6 +198,7 @@ async function work() {
   ok(await page.locator('.mb-checkbar [data-k="chk-electrons"]').count() === 0, `${id}: the strip of checks has no electron total before the valence electrons are answered`)
   ok(await page.locator('[data-key="ex-see-shape"], [data-key="view-shape"]').count() === 0, `${id}: no way to the 3D shape yet`)
   await termsSafe(`${id} empty sheet`)
+  await cardLinksSafe(`${id} empty sheet`)
   await cued(`${id} empty sheet`, 'ex-valence')
   await shot('empty')
 
@@ -189,6 +212,14 @@ async function work() {
   ok(await partState('valence') === 'right', `${id}: the right total is marked and locked`)
   ok(await page.locator('[data-key="ex-valence"]').count() === 0, `${id}: the total's box is gone once it is right`)
   ok(await page.locator('.mb-checkbar [data-k="chk-electrons"]').count() === 1, `${id}: the strip shows the electron total once the valence electrons are answered`)
+
+  // the picker on the molecule already on screen closes and keeps the sheet (CODE-3)
+  await hit('[data-key="picker"]', 'Change molecule with an answer on the sheet')
+  ok(await page.locator(`[data-key="ex-pick-${pick.at}"][aria-current="true"]`).count() === 1, `${id}: the picker marks the molecule on screen`)
+  await hit(`[data-key="ex-pick-${pick.at}"]`, `pick ${id}, the molecule already on screen`)
+  st = await ex()
+  ok(st.at === pick.at && st.valence.right && await page.locator('.mb-picker').count() === 0, `${id}: picking the molecule on screen closes the picker and keeps its answers (at ${st.at}, valence ${st.valence.right})`)
+  ok(await partState('valence') === 'right', `${id}: the valence part is still marked right after the picker closes`)
 
   // electron geometry and molecular geometry: a wrong pick each, then the right one
   const wrongOf = async (act, right) => mb(({ act, right }) => [...document.querySelectorAll(`[data-act="${act}"]`)].map((b) => b.getAttribute('data-v')).find((v) => v !== right), { act, right })
@@ -237,8 +268,8 @@ async function work() {
   }
   ok(await partState('net') === 'right', `${id}: the net dipole part is answered`)
 
-  // the structure: check an empty board, then build it by dragging, with an extra electron first
-  await hit('[data-key="ex-structure"]', 'Check my structure on an empty board')
+  // the structure: check an empty board, then build it by dragging, with an electron missing first
+  await hit('[data-key="ex-structure"]', 'Check the structure on an empty board')
   ok(/still to put on the board/.test(await text('.ex-part[data-part="structure"] .mb-coach-lead')), `${id}: an empty board is told what is missing`)
   ok((await ex()).structure.tries === 0, `${id}: checking an unfinished board is not a try`)
   const formula = await mb(() => { const s = window.__mb.store; const p = s.problemOf(); return { center: p.center, atoms: p.formula.flatMap(([el, n]) => new Array(n).fill(el)) } })
@@ -270,18 +301,20 @@ async function work() {
   ok(st.bonds.length === outer.length, `${id}: every outer atom bonded by dragging (${st.bonds.length})`)
   const box = await page.locator('.mb-canvas-wrap').boundingBox()
   const empty = { x: box.x + 24, y: box.y + box.height * 0.5 }
-  const someOuter = st.atoms.find((a) => a.id !== centerId)
-  await tapAt(await atomPoint(someOuter.id))
-  await hit('[data-key="e-plus"]', '+ electron')
-  await tapAt(empty)
-  await hit('[data-key="ex-structure"]', 'Check my structure')
-  const lead = (await text('.ex-part[data-part="structure"] .mb-coach-lead')).trim()
-  ok(/more than/.test(lead), `${id}: an extra electron is called out (${lead})`)
-  await tapAt(await atomPoint(someOuter.id))
+  // a full shell takes no more electrons (hydrogen at 2, oxygen at 8 in water), so the check takes one
+  // off an atom with unshared electrons, then puts it back
+  const someAtom = st.atoms.find((a) => a.lone > 0) ?? st.atoms.find((a) => a.id === centerId)
+  await tapAt(await atomPoint(someAtom.id))
   await hit('[data-key="e-minus"]', '− electron')
   await tapAt(empty)
+  await hit('[data-key="ex-structure"]', 'Check the structure')
+  const lead = (await text('.ex-part[data-part="structure"] .mb-coach-lead')).trim()
+  ok(/fewer than/.test(lead), `${id}: a missing electron is called out (${lead})`)
+  await tapAt(await atomPoint(someAtom.id))
+  await hit('[data-key="e-plus"]', '+ electron')
+  await tapAt(empty)
   ok(await page.locator('.ex-part[data-part="structure"] .mb-coach').count() === 0, `${id}: a change to the board takes the old result away`)
-  await hit('[data-key="ex-structure"]', 'Check my structure')
+  await hit('[data-key="ex-structure"]', 'Check the structure')
   ok((await ex()).structure.right, `${id}: the Lewis structure is accepted`)
 
   // resonance, the last part: a wrong pick gets its card, and the sheet is finished
@@ -323,6 +356,13 @@ async function reloadAndKeys(done) {
   await page.keyboard.press('Enter')
   await wait(400)
   ok(await partState('valence') === 'right', 'keyboard: Enter checks the total')
+  // a second Enter lands on the sheet, never on Next molecule (CODE-2)
+  const focusAfter = await mb(() => ({ key: document.activeElement?.getAttribute('data-key') ?? null, step: document.activeElement?.classList.contains('mb-step') ?? false }))
+  ok(focusAfter.key !== 'ex-next', `keyboard: after the total is right the focus is not on Next molecule (${JSON.stringify(focusAfter)})`)
+  await page.keyboard.press('Enter')
+  await wait(400)
+  const again = await ex()
+  ok(again.at === done.at && again.valence.right && await partState('valence') === 'right', `keyboard: a second Enter keeps ${done.id} and its answer (at ${again.at}, valence ${again.valence.right})`)
   const eg = ANSWERS[done.id][1]
   found = false
   for (let i = 0; i < 60 && !found; i++) { await page.keyboard.press('Tab'); found = await mb((k) => document.activeElement?.getAttribute('data-key') === k, `ex-eg-${slug(eg)}`) }

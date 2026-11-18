@@ -48,6 +48,6 @@ const ALL: ModuleInfo[] = [
 /** The cards a student can open. The shapes quiz and the exercises are built and stay closed until
  *  their review findings are fixed. The Lewis module has the same switch for its tabs
  *  (`OPEN_PARTS` in `src/modules/lewis/parts.ts`): change both together. */
-const OPEN: readonly string[] = ['lewis']
+const OPEN: readonly string[] = ['lewis', 'shapes', 'exercises']
 
 export const MODULES: ModuleInfo[] = ALL.filter((m) => OPEN.includes(m.id))

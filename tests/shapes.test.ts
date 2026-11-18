@@ -162,6 +162,25 @@ describe('the choices', () => {
       for (const x of c) expect(ANGLES).toContain(x)
     }
   })
+  it('never offers as a wrong pick an angle that two bonds of the row really make', () => {
+    // Worked by hand from the drawings in OpenStax 2e, 7.6 (Figure 7.16): the top and bottom
+    // positions of a trigonal bipyramid are on one line through the middle atom (180°), and so are
+    // opposite corners of an octahedron. A label of two angles holds each of them alone, and a
+    // seesaw's bonds are the trigonal bipyramid's bonds squeezed a little.
+    const holds: Record<RowKey, string[]> = {
+      '5,0': ['90°', '120°', '180°'],
+      '4,1': ['less than 90°', 'less than 120°', '180°'],
+      '3,2': ['180°'],
+      '6,0': ['180°'],
+      '5,1': ['180°'],
+      '4,2': ['180°'],
+    }
+    for (const [key] of TABLE) {
+      const c = choicesFor('angle', rowOf(key))
+      expect(c.length, key).toBe(5)
+      for (const x of holds[key] ?? []) expect(c, `${key} offers ${x}`).not.toContain(x)
+    }
+  })
 })
 
 describe('the random source', () => {

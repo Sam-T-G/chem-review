@@ -9,6 +9,8 @@ checks. None of it touches React, React Native or Three.js.
 - `polarity.test.ts`: bond and molecular polarity, sigma and pi bonds, hybridization, with the course slides' worked examples as the expected answers. Team chem.
 - `guide.test.ts`: the guide's step rules and wording, including the scan of every sentence. Team lewis, reviewed by learning.
 - `store.test.ts`: the step flow in the Lewis module's store. Team lewis.
+- `parts-store.test.ts`: where the store meets the shapes quiz and the exercises: which saved ids are kept, which exercise opens first, and Undo after Clear on a finished exercise. Team lewis.
+- `board.test.ts`: the words and the state behind the switch between the two geometries on the lifted model. Team lewis. What the switch draws is checked by `scripts/check-board.mjs`.
 - `terms.test.ts`: the key terms: which words are highlighted, what each card says, and that a card's example is never the molecule on screen. Team lewis, reviewed by learning and chem.
 - `exercise.test.ts`: the exercises: each part's answer worked by hand, the checks, the locks, the reset on a board change, the next-molecule rule and what is saved. Team lewis.
 - `exercise-words.test.ts`: every sentence the exercises can show, scanned, and that no card gives an answer away early. Team lewis, reviewed by learning.

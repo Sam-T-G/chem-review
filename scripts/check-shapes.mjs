@@ -10,7 +10,8 @@
 // It walks the series, flips the switch between the two geometries, answers a question right and
 // one wrong, sees the missed row come back, answers until a row is known, reloads and sees it
 // still known, uses the keyboard, and checks that nothing on screen gives the answer while a
-// question is open. The answers below are the shape table, written by hand from OpenStax
+// question is open: no key-term card links to a term the quiz blocks, and a counts question whose
+// electron part was missed keeps that name off the screen until the molecular part is answered. The answers below are the shape table, written by hand from OpenStax
 // Chemistry 2e, section 7.6.
 import { chromium } from 'playwright'
 
@@ -137,17 +138,41 @@ async function nothingGivesItAway(label, cards = false) {
   ok((await sceneInput()).angles === 0, `${label}: no angle marks on the model`)
   ok((await page.locator('.mb-panel .mb-readout').count()) === 0, `${label}: no readout`)
   ok((await page.locator('[data-act="sq-view"]').count()) === 0, `${label}: the switch between the geometries is not offered`)
+  const how = await mb(() => document.querySelector('.mb-panel .mb-how')?.innerText ?? '')
+  ok(/Tap a choice/.test(how) && /With a keyboard, press 1 to [56]\b/.test(how), `${label}: a how-to line says to tap a choice, or with a keyboard press its number`)
   if (!cards) return
-  const n = await page.locator('.mb-panel .mb-term').count()
+  const blocked = await blockedNow()
+  ok(blocked.length > 0, `${label}: the quiz blocks some key terms while the question is open (${blocked.join(' ')})`)
+  const shown = await mb(() => [...document.querySelectorAll('.mb-panel .mb-term')].map((n) => n.dataset.term))
+  ok(shown.every((id) => !blocked.includes(id)), `${label}: no blocked term is highlighted in the panel`)
+  const n = shown.length
   for (let i = 0; i < n; i++) {
     await press(`.mb-panel .mb-term >> nth=${i}`, `${label}: key term ${i + 1}`)
     await page.waitForFunction(() => !!window.__mb.term(), null, { timeout: 3000 }).catch(() => {})
     const card = await mb(() => document.querySelector('.mb-termcard')?.innerText ?? '')
     for (const re of res) ok(card.length > 0 && !re.test(card), `${label}: the card for "${card.split('\n')[0]}" does not give the answer`)
+    const links = await mb(() => [...document.querySelectorAll('.mb-termcard [data-term-go]')].map((x) => x.dataset.termGo))
+    ok(links.every((id) => !blocked.includes(id)), `${label}: the card for "${card.split('\n')[0]}" links to no blocked term (${links.join(' ')})`)
     if (phone) await press('.mb-termcard [data-term-close]', `${label}: close the card`)
     else { await page.keyboard.press('Escape'); await wait(250) }
   }
   console.log(`  ${label}: ${n} key terms highlighted, each card opened`)
+}
+/** The key terms the quiz will not open right now. Each term is asked for through the page's debug
+ *  handle (the same path a press takes, past the part's blockedTerms hook); a term that opens no
+ *  card is blocked. This only reads what the page allows: every press in this check is real input. */
+async function blockedNow() {
+  const ids = await mb(() => {
+    const out = []
+    for (const id of window.__mb.terms) {
+      window.__mb.showTerm(id)
+      if (window.__mb.term()?.id !== id) out.push(id)
+    }
+    return out
+  })
+  await page.keyboard.press('Escape')
+  await wait(250)
+  return ids
 }
 /** The open part of the question and its right choice. */
 async function openAsk() {
@@ -242,7 +267,10 @@ async function run() {
       await press(chip(left[0]), `second wrong pick ${left[0]}`)
       now = await sq()
       ok(now.q.asks.find((x) => x.ask === a.ask).right === false, 'two wrong picks close that part')
-      ok(answerRe(a.ask, now.q.row).test(await mb(() => [...document.querySelectorAll('.mb-panel .mb-coach')].map((n) => n.innerText).join(' '))), `the last card gives the answer, ${right}`)
+      const coachText = await mb(() => [...document.querySelectorAll('.mb-panel .mb-coach')].map((n) => n.innerText).join(' '))
+      // a counts question keeps the electron part's answer back while its molecular part is open (COPY-2)
+      if (now.q.right === null) ok(!answerRe(a.ask, now.q.row).test(coachText) && /You'll see the electron geometry/.test(coachText), `the card keeps ${right} back while the molecular part is open`)
+      else ok(answerRe(a.ask, now.q.row).test(coachText), `the last card gives the answer, ${right}`)
     }
   }
   st = await sq()
@@ -294,6 +322,37 @@ async function run() {
   ok((await sq()).q.row !== known, 'the known row is not asked')
   await shot('reload')
   ok(await mb(() => document.documentElement.scrollWidth <= window.innerWidth), 'no sideways scroll in the quiz')
+
+  console.log('quiz: a counts question with its electron part missed')
+  let counts = false
+  for (let i = 0; i < 40 && !counts; i++) {
+    st = await sq()
+    if (st.q.right !== null) await next(`question ${st.q.n}`)
+    st = await sq()
+    if (st.q.kind === 'counts') counts = true
+    else await answerRight()
+  }
+  ok(counts, 'a counts question comes up')
+  if (!counts) return
+  const row = (await sq()).q.row
+  for (let t = 0; t < 2; t++) {
+    const { wrongs } = await openAsk()
+    await press(chip(wrongs[0]), `counts question, wrong electron pick ${wrongs[0]}`)
+  }
+  st = await sq()
+  ok(st.q.asks[0].right === false && st.q.asks[1].right === null, 'two wrong picks close the electron part and open the molecular part')
+  const heldText = await mb(() => {
+    const p = document.querySelector('.mb-panel').cloneNode(true)
+    p.querySelectorAll('.mb-choices').forEach((n) => n.remove())
+    return p.innerText
+  })
+  ok(!answerRe('electron', row).test(heldText), `row ${row}: the electron geometry's name is not on screen while the molecular part is open`)
+  ok(!answerRe('molecular', row).test(heldText), `row ${row}: the molecular geometry's name is not on screen while it is asked`)
+  ok(/You'll see the electron geometry after you answer the molecular geometry/.test(heldText), 'the missed card says when the electron geometry is shown')
+  await nothingGivesItAway('counts question, molecular part', true)
+  await shot('counts-held')
+  await answerRight()
+  ok(answerRe('electron', row).test(await mb(() => [...document.querySelectorAll('.mb-panel .mb-coach')].map((n) => n.innerText).join(' '))), `row ${row}: once the question is finished the card gives the electron geometry, ${answerOf('electron', row)}`)
 }
 
 try { await run() } catch (e) { failed.push(`run: ${String(e).split('\n')[0]}`); console.log(`  ERROR ${String(e).split('\n').slice(0, 8).join('\n    ')}`); await shot('error') }

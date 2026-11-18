@@ -24,6 +24,12 @@ node scripts/check-browser.mjs desktop terms  # the highlighted key terms: every
 node scripts/check-browser.mjs phone terms
 node scripts/check-browser.mjs desktop shell  # home screen, opening the module, the way back, saved progress
 node scripts/check-browser.mjs phone shell
+node scripts/check-board.mjs desktop           # the 3D board's own controls: the switch between the two geometries, a two-atom model, turning the model
+node scripts/check-board.mjs phone
+node scripts/check-shapes.mjs desktop          # the shapes quiz at /shapes: the series, right and wrong answers, a missed row coming back, a known row after a reload
+node scripts/check-shapes.mjs phone
+node scripts/check-exercise.mjs desktop        # the exercises at /exercises: one molecule worked from start to finish, a wrong answer per part, the next molecule, a reload
+node scripts/check-exercise.mjs phone
 MB_SHOTS=1 node scripts/check-browser.mjs ... # also saves screenshots to shots/
 ```
 

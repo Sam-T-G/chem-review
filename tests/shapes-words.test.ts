@@ -4,8 +4,11 @@
 // cards that can open while a question is open. The table is written by hand from OpenStax
 // Chemistry 2e, section 7.6.
 import { describe, expect, it } from 'vitest'
-import { ALL_TERMS, termCard, termPieces, type TermId } from '../src/modules/lewis/guide'
-import { ROW_KEYS, TRIES, answerOf, choicesFor, rowOf, type Ask, type Kind, type RowKey } from '../src/modules/lewis/shapes/deck'
+import { ALL_TERMS, sampleShape, termCard, termPieces, type Sample, type TermId } from '../src/modules/lewis/guide'
+import { getState } from '../src/modules/lewis/store'
+import { shapesPart } from '../src/modules/lewis/shapes/part'
+import { freshShapes, type ShapesState } from '../src/modules/lewis/shapes/state'
+import { KINDS, KNOWN_AT, ROW_KEYS, TRIES, answerOf, choicesFor, moleculesFor, nextQuestion, pick, problemById, rowOf, type Ask, type Kind, type RowKey } from '../src/modules/lewis/shapes/deck'
 import {
   SENTENCES,
   WORDS,
@@ -13,6 +16,7 @@ import {
   answerPattern,
   blockedTerms,
   feedbackFor,
+  howPick,
   learnLines,
   questionLines,
   readoutRows,
@@ -85,6 +89,9 @@ function allCopy(): string[] {
     lines.push(knownLine(row))
     for (const n of [0, 1, 12, 13]) labels.push(WORDS.knownCount(n), WORDS.questionNo(n + 1))
   }
+  lines.push(howPick(5), howPick(6))
+  // the molecular cards of a counts question while the missed electron part is held back
+  for (const key of ROW_KEYS) for (const p of choicesFor('molecular', rowOf(key))) lines.push(feedbackFor('molecular', rowOf(key), 'the middle atom', p, 1, 'counts', true).text)
   for (const f of FEEDBACK) {
     lines.push(f.said.text)
     if (f.said.coach) lines.push(f.said.coach.lead, f.said.coach.why, f.said.coach.ask)
@@ -175,10 +182,14 @@ describe('a wrong pick', () => {
         expect(f.said.coach!.why).toContain(t.pairs === 1 ? `1 of the ${t.groups} corners holds a lone pair` : `${t.pairs} of the ${t.groups} corners hold lone pairs`)
       }
       if (f.ask === 'electron' && f.pick === t.molecular) {
-        expect(f.said.idea).toBe('swapped')
-        // a counts question asks for the molecular geometry next, so its card does not name it
-        if (f.kind === 'counts') expect(f.said.coach!.lead).toBe(`${f.pick.charAt(0).toUpperCase()}${f.pick.slice(1)} leaves out the ${t.pairs} lone pairs.`)
-        else {
+        expect(f.said.idea).toBe(f.kind === 'counts' ? 'no-lone-pairs' : 'swapped')
+        // a counts question asks for the molecular geometry next, so its card does not name it or
+        // say that the pick leaves out the lone pairs (COPY-3): the pick gets the card for the
+        // electron geometry of the bonded atoms alone
+        if (f.kind === 'counts') {
+          expect(f.said.idea).toBe('no-lone-pairs')
+          expect(f.said.coach!.lead).toBe(`${f.pick.charAt(0).toUpperCase()}${f.pick.slice(1)} is the electron geometry for ${t.bonded} electron groups.`)
+        } else {
           expect(f.said.coach!.lead).toMatch(/is the molecular geometry here/)
           expect(f.said.coach!.lead).toContain(`the ${t.bonded} atoms`)
         }
@@ -252,7 +263,8 @@ describe('the series', () => {
 
 /** The cards a student can reach from a set of lines: each highlighted word's card, and each
  *  card's related terms in turn. The quiz has no guided problem on screen, so cards are built for
- *  none (as ui.ts does outside the guided steps). */
+ *  none (as ui.ts does outside the guided steps). ui.ts never opens a blocked term and leaves its
+ *  link out of every card (the part's blockedTerms hook), so the walk stops at a blocked term. */
 function reachable(text: string[], blocked: TermId[]): Set<TermId> {
   const seen = new Set<TermId>()
   const todo: TermId[] = []
@@ -261,7 +273,7 @@ function reachable(text: string[], blocked: TermId[]): Set<TermId> {
     const id = todo.pop()!
     if (seen.has(id)) continue
     seen.add(id)
-    for (const r of termCard(id, null, null).related) todo.push(r.id)
+    for (const r of termCard(id, null, null).related) if (!blocked.includes(r.id)) todo.push(r.id)
   }
   return seen
 }
@@ -279,7 +291,8 @@ describe('key terms while a question is open', () => {
         const who = kind === 'counts' || kind === 'angle' ? 'the middle atom' : 'nitrogen'
         const asks: Ask[] = kind === 'counts' ? ['electron', 'molecular'] : kind === 'angle' ? ['angle'] : [kind]
         const answers = asks.map((a) => answerPattern(a, row))
-        const blocked = blockedTerms(asks, row)
+        for (const p of moleculesFor(key)) {
+        const blocked = blockedTerms(asks, row, p.id)
         const q = questionLines(kind, row, who)
         // the question, and every card a wrong first pick can bring up while the question is still open
         const text = [q.title, q.sub, ...q.asks, SENTENCES.howTurn]
@@ -291,13 +304,14 @@ describe('key terms while a question is open', () => {
           for (const answer of answers) expect(cardText(id), `${key} ${kind}: the card for ${id}`).not.toMatch(answer)
           checked++
         }
+        }
       }
     }
     expect(checked).toBeGreaterThan(0)
   })
   it('still highlights words whose cards are safe', () => {
     const row = rowOf('2,0')
-    const blocked = blockedTerms(['angle'], row)
+    const blocked = blockedTerms(['angle'], row, 'CO2')
     expect(ALL_TERMS.filter((id) => !blocked.includes(id)).length).toBeGreaterThan(10)
   })
   it('answerPattern finds the answer and not a longer name around it', () => {
@@ -309,5 +323,243 @@ describe('key terms while a question is open', () => {
   })
   it('the row is never answered by its own answer under another name in the table', () => {
     for (const key of ROW_KEYS) expect(answerOf('electron', rowOf(key))).toBe(T(key).electron)
+  })
+})
+
+// ---------------------------------------------------------------- review round 1 (2026-11-17)
+
+const SAMPLE_COUNTS = (m: Sample) => (m.formula.reduce((n, [, k]) => n + k, 0) > 2 ? sampleShape(m) : null)
+const samplesOf = (id: TermId): Sample[] => {
+  const c = termCard(id, null, null)
+  return [...c.about.samples, ...(c.picture.kind === 'lewis' ? c.picture.samples : []), ...(c.picture.kind === 'model' ? [c.picture.sample] : [])]
+}
+const sameSpecies = (m: Sample, id: string) => {
+  const p = problemById(id)
+  return m.charge === p.charge && JSON.stringify([...m.formula].sort()) === JSON.stringify([...p.formula].sort())
+}
+const ASKS_OF: Record<Kind, Ask[]> = { electron: ['electron'], molecular: ['molecular'], counts: ['electron', 'molecular'], angle: ['angle'] }
+
+describe('key terms while a question is open, against the molecule and the counts (COPY-1, COPY-8)', () => {
+  it('no card that can open works the molecule on the board, a molecule with the row\'s counts, or states the answer', () => {
+    let checked = 0
+    for (const key of ROW_KEYS) {
+      const row = rowOf(key)
+      const t = T(key)
+      for (const kind of KINDS) {
+        const asks = ASKS_OF[kind]
+        for (const p of moleculesFor(key)) {
+          const blocked = blockedTerms(asks, row, p.id)
+          for (const id of ALL_TERMS.filter((x) => !blocked.includes(x))) {
+            const label = `${key} ${kind} ${p.id}: the card for ${id}`
+            for (const a of asks) expect(cardText(id), label).not.toMatch(answerPattern(a, row))
+            for (const m of samplesOf(id)) {
+              expect(sameSpecies(m, p.id), `${label} draws ${m.id}`).toBe(false)
+              const s = SAMPLE_COUNTS(m)
+              expect(s !== null && s.bonded === t.bonded && s.lonePairs === t.pairs, `${label} works ${m.id}, ${t.bonded} bonded atoms and ${t.pairs} lone pairs`).toBe(false)
+            }
+            if (asks.includes('angle')) {
+              expect(id, label).not.toBe('bond-angle')
+              expect(cardText(id), `${label} says what lone pairs do to an angle`).not.toMatch(/squeez|push(es)? harder/i)
+            }
+            checked++
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(1000)
+  })
+  it('the electron group card (nitrogen trifluoride, 3 bonded atoms and 1 lone pair) never opens on a row 3,1 question', () => {
+    for (const kind of KINDS) for (const p of moleculesFor('3,1')) expect(blockedTerms(ASKS_OF[kind], rowOf('3,1'), p.id), `${kind} ${p.id}`).toContain('electron-group')
+  })
+  it('the bond angle card never opens while a bond angle is asked', () => {
+    for (const key of ROW_KEYS) for (const p of moleculesFor(key)) expect(blockedTerms(['angle'], rowOf(key), p.id), key).toContain('bond-angle')
+  })
+  it('the part hands the module the same set the panel leaves plain, and none once the question is finished', () => {
+    let st: ShapesState = { ...freshShapes(), phase: 'quiz' }
+    st = nextQuestion(st, new Set())
+    const q = st.q!
+    const s = { ...getState(), mode: 'shapes' as const, shapes: st }
+    expect([...shapesPart.blockedTerms!(s)].sort()).toEqual([...blockedTerms(q.asks.map((a) => a.ask), rowOf(q.row), q.molecule)].sort())
+    let done = st
+    for (let i = 0; i < 4 && done.q!.right === null; i++) {
+      const a = done.q!.asks.find((x) => x.right === null)!
+      done = pick(done, answerOf(a.ask, rowOf(done.q!.row))).st
+    }
+    expect(shapesPart.blockedTerms!({ ...s, shapes: done }).size).toBe(0)
+    expect(shapesPart.blockedTerms!({ ...s, shapes: { ...st, phase: 'learn' } }).size).toBe(0)
+  })
+})
+
+/** A counts question on a row with the electron part missed twice, the molecular part open. */
+function missedElectron(key: RowKey): ShapesState {
+  const row = rowOf(key)
+  const asks = ASKS_OF.counts.map((ask) => ({ ask, choices: choicesFor(ask, row), picks: [] as string[], right: null }))
+  let st: ShapesState = { ...freshShapes(), phase: 'quiz', turn: 1, q: { n: 1, row: key, kind: 'counts', molecule: moleculesFor(key)[0]!.id, asks, right: null, firstTry: false, madeKnown: false } }
+  for (const w of choicesFor('electron', row).filter((c) => c !== T(key).electron).slice(0, TRIES)) st = pick(st, w).st
+  return st
+}
+const panelText = (st: ShapesState) => {
+  const html = shapesPart.panel({ ...getState(), mode: 'shapes', shapes: st })
+  return html.replace(/<div class="mb-choices[^>]*>[\s\S]*?<\/div>/g, ' ').replace(/<\/?button\b[^>]*>/g, '').replace(/<[^>]+>/g, ' ').replace(/&[a-z#0-9]+;/g, ' ').replace(/\s+/g, ' ')
+}
+
+describe('a counts question whose electron part was missed (COPY-2, CODE-1)', () => {
+  it('keeps the electron geometry\'s name off the panel while the molecular part is open, and shows it once the question is finished', () => {
+    for (const key of ROW_KEYS) {
+      const st = missedElectron(key)
+      expect(st.q!.asks[0]!.right, key).toBe(false)
+      expect(st.q!.right, key).toBeNull()
+      const text = panelText(st)
+      expect(text, key).not.toMatch(answerPattern('electron', rowOf(key)))
+      expect(text, key).not.toMatch(answerPattern('molecular', rowOf(key)))
+      expect(text, key).toContain(SENTENCES.electronHeld)
+      const done = pick(st, T(key).molecular).st
+      expect(done.q!.right, key).toBe(false)
+      expect(panelText(done), key).toContain(`The electron geometry is ${T(key).electron}`)
+    }
+  })
+  it('no electron card in a counts question names the molecular geometry, outside the student\'s own pick', () => {
+    for (const f of FEEDBACK.filter((x) => x.kind === 'counts' && x.ask === 'electron' && !x.said.right && x.said.coach)) {
+      const c = f.said.coach!
+      const lines = [c.lead, c.why, ...(f.tries < TRIES ? [c.ask] : [])].join(' ')
+      const text = lines.split(f.pick).join(' ').split(f.pick.charAt(0).toUpperCase() + f.pick.slice(1)).join(' ')
+      expect(text, `${f.key} ${f.pick}: ${lines}`).not.toMatch(answerPattern('molecular', rowOf(f.key)))
+    }
+  })
+})
+
+describe('the open question shows how to pick (COPY-28)', () => {
+  it('a how-to line for tapping a choice that names the number keys, only while a question is open', () => {
+    for (const n of [5, 6]) {
+      expect(howPick(n)).toMatch(/\btap\b/i)
+      expect(howPick(n)).toMatch(new RegExp(`press 1 to ${n}\\b`))
+    }
+    const st = nextQuestion({ ...freshShapes(), phase: 'quiz' }, new Set())
+    expect(panelText(st)).toContain(howPick(st.q!.asks[0]!.choices.length))
+  })
+})
+
+describe('the cards and lines the review asked to change', () => {
+  const wrong = FEEDBACK.filter((f) => !f.said.right)
+  const card = (key: RowKey, ask: Ask, kind: Kind, pick: string, tries = 1) => feedbackFor(ask, rowOf(key), kind === 'counts' || kind === 'angle' ? 'the middle atom' : 'xenon', pick, tries, kind)
+  it('COPY-3: in a counts question, linear on row 2,3 gets the card for leaving out the lone pairs, with no word on the molecular geometry', () => {
+    const s = card('2,3', 'electron', 'counts', 'linear')
+    expect(s.idea).toBe('no-lone-pairs')
+    expect(s.coach!.lead).toBe('Linear is the electron geometry for 2 electron groups.')
+    expect(s.text).not.toMatch(/leaves out/)
+  })
+  it('COPY-4: a fallback card says why the pick fails without saying "different"', () => {
+    for (const f of wrong.filter((x) => x.said.idea === 'other' && x.ask !== 'angle')) expect(f.said.coach!.why, f.said.text).not.toMatch(/\bdifferent\b/)
+    for (const f of wrong.filter((x) => x.said.idea === 'other' && x.ask === 'electron')) {
+      const n = Object.entries(BY_GROUPS).find(([, g]) => g === f.pick)![0]
+      expect(f.said.coach!.why, f.said.text).toContain(`does not have ${n} electron groups`)
+    }
+    // a counts question: the ask hands back a smaller question than the title
+    for (const f of wrong.filter((x) => x.said.idea === 'other' && x.ask === 'molecular' && x.kind === 'counts' && x.tries === 1)) {
+      expect(f.said.coach!.ask, f.said.text).not.toMatch(/^Find the molecular geometry with/)
+      expect(f.said.coach!.ask, f.said.text).toMatch(/electron geometry/)
+    }
+  })
+  it('COPY-5: the ideal-angle card does not say which way to go before the last try', () => {
+    for (const f of wrong.filter((x) => x.said.idea === 'ideal' && x.tries === 1)) expect(f.said.coach!.ask, f.said.text).not.toMatch(/closer|smaller|less/)
+  })
+  it('COPY-6: a molecular geometry card never asks to count lone pairs as electron groups', () => {
+    for (const f of wrong.filter((x) => x.ask === 'molecular')) expect(f.said.text, f.said.text).not.toMatch(/as electron groups too|pushes the atoms into other places/)
+  })
+  it('CHEMWORDS-2, COPY-7: row 2,3\'s angle card says the 3 lone pairs take the flat triangle and the 2 bonds are the top and bottom ones', () => {
+    for (const pick of choicesFor('angle', rowOf('2,3')).filter((x) => x !== '180°' && !x.startsWith('less'))) {
+      const s = card('2,3', 'angle', 'angle', pick)
+      expect(s.coach!.why, pick).toMatch(/3 lone pairs take all 3 places in the flat triangle/)
+      expect(s.coach!.why, pick).toMatch(/top and bottom/)
+      expect(s.text, pick).not.toMatch(/Start from the bond angle/)
+    }
+  })
+  it('COPY-14: the trigonal bipyramid rows with lone pairs say where the lone pairs sit in plain words, singular for 1', () => {
+    for (const line of lines) expect(line, line).not.toMatch(/\bseats?\b/)
+    expect(angleReason(rowOf('4,1'), 'sulfur')).toMatch(/^The lone pair on sulfur sits in the flat triangle of 3 places around sulfur/)
+    expect(angleReason(rowOf('3,2'), 'chlorine')).toMatch(/^The 2 lone pairs on chlorine sit in the flat triangle of 3 places around chlorine/)
+  })
+  it('COPY-18, COPY-26: a name two rows share adds the row\'s lone pairs, in titles, the Next button and the known line', () => {
+    const titles = ROW_KEYS.map((k) => learnLines(rowOf(k), 'nitrogen').title)
+    expect(new Set(titles).size).toBe(13)
+    expect(new Set(ROW_KEYS.map((k) => WORDS.nextTo(rowOf(k)))).size).toBe(13)
+    expect(knownLine(rowOf('2,0'))).toBe(`Linear with no lone pairs is known: you got ${KNOWN_AT} questions in a row right on the first try.`)
+    expect(knownLine(rowOf('2,2'))).toBe(`Bent with 2 lone pairs is known: you got ${KNOWN_AT} questions in a row right on the first try.`)
+    expect(knownLine(rowOf('3,1'))).toBe(`Trigonal pyramidal is known: you got ${KNOWN_AT} questions in a row right on the first try.`)
+  })
+  it('COPY-21: the series line on lone pairs has the student count them, with no idea doing a person\'s job', () => {
+    expect(learnLines(rowOf('2,1'), 'sulfur').difference).toBe(
+      'Count the lone pair on sulfur as an electron group too, and the 3 groups make a trigonal planar electron geometry. Leave the lone pair out, and the 2 atoms make a bent molecular geometry.',
+    )
+    expect(learnLines(rowOf('6,0'), 'sulfur').difference).not.toMatch(/Count/)
+    for (const k of ROW_KEYS) expect(learnLines(rowOf(k), 'sulfur').difference).not.toMatch(/geometry (counts|names)/)
+  })
+  it('COPY-24: no line says a geometry has lone pairs, and no line says "the lone pairs" for 1', () => {
+    for (const line of lines) expect(line, line).not.toMatch(/This molecular geometry has|\bdo to it\b/)
+    for (const f of wrong.filter((x) => T(x.key).pairs === 1)) expect(f.said.text, f.said.text).not.toMatch(/\bthe lone pairs (do|push)\b/)
+  })
+  it('COPY-25: a counts line has a subject and a verb', () => {
+    for (const k of ROW_KEYS) {
+      expect(learnLines(rowOf(k), 'sulfur').counts).toMatch(/^The middle atom has /)
+      expect(questionLines('counts', rowOf(k), 'the middle atom').title).toMatch(/^The middle atom has /)
+    }
+  })
+  it('COPY-29: the result line promises no return it cannot keep', () => {
+    for (const first of [true, false]) for (const r of [true, false]) expect(resultLine(r, first)).not.toMatch(/after the next question/)
+  })
+})
+
+// ---------------------------------------------------------------- fix check, round 2 (2026-11-17)
+
+describe('round 2 of the fixes', () => {
+  it('FQ-1: while a bond angle is asked, no card that can open states any bond angle, in its text or its picture', () => {
+    let checked = 0
+    for (const key of ROW_KEYS) {
+      for (const p of moleculesFor(key)) {
+        const blocked = blockedTerms(['angle'], rowOf(key), p.id)
+        for (const id of ALL_TERMS.filter((x) => !blocked.includes(x))) {
+          const c = termCard(id, null, null)
+          expect(cardText(id), `${key} ${p.id}: the card for ${id}`).not.toMatch(/\d°/)
+          expect(c.picture.kind === 'model' && c.picture.angle, `${key} ${p.id}: the picture of ${id} marks an angle`).toBe(false)
+          checked++
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(100)
+    // the case the check found: the bent card ("The bond angle is less than 109.5°") on row 2,1
+    for (const p of moleculesFor('2,1')) expect(blockedTerms(['angle'], rowOf('2,1'), p.id), p.id).toContain('shape:bent')
+  })
+  it('FQ-2: a counts question on a row whose lone pairs take particular places says where they go', () => {
+    const place: Record<RowKey, RegExp> = {
+      '4,1': /The lone pair takes 1 of the 3 places in the flat triangle/,
+      '3,2': /The 2 lone pairs take 2 of the 3 places in the flat triangle/,
+      '2,3': /The 3 lone pairs take all 3 places in the flat triangle/,
+      '4,2': /The 2 lone pairs take 2 places on opposite sides of the middle atom/,
+    }
+    for (const f of FEEDBACK.filter((x) => x.kind === 'counts' && x.ask === 'molecular' && !x.said.right && x.tries === 1 && place[x.key])) {
+      expect(f.said.text, `${f.key} ${f.pick}`).toMatch(place[f.key]!)
+      expect(f.said.text, f.said.text).not.toMatch(/leave out the (\d )?corners?/i)
+    }
+  })
+  it('FQ-3: row 2,3\'s squeezed card asks for the angle between the top and bottom bonds', () => {
+    for (const pick of choicesFor('angle', rowOf('2,3')).filter((x) => x.startsWith('less'))) {
+      expect(feedbackFor('angle', rowOf('2,3'), 'the middle atom', pick, 1, 'angle').coach!.ask, pick).toBe('Pick the angle between the top bond and the bottom bond.')
+    }
+  })
+  it('FQ-4: with the electron part held back, no molecular card names the electron geometry, for every row and pick', () => {
+    for (const key of ROW_KEYS) {
+      const st = missedElectron(key)
+      for (const w of choicesFor('molecular', rowOf(key)).filter((c) => c !== T(key).molecular)) {
+        const one = pick(st, w).st
+        expect(one.q!.right, `${key} ${w}`).toBeNull()
+        expect(panelText(one), `${key} ${w}`).not.toMatch(answerPattern('electron', rowOf(key)))
+      }
+    }
+  })
+  it('FQ-5: the how-to for picking is true with or without a keyboard, and gives the keys for the choices shown', () => {
+    expect(howPick(5)).toBe('Tap a choice to pick it. With a keyboard, press 1 to 5: 1 picks the first choice.')
+    const st = nextQuestion({ ...freshShapes(), phase: 'quiz' }, new Set())
+    const n = st.q!.asks[0]!.choices.length
+    expect(panelText(st)).toContain(howPick(n))
   })
 })

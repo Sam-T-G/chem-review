@@ -12,11 +12,11 @@ under its column names. There is no step rail and no Hint button.
 | Part | How it is answered | What counts as right |
 |---|---|---|
 | Valence electrons | A number in a box, then "Check the total" or Enter | `totalElectrons(p)` |
-| Lewis structure | Built on the board with the free build gestures, then "Check my structure" | `assess(s, speciesOf(p)).complete` |
+| Lewis structure | Built on the board with the free build gestures, then "Check the structure" | `assess(s, speciesOf(p)).complete` |
 | Resonance (inside Lewis structure) | Yes or No, once the structure is right | `hasResonance(p)` |
 | Electron geometry | One of the five names | the engine's `ShapeInfo.geometry` for `referenceStructure(p)` |
 | Molecular geometry | One of four names (`shapeChoices`) | `ShapeInfo.shape` |
-| Bond angle | One of five angle texts from the shape table, "No bond angle" among them | the table's angle, or no angle for 2 atoms |
+| Bond angle | One of five angle texts from the shape table, "No bond angle" among them. An angle two bonds of the molecule really make (`alsoAngles`: 180° across a trigonal bipyramid or an octahedron, 90° or 120° alone in a trigonal bipyramid) is never offered as a wrong pick | the table's angle, or no angle for 2 atoms |
 | Bond polarity | For each kind of bond: ΔEN typed and checked, then Polar or Nonpolar | ΔEN from the course table; polar when the bond has a dipole |
 | Net dipole | Polar or nonpolar (for an ion: the dipoles cancel or not), then for a polar one which way it points | `moleculePolarity` on the finished structure |
 
@@ -25,9 +25,20 @@ answer them before building anything. Two parts wait for others, and say so in a
 waits for the structure, and the net dipole waits for Molecular geometry and Bond polarity.
 
 The direction picks are built from the molecule: toward or away from the atoms of one element ("toward the 3
-chlorine atoms"), toward or away from the lone pairs, and along a single bond of a kind that has several. Picks
-that point the same way are merged, and the right one is the closest to the net dipole (within 35°, every other
-pick at least 45° away). For 2 atoms the picks are "from A toward B" and "from B toward A".
+chlorine atoms"), toward or away from the lone pairs, and along a single bond of a polar kind that has several (a
+nonpolar bond has no dipole to follow, and the pick is left out when any bond of that kind lies within 45° of the net
+dipole, since "along 1 bond" does not say which bond: ICl3, ICl5 and ClF5, where the net dipole runs along one bond). Picks that point the same way are merged, and the right one is the closest
+to the net dipole (within 35°, every other pick at least 45° away). The net dipole is the bond dipoles added up and
+lone pairs add nothing to it (`docs/chemistry/sources.md`), so the accepted pick is always worded by the atoms: for
+water, the hydronium ion and the amide ion it is "Away from the 2 hydrogen atoms", and the answer line and the
+finished row add where the arrow passes, as the class worksheet does ("away from the 2 hydrogen atoms, through the
+oxygen atom"). A lone pair pick stays only as a wrong one ("toward the lone pair" for PCl3). When the middle atom's
+element is also an outer atom (ozone), the label says "the 2 outer oxygen atoms". A square pyramid (ICl5, ClF5) and a T-shape (ICl3)
+have their other dipoles cancel in pairs, so the right pick names the 1 atom the net dipole points at ("toward the
+chlorine atom across from the lone pair", "toward the chlorine atom in the flat triangle with the 2 lone pairs"),
+with "toward 1 of the 4 chlorine atoms in the square" (or "of the 2 across from each other") as a wrong pick. A bond
+to hydrogen is written with hydrogen first (H–Cl). For 2 atoms the picks are "from A
+toward B" and "from B toward A".
 
 A molecule of two atoms has no middle atom: both geometries are linear and the right bond angle is "No bond angle".
 The words never print a group count for it and never say "the middle atom" of it.
@@ -49,6 +60,9 @@ The words never print a group count for it and never say "the middle atom" of it
   the angle without lone pairs, a squeeze with no lone pairs, the flat 90°, "no bond angle" on a molecule with a
   middle atom; ΔEN names the two values added, the subtraction the wrong way round, one atom's value, and ΔEN times
   the number of bonds; the direction names the opposite way and a single bond.
+- Where a card hands back lone pairs to place, it says where they go: with 5 electron groups in the places of the
+  flat triangle around the middle atom, with 2 lone pairs on 6 groups on opposite sides (OpenStax 7.6). Ozone's
+  middle atom is "the middle oxygen atom" on every card.
 - A card for one part never states the answer of another part that is still open. A wrong idea that cannot be
   named without that (the electron geometry inside a molecular geometry card) waits until the other part is
   answered, and the card falls back to a plainer one. `tests/exercise-words.test.ts` checks every card for every
@@ -64,8 +78,15 @@ The words never print a group count for it and never say "the middle atom" of it
 - Key terms: the module opens a card with no molecule outside the guided steps, so `src/modules/lewis/exercise/terms.ts`
   leaves a term plain when its card would draw the molecule, use an atom from one of its columns, show a molecule
   with the same electron or molecular geometry or angle, or work a bond the molecule has, while the part it gives
-  away is still open. A card that links to such a card is left plain too. `tests/exercise-terms.test.ts` holds
-  every molecule to that.
+  away is still open. Each card is judged on its own: the part hands the same set to the module as
+  `blockedTerms`, and the module never opens a blocked card and takes links to blocked cards out of every card it
+  opens. `tests/exercise-terms.test.ts` holds every molecule and every set of open parts to that. With every part
+  open, water has 12 of the 41 terms live (none before round 1, when a card that linked to a blocked card was
+  blocked too). For a molecule of 2 atoms the net dipole is its 1 bond dipole, so while the net dipole is open a card
+  that draws or names a bond from the same 2 columns (H–Cl on HBr), or says which atom a dipole points at, stays
+  plain. While Bond polarity is open, a card that gives a ΔEN of 0 or talks about a bond of 2 atoms of one element
+  stays plain on a molecule with such a bond (F2, N2, O3). `tests/exercise-terms.test.ts` also checks every live card
+  against facts written by hand for each of the 43 molecules (its geometries, angle, ΔEN values and dipole).
 
 ## The finished sheet
 
@@ -76,7 +97,11 @@ about the molecule and stays.
 
 ## The next molecule
 
-"Next molecule" is always there, so a student can skip. It opens, in this order (`nextAt` in
+"Next molecule" is always there, so a student can skip. It is a quiet button until the sheet is done and the main
+button after: when an answer takes its control off the sheet, the module moves the focus to the main button, so a
+second Enter on a main "Next molecule" would skip the molecule and empty its sheet. While it is quiet the focus
+waits on the sheet, where Enter does nothing. Picking the molecule already on screen in the picker closes the
+picker and keeps the sheet. It opens, in this order (`nextAt` in
 `src/modules/lewis/exercise/state.ts`, tested in `tests/exercise.test.ts`):
 
 1. a molecule that was finished with a missed part, once 3 more molecules have been finished since;
@@ -88,10 +113,16 @@ A molecule finished with every part right on the first try leaves the queue. Cha
 or the picker, empties the board and that molecule's answers. The queue is kept in memory, so a reload forgets it;
 the finished list is saved.
 
+The exercises open on the first molecule of the picker, even when it is finished. `openingExercise(st, solved)`
+in `state.ts` (tested) picks the first unfinished one while the sheet is untouched, but the saved list reaches the
+module after it starts (`store.mergeSolved`), so the call belongs in `store.ts`, which this folder does not own: it
+waits for the lead (review round 1, CODE-6).
+
 ## Checks
 
 - `pnpm exec vitest run exercise`: the answers worked by hand for the 20 worksheet molecules and 8 of two atoms
   (`tests/exercise-pool.ts`), the checks, locks and resets, the next-molecule rule, saved ids, the wording scan, and
   the key terms.
 - `node scripts/check-exercise.mjs desktop` and `phone`: one molecule worked with real input, a wrong answer per
-  part, the locks, the finished sheet, the next molecule, a reload and the keyboard.
+  part, the locks, the finished sheet, the next molecule, a reload and the keyboard, with the picker on the molecule
+  already on screen and a second Enter after the total.

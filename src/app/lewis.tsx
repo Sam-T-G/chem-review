@@ -6,7 +6,7 @@ import { Platform, StyleSheet, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 import LewisModule from '@/modules/lewis/LewisModule'
-import { PART_IDS, type Mode } from '@/modules/lewis/store'
+import { PART_IDS, type Mode } from '@/modules/lewis/contract'
 import type { Feel } from '@/modules/lewis/ui'
 import { useProgress } from '@/shell/progress'
 import { color } from '@/theme/tokens'

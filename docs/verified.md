@@ -2,6 +2,26 @@
 
 Dated entries, newest first. Each says what was run, on which build, by whom, and what it did not cover. Add an entry when you verify something a reader would otherwise have to take on trust. A claim with no entry here has not been checked.
 
+## 2026-11-18: the shapes quiz, the exercises and the board, all open (lead session)
+
+Run in the worktree `chem-review-review` on the branch `lewis/review-modes`, on the tree that was pushed to main. The web build under test was made at e4c9516; the commits after it change check scripts and docs only. It was served on port 5220. The runs started late on 2026-11-17 and ended after midnight.
+
+- `pnpm verify` exits 0: typecheck, lint, 987 unit tests in 19 files, `check-repo: ok`, and the production web build.
+- Browser, real input (headless Chromium with a software renderer), one run at a time under the run's browser lock, 0 failed in each run counted here:
+  - `check-browser.mjs`, all 20 guided molecules start to finish: 764 and 747 checks with touch at 390 x 844 (molecules 1 to 10, 11 to 20), 782 and 767 with a mouse at 1360 x 840. New in each run: a pick of "Molecular geometry" on step 5's model ends with that step, and step 6 draws every electron group and has no switch.
+  - The extras: 315 with touch, 414 with a mouse. The key terms: 81 and 89. Home screen with three cards, opening each, the way back and saved progress: 152 and 154.
+  - `check-board.mjs` (the switch between the two geometries, the two-atom models, turning the model): 162 with touch, 165 with a mouse.
+  - `check-shapes.mjs` (the shapes quiz): 163 with touch, 180 with a mouse.
+  - `check-exercise.mjs` (the exercises): 99 with touch, 99 with a mouse.
+- Runs that failed on the way, and why:
+  - Step 6 of SF6 with touch: the bond never answered and a tap timed out, in 2 runs of 4 on this build, and a few times in earlier builds. The check pressed a point 9 px clear of other atoms, inside the board's 10 to 12 px touch slack, so the press sometimes landed on a fluorine in front of sulfur (M-0020). With a 14 px margin SF6 passed 6 runs of 6 under a load average of 30 to 60, and then passed in both full runs above. The entry below this one blames an earlier failure of the same kind on the lead's scroll change: that was not proven (M-0013, corrected).
+  - `check-board.mjs` with touch, inside the full batch: 71 passed and 67 failed. One failure was the check still expecting the switch's pick to outlast the model, which the lead changed on purpose (M-0017). The other 66 followed a tap that opened a key-term card, which then covered the controls. Load average 31. Run alone on the same build: 161 passed and that 1 failed, with no page error. After the expectation was corrected: 162 passed, 0 failed.
+- Looked at by the lead, in screenshots: step 5 on a phone with four tabs, the back button and the name over the picks; the board builder's screenshots of the switch at both sizes and of HCl, N2, O2, IF and CN− lifted.
+- Eleven independent review reports stand behind this tree. `HANDOFF.md` lists what they found and what is still open.
+- The live site after the first push (8732a4d), checked against https://sam-t-g.github.io/chem-review: home screen and saved progress, 92 with a mouse and 90 with touch, 0 failed; one molecule start to finish with touch, 80, 0 failed; the extras with a mouse, 400 passed and 12 failed at a load average of 40 to 49, then 408 passed and 1 failed at 25. Every failure was a timing check of the 3D lift ("lift finished", "Flat drawing puts the model back on the board").
+- Not checked: a real phone or tablet (W-003), Safari's engine (W-012). Where the switch stands on a phone was looked at for water only. The exercises' third fix round and the lead's last changes have had no second read.
+- The machine was shared the whole time with other sessions' compiles and browser runs (load average 10 to 60 on 14 cores).
+
 ## 2026-11-17: the two geometry names, with the shapes quiz and the exercises closed (lead session)
 
 Run in the worktree `chem-review-review` on the branch `lewis/review-modes`, on the tree that was pushed to main: the source at 8da9270, which holds main's af57d17 (the net dipole label). The web build under test was made from that source and served on port 5220.

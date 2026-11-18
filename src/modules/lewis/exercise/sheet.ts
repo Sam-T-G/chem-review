@@ -12,7 +12,7 @@ import { atomsOf, speciesOf, totalElectrons, type Problem } from '../../../chem/
 import { idealDirs, type V3 } from '../../../chem/repulsion'
 import { bestStructures, solveStar, type StarSolution } from '../../../chem/solve'
 import type { Structure } from '../../../chem/structure'
-import { ALL_CASES, classify, type Geometry, type ShapeInfo, type ShapeName } from '../../../chem/vsepr'
+import { ALL_CASES, alsoAngles, classify, type Geometry, type ShapeInfo, type ShapeName } from '../../../chem/vsepr'
 import { geometryChoices, mixedOuter, shapeChoices, shapeInfoFor } from '../guide'
 
 /** The parts of the sheet, in the worksheet's order. */
@@ -43,13 +43,19 @@ export interface Direction {
   id: string
   /** toward or away from the atoms of one element, toward or away from the lone pairs, along one
    *  bond of a kind that has several, or for two atoms, toward the outer atom or toward the first. */
-  kind: 'to' | 'from' | 'lone-to' | 'lone-from' | 'one' | 'pair'
+  kind: 'to' | 'from' | 'lone-to' | 'lone-from' | 'one' | 'pair' | 'axis' | 'side'
+  /** For 'axis' (the 1 outer atom the net dipole points at) and 'side' (1 of the outer atoms whose dipoles cancel):
+   *  where that atom sits. 'square': a square pyramid (the axis atom is across from the lone pair). 'tee': a T-shape
+   *  (the axis atom is in the flat triangle with the 2 lone pairs, the side atoms across from each other). */
+  where?: 'square' | 'tee'
   el: El | null
   /** For two atoms: the atom the arrow starts at (`el` is the one it points at). */
   from?: El
   /** How many atoms of `el`, or how many lone pairs. */
   count: number
   dir: V3
+  /** For "along 1 bond": every bond of that kind, since the words do not say which one. */
+  bonds?: V3[]
 }
 
 export interface Sheet {
@@ -71,8 +77,8 @@ export interface Sheet {
   angleChoices: string[]
   bonds: BondKind[]
   m: MoleculePolarity
-  /** Null when the dipoles cancel or there are none. */
-  directions: { choices: Direction[]; right: string } | null
+  /** Null when the dipoles cancel or there are none. `net` is the net dipole's direction. */
+  directions: { choices: Direction[]; right: string; net: V3 } | null
 }
 
 const dot = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
@@ -98,7 +104,8 @@ export function directionsOf(m: MoleculePolarity, diatomic: boolean): Sheet['dir
     const toOuter: Direction = { id: 'to-outer', kind: 'pair', el: b.el, from: m.center.el, count: 1, dir: [1, 0, 0] }
     const toCenter: Direction = { id: 'to-center', kind: 'pair', el: m.center.el, from: b.el, count: 1, dir: [-1, 0, 0] }
     // the arrow points at the δ− atom; ozone's case (formal charges) has no two-atom form
-    return { choices: [toOuter, toCenter], right: b.out === 1 ? toOuter.id : toCenter.id }
+    const right = b.out === 1 ? toOuter : toCenter
+    return { choices: [toOuter, toCenter], right: right.id, net: right.dir }
   }
   const seats = idealDirs(m.bonded, m.lonePairs)
   if (!seats) return null
@@ -110,34 +117,61 @@ export function directionsOf(m: MoleculePolarity, diatomic: boolean): Sheet['dir
   const kinds = [...new Set(m.bonds.map((b) => b.el))]
   const seatsOf = (el: El) => m.bonds.map((b, i) => (b.el === el ? seats[i]! : null)).filter((v): v is V3 => !!v)
   const lone = seats.slice(m.bonded)
+  // a square pyramid (5 atoms, 1 lone pair) or a T-shape (3 atoms, 2 lone pairs) of one outer element: the other
+  // dipoles cancel in pairs and the net dipole runs along 1 bond, so the right pick names that atom (FX-4)
+  const where = kinds.length === 1 && m.bonded === 5 && m.lonePairs === 1 ? 'square' : kinds.length === 1 && m.bonded === 3 && m.lonePairs === 2 ? 'tee' : null
+  if (where) {
+    const el = kinds[0]!
+    const axis = seatsOf(el).find((v) => dot(unit(v), net) > 0.99)
+    const side = seatsOf(el).find((v) => Math.abs(dot(unit(v), net)) < 0.01)
+    if (axis) cands.push({ id: `axis-${el}`, kind: 'axis', el, count: 1, dir: axis, where })
+    if (side) cands.push({ id: `side-${el}`, kind: 'side', el, count: where === 'square' ? 4 : 2, dir: side, where })
+  }
   for (const el of kinds) cands.push({ id: `to-${el}`, kind: 'to', el, count: seatsOf(el).length, dir: sum(seatsOf(el)) })
   if (lone.length) cands.push({ id: 'to-lone', kind: 'lone-to', el: null, count: m.lonePairs, dir: sum(lone) })
-  // one bond of a kind that has several: the net dipole taken to follow a single bond
-  for (const el of kinds) if (seatsOf(el).length > 1) cands.push({ id: `one-${el}`, kind: 'one', el, count: 1, dir: seatsOf(el)[0]! })
+  // one bond of a kind that has several: the net dipole taken to follow a single bond. Only a polar
+  // kind: a nonpolar bond has no dipole to follow (C–H in dichloromethane)
+  const polarKind = (el: El) => m.bonds.some((b) => b.el === el && b.out !== 0)
+  // "Along 1 bond" does not say which bond, so it is true when any bond of the kind lies along the net
+  // dipole (a T-shape's equatorial bond, a square pyramid's apical bond): then it is left out (FE-1)
+  const cos = (deg: number) => Math.cos((deg * Math.PI) / 180)
+  for (const el of kinds) {
+    const own = seatsOf(el)
+    if (own.length > 1 && polarKind(el) && own.every((v) => dot(unit(v), net) <= cos(DISTRACTOR_DEG))) cands.push({ id: `one-${el}`, kind: 'one', el, count: 1, dir: own[0]!, bonds: own.map(unit) })
+  }
   for (const el of kinds) cands.push({ id: `from-${el}`, kind: 'from', el, count: seatsOf(el).length, dir: neg(sum(seatsOf(el))) })
   if (lone.length) cands.push({ id: 'from-lone', kind: 'lone-from', el: null, count: m.lonePairs, dir: neg(sum(lone)) })
-  // a phrase whose direction is zero (the 4 fluorine atoms of a square) or repeats an earlier one goes
+  // a phrase whose direction is zero (the 4 fluorine atoms of a square) or repeats an earlier one goes.
+  // The net dipole is the bond dipoles added up and lone pairs add nothing to it (docs/chemistry/sources.md),
+  // so when the right way has a phrase about lone pairs and one about atoms, the atoms' phrase is kept
+  // (water: "away from the 2 hydrogen atoms", never "toward the 2 lone pairs")
   const kept: Direction[] = []
   for (const c of cands) {
     if (len(c.dir) < 1e-6) continue
     const d = unit(c.dir)
-    if (kept.some((k) => dot(k.dir, d) > 0.98)) continue
+    const same = kept.findIndex((k) => dot(k.dir, d) > 0.98)
+    if (same >= 0) {
+      if (kept[same]!.kind.startsWith('lone') && !c.kind.startsWith('lone') && dot(d, net) >= cos(WITHIN_DEG)) kept[same] = { ...c, dir: d }
+      continue
+    }
     kept.push({ ...c, dir: d })
   }
-  const cos = (deg: number) => Math.cos((deg * Math.PI) / 180)
   const right = kept.reduce<Direction | null>((best, c) => (!best || dot(c.dir, net) > dot(best.dir, net) ? c : best), null)
   if (!right || dot(right.dir, net) < cos(WITHIN_DEG)) return null
   const choices = kept.filter((c) => c === right || dot(c.dir, net) <= cos(DISTRACTOR_DEG)).slice(0, 4)
   if (!choices.includes(right)) choices[choices.length - 1] = right
-  return { choices, right: right.id }
+  return { choices, right: right.id, net }
 }
 
 /** The bond angle picks: the right one, the wrong ideas (the angle without lone pairs, the flat
- *  drawing's 90°, no angle at all) and others from the table to make five, in table order. */
+ *  drawing's 90°, no angle at all) and others from the table to make five, in table order. An angle
+ *  that two bonds of the molecule really make (180° across a trigonal bipyramid or an octahedron)
+ *  is never offered as a wrong pick (`alsoAngles`). */
 export function angleChoicesFor(info: ShapeInfo, angle: string): string[] {
   const pool = [angle]
+  const also = info.diatomic ? [] : alsoAngles(info.bonded, info.lonePairs)
   const add = (a: string | undefined) => {
-    if (a && pool.length < 5 && !pool.includes(a)) pool.push(a)
+    if (a && pool.length < 5 && !pool.includes(a) && !also.includes(a)) pool.push(a)
   }
   if (info.diatomic) add('180°')
   else {
@@ -167,7 +201,9 @@ export function sheetOf(p: Problem): Sheet {
   const diatomic = isDiatomic(p)
   const kinds: BondKind[] = []
   // for two atoms the bond is named from the problem's first atom, whichever end the engine calls its middle
-  const first = diatomic ? p.center : m.center.el
+  // a bond to hydrogen is named with hydrogen first, as the course writes it (H–Cl)
+  const firstAtom = diatomic && p.center !== 'H' && atomsOf(p).includes('H') ? 'H' : p.center
+  const first = diatomic ? firstAtom : m.center.el
   for (const b of m.bonds) {
     const outer = diatomic ? (b.el === first ? m.center.el : b.el) : b.el
     const known = kinds.find((k) => k.b === outer)

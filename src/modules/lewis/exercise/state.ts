@@ -97,6 +97,24 @@ export function goTo(st: ExerciseState, at: number): ExerciseState {
   return { ...freshAnswers(at), finished: st.finished, queue: st.queue }
 }
 
+/** A molecule chosen in the picker. The molecule already on screen keeps its sheet. */
+export function pickAt(st: ExerciseState, at: number): ExerciseState {
+  return at === st.at ? st : goTo(st, at)
+}
+
+/** True while nothing on the sheet has been answered or tried and nothing has been finished. */
+function untouched(st: ExerciseState): boolean {
+  return JSON.stringify(st) === JSON.stringify({ ...freshAnswers(st.at), finished: 0, queue: [] })
+}
+/** The molecule the exercises open on, once the saved list is known: the first one in the picker's
+ *  order that is not finished. A sheet with anything on it stays, and so does the first molecule
+ *  when every molecule is finished. */
+export function openingExercise(st: ExerciseState, solved: string[], pool: Problem[] = EXERCISES, sets = EXERCISE_SETS): ExerciseState {
+  if (!untouched(st)) return st
+  const open = poolOrder(pool, sets).find((i) => !solved.includes(savedId(pool[i]!)))
+  return open === undefined || open === st.at ? st : goTo(st, open)
+}
+
 const miss = (st: ExerciseState, part: PartId): PartId[] => (st.missed.includes(part) ? st.missed : [...st.missed, part])
 
 // ---------------------------------------------------------------- the parts

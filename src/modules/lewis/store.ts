@@ -3,6 +3,7 @@
 import { assess } from '../../chem/assess'
 import { ELEMENTS, EL_ORDER, type El } from '../../chem/elements'
 import type { P2 } from '../../chem/layout2d'
+import { EXERCISES } from '../../chem/exercises'
 import { PROBLEMS, atomsOf, totalElectrons, type Problem } from '../../chem/problems'
 import {
   EMPTY,
@@ -21,7 +22,9 @@ import { hybridFor, type Hybrid } from '../../chem/orbitals'
 import type { SeenBond } from '../../chem/polarity'
 import type { V3 } from '../../chem/repulsion'
 import { shapeOf, type ShapeName } from '../../chem/vsepr'
-import { exerciseBoardChanged, exerciseCanLift, exerciseProblem, freshExercise, type ExerciseState } from './exercise/state'
+import { PART_IDS, type Mode } from './contract'
+import { exerciseBoardChanged, exerciseCanLift, exerciseProblem, freshExercise, openingExercise, savedId, type ExerciseState } from './exercise/state'
+import { ROW_KEYS } from './shapes/deck'
 import { freshShapes, shapesBoard, type ShapesState } from './shapes/state'
 import {
   AFTER_SHAPE,
@@ -60,10 +63,7 @@ import {
   type StepId,
 } from './guide'
 
-/** 'guided' and 'free' are the module's own modes. 'shapes' (the shapes quiz) and 'exercise' are parts: parts.ts has their contract. */
-export type Mode = 'guided' | 'free' | 'shapes' | 'exercise'
-/** A finished item of a part is saved with the part's prefix, so the three lists never share an id. */
-export const PART_IDS = { shapes: 'shape:', exercise: 'ex:' } as const
+export { PART_IDS, type Mode } from './contract'
 export interface Selection {
   kind: 'atom' | 'bond'
   id: string
@@ -156,6 +156,9 @@ export interface State {
   past: Structure[]
   selection: Selection | null
   view: 'flat' | 'shape'
+  /** What the lifted model shows of the middle atom: 'all' its lone pairs with the atoms (the
+   *  electron geometry), 'atoms' the atoms only (the molecular geometry). The student's choice. */
+  groupsView: 'all' | 'atoms'
   hints: number
   pickerOpen: boolean
   solved: string[]
@@ -165,7 +168,7 @@ export interface State {
   /** Set when Clear emptied a finished structure from the 3D model or a later step: the step, the
    *  view and the answers as they were, so that Undo puts all of it back with the atoms. Any other
    *  change to the board drops it. */
-  cleared: { s: Structure; step: StepId; view: 'flat' | 'shape'; hints: number; shape: ShapeState; polar: PolarState; orbitals: OrbitalState } | null
+  cleared: { s: Structure; step: StepId; view: 'flat' | 'shape'; hints: number; shape: ShapeState; polar: PolarState; orbitals: OrbitalState; exercise: ExerciseState } | null
 }
 
 const freshCount = (): CountState => ({ answers: {}, right: {}, tries: {}, feedback: {}, changed: {}, total: null, totalRight: false, totalTries: 0, totalFeedback: null })
@@ -192,11 +195,19 @@ const freshOrbitals = (): OrbitalState => ({ sigma: 0, pi: 0, counts: unanswered
 const freshAnswers = () => ({ shape: freshShape(), polar: freshPolar(), orbitals: freshOrbitals() })
 
 const SOLVED_KEY = 'chem-review:lewis:solved'
+/** True for an id that names something: a guided problem, a row of the shape table (with the quiz's
+ *  prefix) or an exercise (with the exercises' prefix). An id left over from an older pool is not
+ *  kept, so a home card never counts more finished items than it has. */
+function isSavedId(id: string): boolean {
+  if (id.startsWith(PART_IDS.shapes)) return (ROW_KEYS as string[]).includes(id.slice(PART_IDS.shapes.length))
+  if (id.startsWith(PART_IDS.exercise)) return EXERCISES.some((p) => savedId(p) === id)
+  return PROBLEMS.some((p) => p.id === id)
+}
 function loadSolved(): string[] {
   try {
     const raw = localStorage.getItem(SOLVED_KEY)
     const list: unknown = raw ? JSON.parse(raw) : []
-    return Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : []
+    return Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string' && isSavedId(x)) : []
   } catch {
     return []
   }
@@ -218,11 +229,13 @@ function initial(): State {
     middle: freshMiddle(),
     ...freshAnswers(),
     shapes: freshShapes(),
-    exercise: freshExercise(),
+    // the exercises open on the first molecule that is not finished yet
+    exercise: openingExercise(freshExercise(), loadSolved()),
     s: EMPTY,
     past: [],
     selection: null,
     view: 'flat',
+    groupsView: 'all',
     hints: 0,
     pickerOpen: false,
     solved: loadSolved(),
@@ -248,7 +261,12 @@ export function subscribe(fn: (s: State) => void): () => void {
   return () => listeners.delete(fn)
 }
 function set(patch: Partial<State>) {
-  state = { ...state, ...patch }
+  const next = { ...state, ...patch }
+  // The switch between the two geometries belongs to the one lifted model it was pressed on. It goes
+  // back to every electron group when the mode, the molecule, the step or the board changes, or the
+  // model comes down, so steps 6 and 7 and the next molecule always draw the lone pairs they talk about.
+  if (!('groupsView' in patch) && next.groupsView !== 'all' && (next.mode !== state.mode || next.problem !== state.problem || next.step !== state.step || next.s !== state.s || next.view !== 'shape')) next.groupsView = 'all'
+  state = next
   for (const fn of listeners) fn(state)
 }
 
@@ -489,11 +507,11 @@ export function next() {
 
 /** Add finished problems the app shell already knows about (its saved progress). */
 export function mergeSolved(ids: string[]) {
-  const known = new Set(PROBLEMS.map((p) => p.id))
-  const merged = [...new Set([...state.solved, ...ids.filter((id) => known.has(id) || Object.values(PART_IDS).some((prefix) => id.startsWith(prefix)))])]
+  const merged = [...new Set([...state.solved, ...ids.filter(isSavedId)])]
   if (merged.length === state.solved.length) return
   saveSolved(merged)
-  set({ solved: merged })
+  // saved progress arrives after the module starts: an exercise sheet nobody has touched moves on to the first unfinished molecule
+  set({ solved: merged, ...(state.mode !== 'exercise' || state.s.atoms.length === 0 ? { exercise: openingExercise(state.exercise, merged) } : {}) })
 }
 
 /** Record one more finished item: a guided problem's id, or a part's item with its prefix (PART_IDS). */
@@ -643,7 +661,7 @@ export function undo() {
   const was = state.cleared
   // straight after a Clear that emptied a finished structure: the step, the view and the answers come back with the atoms
   if (was && was.s === prev) {
-    set({ s: prev, past: state.past.slice(0, -1), selection: null, step: was.step, view: was.view, hints: was.hints, shape: was.shape, polar: was.polar, orbitals: was.orbitals, cleared: null })
+    set({ s: prev, past: state.past.slice(0, -1), selection: null, step: was.step, view: was.view, hints: was.hints, shape: was.shape, polar: was.polar, orbitals: was.orbitals, exercise: was.exercise, cleared: null })
     return
   }
   set({ s: prev, past: state.past.slice(0, -1), selection: null, ...afterChange(prev), cleared: null })
@@ -656,8 +674,8 @@ export function clearBoard() {
   if (isSpecimen() || state.s.atoms.length === 0) return
   if (editable()) commit(EMPTY, { selection: null })
   else {
-    const { s, step, view, hints, shape, polar, orbitals } = state
-    commit(EMPTY, { selection: null, view: 'flat', ...(state.mode === 'guided' ? { step: 'place' as const, hints: 0 } : {}), cleared: { s, step, view, hints, shape, polar, orbitals } })
+    const { s, step, view, hints, shape, polar, orbitals, exercise } = state
+    commit(EMPTY, { selection: null, view: 'flat', ...(state.mode === 'guided' ? { step: 'place' as const, hints: 0 } : {}), cleared: { s, step, view, hints, shape, polar, orbitals, exercise } })
   }
 }
 
@@ -819,6 +837,23 @@ export function pickHybrid(h: Hybrid) {
     set({ orbitals: { ...o, hybrid: { pick: h, right: false, tries, text: null, coach: hybridCoach(center, f, h, tries) } } })
   }
 }
+/** Where the switch between the two geometries is offered: on the lifted model in free build, and in
+ *  step 5 of a guided molecule (the lift comes after both of that step's picks). Steps 6 and 7 aim at
+ *  lone pairs and count electron groups, so they always draw every group, and so do the parts: the
+ *  shapes quiz has a switch of its own, and the exercises have none. */
+export function canSwitchGroups(s: State = state): boolean {
+  return s.view === 'shape' && (s.mode === 'free' || (s.mode === 'guided' && s.step === 'shape'))
+}
+/** What the lifted model draws for the module's own modes: every electron group, or the atoms only. */
+export function groupsViewShown(s: State = state): 'all' | 'atoms' {
+  return canSwitchGroups(s) ? s.groupsView : 'all'
+}
+/** The switch on the lifted model: the electron geometry ('all') or the molecular geometry ('atoms'). */
+export function setGroupsView(groupsView: 'all' | 'atoms') {
+  if (!canSwitchGroups()) return
+  if (groupsView !== state.groupsView) set({ groupsView })
+}
+
 export function setView(view: 'flat' | 'shape') {
   if (view === state.view) return
   if (view === 'shape') {

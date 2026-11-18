@@ -319,9 +319,15 @@ export class Scene {
   private domAtoms: (string | null)[] = []
   private glide: { from: V3[]; to: V3[]; t: number; dur: number } | null = null
   private quiet = 0
+  /** A molecule of two atoms has no middle atom: the lifted model puts `a` and `b` on one line
+   *  through the model's center, along `dir`, with the middle of the bond at the center. */
+  private pair: { a: string; b: string; dir: V3 } | null = null
+  /** 0: the middle atom's lone pairs are drawn on the lifted model. 1: they have faded out and only
+   *  the atoms are seen (`groupsView: 'atoms'`). Moves between the two over 0.45 seconds. */
+  private groupsHide = 0
 
   // pointer
-  private press: { kind: 'atom' | 'dot' | 'bond' | 'empty' | 'cut' | 'orbit' | 'dom' | 'arrow' | 'aim'; pointerId: number; id?: string; dom?: number; x: number; y: number; moved: boolean; grab?: P2 } | null = null
+  private press: { kind: 'atom' | 'dot' | 'bond' | 'empty' | 'cut' | 'orbit' | 'dom' | 'arrow' | 'aim'; pointerId: number; id?: string; dom?: number; x: number; y: number; moved: boolean; grab?: P2; last?: { x: number; y: number } } | null = null
   private pinned: string | null = null
   private dropTarget: string | null = null
   private coarse = false
@@ -959,6 +965,11 @@ export class Scene {
     const s = this.input.s
     const top = assess(s).topology
     if (top.kind !== 'star') return
+    if (top.terminals.length === 1) {
+      this.enterPair(top.center, top.terminals[0]!)
+      return
+    }
+    this.pair = null
     this.centerId = top.center
     const d = centerDomains(s, top.center)
     this.doms = makeDomains(
@@ -990,6 +1001,61 @@ export class Scene {
     this.orbit.az = this.clearView(to ?? this.doms.map((x) => x.dir))
     this.liftTarget = 1
     this.quiet = 0
+  }
+
+  /** A molecule of two atoms: neither atom is drawn as the middle one. Both sit on a level line
+   *  through the model's center, with the middle of the bond at the center, and each atom's lone
+   *  pairs fan out behind it the way an outer atom's do. The camera turns so the line lies across
+   *  the screen, the atoms keeping the left and right they had on the flat board. */
+  private enterPair(aId: string, bId: string) {
+    const s = this.input.s
+    const pa = this.positions.get(aId) ?? { x: -1, y: 0 }
+    const pb = this.positions.get(bId) ?? { x: 1, y: 0 }
+    let dx = pb.x - pa.x
+    let dy = pb.y - pa.y
+    if (Math.hypot(dx, dy) < 1e-3) {
+      dx = 1
+      dy = 0
+    }
+    const n = Math.hypot(dx, dy)
+    // The line runs from the atom on the left of the board to the one on the right (the board's y
+    // runs toward -z in the scene). The camera's right is (cos az, 0, -sin az), so this turn puts
+    // that line across the screen with the atoms on the same sides.
+    const k = dx < 0 ? -1 : 1
+    this.pair = k > 0 ? { a: aId, b: bId, dir: [dx / n, 0, -dy / n] } : { a: bId, b: aId, dir: [-dx / n, 0, dy / n] }
+    this.centerId = null
+    this.doms = []
+    this.domAtoms = []
+    this.glide = null
+    const az = Math.atan2(dy, dx) + (k < 0 ? Math.PI : 0)
+    this.orbit.az = az + Math.PI * 2 * Math.round((this.orbit.az - az) / (Math.PI * 2))
+    const A = atomById(s, aId)
+    const B = atomById(s, bId)
+    const order = s.bonds[0]?.order ?? 1
+    const L = A && B ? bondLength(A.el, B.el, order) : 1.6
+    const ra = A ? atomRadius(A.el) : 0.5
+    const rb = B ? atomRadius(B.el) : 0.5
+    const half = Math.max(ra, rb) + Math.max(0, L - ra - rb) / 2
+    this.modelR = Math.max(2, Math.min(3.2, half + Math.max(ra, rb) + 0.45))
+    this.liftTarget = 1
+    this.quiet = 0
+  }
+
+  /** Where each atom of a two-atom molecule sits on the lifted model, as offsets from its center. */
+  private pairOffset(id: string): THREE.Vector3 | null {
+    const p = this.pair
+    if (!p || (id !== p.a && id !== p.b)) return null
+    const A = this.atoms.get(p.a)
+    const B = this.atoms.get(p.b)
+    const s = this.input.s
+    const ea = atomById(s, p.a)
+    const eb = atomById(s, p.b)
+    if (!A || !B || !ea || !eb) return null
+    const L = bondLength(ea.el, eb.el, s.bonds[0]?.order ?? 1)
+    const gap = Math.max(0, L - A.r - B.r)
+    // the middle of the gap between the two balls is the model's center
+    const along = id === p.a ? -(A.r + gap / 2) : B.r + gap / 2
+    return v3(p.dir).multiplyScalar(along)
   }
 
   /** The camera direction (angle around the vertical) from which the bonded atoms overlap least,
@@ -1096,6 +1162,9 @@ export class Scene {
     const speed = this.reduced ? 100 : 1 / 1.25
     this.liftRaw += Math.max(-speed * dt, Math.min(speed * dt, this.liftTarget - this.liftRaw))
     const lift = ease(this.liftRaw)
+    // the middle atom's lone pairs fade out for the molecular geometry and back in for the electron geometry
+    const hideTo = this.input.groupsView === 'atoms' ? 1 : 0
+    this.groupsHide = this.reduced ? hideTo : this.groupsHide + Math.max(-dt / 0.45, Math.min(dt / 0.45, hideTo - this.groupsHide))
     if (this.liftRaw > 0) this.stepShape(dt)
     if (this.aimWanted && this.liftRaw >= 1 && !this.glide) {
       this.aimWanted = false
@@ -1163,7 +1232,9 @@ export class Scene {
 
       const flat = new THREE.Vector3(p.x + sway, view.r + (pinned ? 0.24 : 0) + view.drop + bob, -p.y)
       let target = flat
-      if (lift > 0 && centerAtom) {
+      const inPair = lift > 0 ? this.pairOffset(atom.id) : null
+      if (inPair) target = flat.clone().lerp(centerPos.clone().add(inPair), lift)
+      else if (lift > 0 && centerAtom) {
         if (atom.id === this.centerId) target = flat.clone().lerp(centerPos, lift)
         else {
           const i = this.domAtoms.indexOf(atom.id)
@@ -1350,9 +1421,10 @@ export class Scene {
         }
       }
       const lifted: THREE.Vector3[] = []
-      if (lift > 0 && this.centerId) {
+      const inPair = lift > 0 ? this.pairOffset(atom.id) : null
+      if (lift > 0 && (this.centerId || inPair)) {
         const counts = slots.groups.map((g) => g.count)
-        if (atom.id === this.centerId) {
+        if (atom.id === this.centerId && !inPair) {
           const loneDoms = this.doms.filter((d) => d.lone)
           counts.forEach((count, k) => {
             const dom = loneDoms[k]
@@ -1361,10 +1433,12 @@ export class Scene {
           })
         } else {
           // an outer atom: its groups fan out behind it, away from the bond
+          // (in a two-atom molecule both atoms are drawn this way, each facing away from the other)
           const i = this.domAtoms.indexOf(atom.id)
-          const out3 = i >= 0 ? v3(this.doms[i]!.dir) : new THREE.Vector3(0, 1, 0)
-          const u = perp(out3)
-          const w = new THREE.Vector3().crossVectors(out3, u)
+          const out3 = inPair ? inPair.clone().normalize() : i >= 0 ? v3(this.doms[i]!.dir) : new THREE.Vector3(0, 1, 0)
+          // both atoms of a pair share one sideways direction, so their lone pairs are mirror images
+          const u = inPair && this.pair ? perp(v3(this.pair.dir)) : perp(out3)
+          const w = inPair && this.pair ? new THREE.Vector3().crossVectors(v3(this.pair.dir), u) : new THREE.Vector3().crossVectors(out3, u)
           const g = counts.length
           const polar = g === 1 ? 0 : g === 2 ? Math.PI / 3 : g === 3 ? 1.2310 : 1.4
           counts.forEach((count, k) => {
@@ -1440,6 +1514,9 @@ export class Scene {
       for (const [key, p] of free) this.dots.push(this.makeDot(key, p))
     }
     const k = 1 - Math.exp(-(this.reduced ? 60 : 15) * dt)
+    // the middle atom's unshared electrons shrink away with its lone pairs' lobes when only the atoms are shown
+    const hidden = this.centerId ? `L:${this.centerId}:` : null
+    const hide = this.groupsHide * lift
     for (const d of this.dots) {
       const t = targets.get(d.key)
       if (t && !d.dying) d.pos.lerp(t, k)
@@ -1452,7 +1529,9 @@ export class Scene {
         d.mesh.position.y += Math.sin(this.time * 2.6 + d.phase * 1.3) * w * 0.9
         d.mesh.position.z += Math.sin(this.time * 2.1 + d.phase * 0.7) * w
       }
-      d.mesh.scale.setScalar(Math.max(0.001, d.grow) * big)
+      const fade = hidden && d.key.startsWith(hidden) ? 1 - hide : 1
+      d.mesh.scale.setScalar(Math.max(0.001, d.grow * fade) * big)
+      d.mesh.visible = fade > 0.02
     }
     this.dots = this.dots.filter((d) => {
       if (d.dying && d.grow < 0.03) {
@@ -1472,15 +1551,17 @@ export class Scene {
       this.scene.add(m)
       this.lobes.push(m)
     }
-    this.lobeMat.opacity = 0.5 * lift
+    // the molecular geometry: the lobes fade and shrink toward the middle atom, and keep their places
+    const show = lift * (1 - this.groupsHide)
+    this.lobeMat.opacity = 0.5 * show
     this.lobes.forEach((m, i) => {
       const dom = lone[i]
-      m.visible = !!dom && !!center && lift > 0.02
+      m.visible = !!dom && !!center && show > 0.02
       if (!dom || !center) return
       const dir = v3(dom.dir)
-      m.position.copy(center.pos).addScaledVector(dir, center.r + 0.2)
+      m.position.copy(center.pos).addScaledVector(dir, center.r + 0.2 * (1 - 0.6 * this.groupsHide))
       m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir)
-      const breath = this.reduced ? 1 : 1 + 0.05 * Math.sin(this.time * 1.5 + i * 1.7)
+      const breath = (this.reduced ? 1 : 1 + 0.05 * Math.sin(this.time * 1.5 + i * 1.7)) * (1 - 0.4 * this.groupsHide)
       m.scale.set(0.4 * breath, 0.52 * breath, 0.4 * breath)
     })
   }
@@ -1693,7 +1774,31 @@ export class Scene {
         // through the middle atom would land on that bond's outer atom. It is drawn beside the
         // bond, on the upper side, where the bond's own arrow is not.
         const along = bonds.map((b) => this.atoms.get(b.atomId)).find((o) => o && o.pos.clone().sub(center.pos).normalize().dot(sum) > 0.9)
-        if (along) {
+        const partner = this.pair ? this.atoms.get(this.pair.a === center.id ? this.pair.b : this.pair.a) : undefined
+        if (partner) {
+          // A molecule of two atoms: the net dipole is its one bond's dipole. It runs the length of
+          // the bond on the upper side, from the δ+ atom to the δ− atom, with its label above its middle.
+          const toward = partner.pos.clone().sub(center.pos).dot(sum) > 0
+          const tail = this.toScreen((toward ? center : partner).pos)
+          const head = this.toScreen((toward ? partner : center).pos)
+          const len = Math.hypot(head.x - tail.x, head.y - tail.y) || 1
+          const ux = (head.x - tail.x) / len
+          const uy = (head.y - tail.y) / len
+          const side = ux >= 0 ? -1 : 1
+          const off = Math.max(rc, this.pxRadius(partner.pos, partner.r)) + 16
+          const sx = -uy * side * off
+          const sy = ux * side * off
+          from.x = tail.x + sx
+          from.y = tail.y + sy
+          to.x = head.x + sx
+          to.y = head.y + sy
+          net = this.placeArrow(this.netArrow, from, to, null, 13)
+          if (net) {
+            this.netTag.textContent = d.netLabel
+            const k = 16 / off
+            this.netTag.style.transform = `translate(${((from.x + to.x) / 2 + sx * k).toFixed(1)}px, ${((from.y + to.y) / 2 + sy * k).toFixed(1)}px) translate(-50%, -50%)`
+          }
+        } else if (along) {
           const len = Math.hypot(to.x - from.x, to.y - from.y) || 1
           const ux = (to.x - from.x) / len
           const uy = (to.y - from.y) / len
@@ -1706,7 +1811,7 @@ export class Scene {
           to.y += shift.y
           net = this.placeArrow(this.netArrow, from, to, null, 13)
         } else net = this.placeArrow(this.netArrow, from, to, { at: pc, r: rc + 4 }, 13)
-        if (net) {
+        if (net && !partner) {
           const len = Math.hypot(to.x - from.x, to.y - from.y) || 1
           this.netTag.textContent = d.netLabel
           let tx = to.x + ((to.x - from.x) / len) * 16
@@ -1773,7 +1878,9 @@ export class Scene {
    *  from above. */
   private sideView(): { az: number; pol: number } | null {
     const n = this.netDir()
-    const center = this.centerId ? this.atoms.get(this.centerId) : undefined
+    // a two-atom molecule has no middle atom: the arrow starts on the atom the dipoles are drawn from
+    const id = this.centerId ?? (this.pair ? this.input.dipoles?.center : undefined)
+    const center = id ? this.atoms.get(id) : undefined
     if (!n || !center) return null
     const pol = Math.abs(n.y) > 0.6 ? Math.max(this.orbit.pol, 1.2) : this.orbit.pol
     const points = [new THREE.Vector3(), ...[...this.atoms.values()].filter((v) => v !== center).map((v) => v.pos.clone().sub(center.pos))]
@@ -2391,8 +2498,11 @@ export class Scene {
       this.arrowOver = this.input.draw?.kind === 'bond' && !this.onAtom(p.id, e.clientX, e.clientY) ? this.atomAt(e.clientX, e.clientY, p.id) : null
       this.aimNear = this.input.draw?.kind === 'net' ? this.aimToward(this.arrowTo.x, this.arrowTo.y) : -1
     } else if (p.kind === 'orbit') {
-      this.orbit.az -= (e.movementX || 0) * 0.008
-      this.orbit.pol = Math.max(0.3, Math.min(1.62, this.orbit.pol - (e.movementY || 0) * 0.008))
+      // measured from the last move, not from movementX: a touch's pointer events can carry 0 there
+      const last = p.last ?? { x: p.x, y: p.y }
+      this.orbit.az -= (e.clientX - last.x) * 0.008
+      this.orbit.pol = Math.max(0.3, Math.min(1.62, this.orbit.pol - (e.clientY - last.y) * 0.008))
+      p.last = { x: e.clientX, y: e.clientY }
     } else if (p.kind === 'dom' && p.dom !== undefined) {
       const center = new THREE.Vector3(0, LIFT_HEIGHT, 0)
       const atomId = this.domAtoms[p.dom]
@@ -2566,7 +2676,9 @@ export class Scene {
     const rect = this.wrap.getBoundingClientRect()
     const atoms = [...this.atoms.values()].map((v) => {
       const c = this.toScreen(v.pos)
-      return { id: v.id, el: v.el, x: rect.left + c.x, y: rect.top + c.y, r: this.pxRadius(v.pos, v.r) }
+      // `at`: the ball's place in the scene, measured from the lifted model's center (0 when on the flat board)
+      const at = this.liftRaw > 0 ? [v.pos.x, v.pos.y - LIFT_HEIGHT, v.pos.z].map((q) => Math.round(q * 1000) / 1000) : null
+      return { id: v.id, el: v.el, x: rect.left + c.x, y: rect.top + c.y, r: this.pxRadius(v.pos, v.r), at }
     })
     const bonds = this.input.s.bonds.map((b) => {
       const f = this.bondFrame(b.a, b.b)
@@ -2579,14 +2691,17 @@ export class Scene {
     })
     const dots = this.dots.filter((d) => !d.dying).map((d) => {
       const c = this.toScreen(d.pos)
-      return { key: d.key, x: rect.left + c.x, y: rect.top + c.y }
+      // `size`: 1 when the electron is drawn full size, 0 when it has shrunk away
+      return { key: d.key, x: rect.left + c.x, y: rect.top + c.y, size: d.mesh.visible ? Math.round((d.mesh.scale.x / (this.input.specimen ? SPECIMEN_SCALE : 1)) * 100) / 100 : 0 }
     })
+    const mid = this.toScreen(new THREE.Vector3(0, LIFT_HEIGHT, 0))
+    const model = { x: rect.left + mid.x, y: rect.top + mid.y, center: this.centerId, pair: this.pair ? [this.pair.a, this.pair.b] : null, hide: Math.round(this.groupsHide * 100) / 100 }
     // the box on the page that holds the four corners of the board, at the height of a ball lying on it
     const corners = [-1, 1].flatMap((sx) => [-1, 1].map((sz) => this.toScreen(new THREE.Vector3(sx * this.halfW, 0.5, sz * this.halfH))))
     const xs = corners.map((q) => q.x)
     const ys = corners.map((q) => q.y)
     const px = { x: rect.left + Math.min(...xs), y: rect.top + Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) }
-    return { atoms, bonds, lobes, dots, lift: this.liftRaw, ringed: this.ringed, dipoles: this.dipolesShown, draw: { kind: this.input.draw?.kind ?? null, ...this.drawnShown }, aims: this.aimsOnPage().map((a, i) => ({ ...a, label: this.aims[i]!.label })), board: { halfW: this.halfW, halfH: this.halfH, px } }
+    return { atoms, bonds, lobes, dots, model, lift: this.liftRaw, ringed: this.ringed, dipoles: this.dipolesShown, draw: { kind: this.input.draw?.kind ?? null, ...this.drawnShown }, aims: this.aimsOnPage().map((a, i) => ({ ...a, label: this.aims[i]!.label })), board: { halfW: this.halfW, halfH: this.halfH, px } }
   }
   /** For tests: the angle in degrees between two bonded atoms as seen from the center, in the 3D model. */
   debugAngles(): number[] {

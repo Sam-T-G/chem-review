@@ -12,7 +12,7 @@ import { PART_IDS, markSolved, update, type State } from '../store'
 import { BUBBLES, ICON, esc, howBox, rich } from '../ui'
 import { GEOMETRIES, ROW_KEYS, example, knownKeys, nextQuestion, pick, practiceAgain, problemById, rowOf, startQuiz, type RowKey } from './deck'
 import type { Question, ShapesState } from './state'
-import { SENTENCES, WORDS, angleReason, blockedTerms, feedbackFor, knownLine, learnLines, questionLines, readoutRows, resultLine, rowCounts, rowLabel } from './words'
+import { SENTENCES, WORDS, angleReason, blockedTerms, feedbackFor, heldBack, howPick, knownLine, learnLines, questionLines, readoutRows, resultLine, rowCounts, rowLabel } from './words'
 
 /** The rows the app has saved as known (`shape:<bonded>,<lonePairs>`). */
 const savedOf = (s: State): Set<RowKey> =>
@@ -25,6 +25,8 @@ const set = (shapes: ShapesState) => update({ shapes })
 const whoFor = (q: Question) => (q.kind === 'electron' || q.kind === 'molecular' ? lower(problemById(q.molecule).center) : 'the middle atom')
 const open = (st: ShapesState) => st.phase === 'quiz' && !!st.q && st.q.right === null
 const turnHow: HowTo[] = [{ gesture: 'drag', text: SENTENCES.howTurn }]
+/** The key terms that stay plain and may not open while the question is open (COPY-1): none once it is finished. */
+const blockedNow = (st: ShapesState): string[] => (open(st) ? blockedTerms(st.q!.asks.map((a) => a.ask), rowOf(st.q!.row), st.q!.molecule) : [])
 
 // ---------------------------------------------------------------- pieces
 
@@ -125,7 +127,7 @@ function quizBody(s: State, q: Question): string {
   const who = whoFor(q)
   const isOpen = q.right === null
   // while the question is open, a word whose card would give the answer stays plain
-  const seen = new Set<string>(isOpen ? blockedTerms(q.asks.map((a) => a.ask), row) : [])
+  const seen = new Set<string>(blockedNow(st))
   const r = (text: string) => (isOpen ? rich(text, seen) : rich(text))
   const lines = questionLines(q.kind, row, who)
   const model = q.kind === 'electron' || q.kind === 'molecular'
@@ -142,7 +144,9 @@ function quizBody(s: State, q: Question): string {
     if (i > at && at >= 0) return
     const ask = lines.asks[i] ? `<p class="mb-q">${r(lines.asks[i]!)}</p>` : ''
     const lastPick = a.picks[a.picks.length - 1]
-    const said = lastPick ? feedbackFor(a.ask, row, who, lastPick, a.picks.length, q.kind) : null
+    // the molecular part of a counts question while the missed electron part's answer is held back
+    const held = isOpen && i > 0 && q.asks[0]!.right === false
+    const said = lastPick ? feedbackFor(a.ask, row, who, lastPick, a.picks.length, q.kind, held) : null
     if (a.right === null) {
       // the open part: its choices as plain text (a geometry's name opens a card that would describe it), and the card for the last wrong pick
       const chips = a.choices
@@ -155,9 +159,12 @@ function quizBody(s: State, q: Question): string {
     } else if (a.right) {
       // a finished first part of a counts question keeps the name back while the second part is open: with no lone pairs it is the same name
       html += `${ask}${isOpen ? good(SENTENCES.electronRight, r) : good(said!.text, r)}`
-    } else html += `${ask}${coachBox(said!.coach!, r)}`
+    } else {
+      // a missed first part of a counts question keeps its answer back while the second part is open: with no lone pairs it is the same name
+      html += `${ask}${coachBox(isOpen ? heldBack(said!.coach!) : said!.coach!, r)}`
+    }
   })
-  html += `<p class="mb-body mb-sub sq-sub">${r(lines.sub)}</p>${model && isOpen ? howBox(turnHow) : ''}`
+  html += `<p class="mb-body mb-sub sq-sub">${r(lines.sub)}</p>${isOpen && at >= 0 ? howBox([{ gesture: 'tap', text: howPick(q.asks[at]!.choices.length) }, ...(model ? turnHow : [])]) : ''}`
   if (isOpen) return html
   html += `${readout(row, q.molecule, r)}<p class="mb-note">${r(angleReason(row, who))}</p>${knownList(s)}`
   return html
@@ -274,5 +281,6 @@ export const shapesPart: Part = {
     return false
   },
   cue: (s) => (open(s.shapes) ? { kind: 'ask', key: 'sq-q' } : { kind: 'next' }),
+  blockedTerms: (s) => new Set(s.mode === 'shapes' ? blockedNow(s.shapes) : []),
   done: (s) => s.shapes.phase === 'quiz' && s.shapes.q?.right === true,
 }

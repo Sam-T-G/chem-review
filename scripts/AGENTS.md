@@ -6,6 +6,7 @@ Node scripts, run by hand or from `package.json`. They import nothing from `src/
 - `check-browser.mjs`: the real-input browser checks. Every action is a real pointer or key event.
 - `check-exercise.mjs`: the real-input browser check of the exercises: one molecule worked from start to finish, a wrong answer per part, the locks, the next molecule, a reload and the keyboard. Team lewis.
 - `check-shapes.mjs`: the real-input browser checks of the shapes quiz (`/shapes`): the series, the switch, right and wrong answers, a missed row coming back, a row becoming known and staying known after a reload, the keyboard, and nothing on screen giving the answer.
+- `check-board.mjs`: the real-input browser checks of the 3D board's own controls: the four tabs and the back button, the switch between the electron geometry and the molecular geometry, and the 3D model of a molecule of two atoms (D-0036).
 - `check-repo.mjs`: `pnpm check:repo`, the repo's structure rules.
 - `who.mjs`: `pnpm who <path>`, the team, reviewers, rule files, docs and fast check for a path.
 - `lib/repo.mjs`: the functions behind the two scripts above. `tests/repo.test.ts` tests it.

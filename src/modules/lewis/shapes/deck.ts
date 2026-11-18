@@ -9,7 +9,7 @@
 import { EXERCISES, referenceStructure } from '../../../chem/exercises'
 import { PROBLEMS, type Problem } from '../../../chem/problems'
 import type { Structure } from '../../../chem/structure'
-import { ALL_CASES, ALL_SHAPES, classify, shapeOf, type Geometry, type ShapeInfo, type ShapeName } from '../../../chem/vsepr'
+import { ALL_CASES, ALL_SHAPES, alsoAngles, classify, shapeOf, type Geometry, type ShapeInfo, type ShapeName } from '../../../chem/vsepr'
 import type { AskState, Question, ShapesState } from './state'
 
 /** A row of the shape table by its counts: `${bonded},${lonePairs}`. */
@@ -116,12 +116,15 @@ export const shapeWithoutPairs = (row: ShapeInfo): ShapeName => classify(row.bon
 /** The choices for a part of a question, in a fixed order: all five electron geometries; six
  *  molecular geometries (the answer, the electron geometry, the one with no lone pairs, the others
  *  with as many atoms or as many groups); five bond angles (the answer, the angle with no lone
- *  pairs, the others of the same electron geometry, then the nearest rows). */
+ *  pairs, the others of the same electron geometry, then the nearest rows). A bond angle that two
+ *  bonds of the row really make, although the row's label is another one (180° across a trigonal
+ *  bipyramid or an octahedron, `alsoAngles`), is never offered as a wrong pick. */
 export function choicesFor(ask: Ask, row: ShapeInfo): string[] {
   if (ask === 'electron') return [...GEOMETRIES]
   const pool: string[] = []
+  const held = ask === 'angle' ? alsoAngles(row.bonded, row.lonePairs) : []
   const add = (x: string, max: number) => {
-    if (pool.length < max && !pool.includes(x)) pool.push(x)
+    if (pool.length < max && !pool.includes(x) && !held.includes(x)) pool.push(x)
   }
   if (ask === 'molecular') {
     for (const x of [row.shape, row.geometry, shapeWithoutPairs(row)]) add(x, 6)

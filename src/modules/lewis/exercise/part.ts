@@ -28,6 +28,7 @@ import {
   netOpen,
   nextAt,
   pickAngle,
+  pickAt,
   pickBond,
   pickDirection,
   pickGeometry,
@@ -250,7 +251,15 @@ function finished(sh: Sheet, st: ExerciseState, t: Printer): string {
   const rows = W.finishedRows(sh)
     .map((r) => `<div><dt>${esc(r.label)}</dt><dd>${esc(r.value)}</dd></div>`)
     .join('')
-  return `<section class="ex-row" data-k="ex-row" data-kv=""><h3 class="ex-h">${esc(W.EX_WORDS.tableTitle)}</h3><dl class="mb-readout">${rows}</dl><p class="mb-note">${esc(W.finishedNote(sh, st.missed, COME_BACK))}</p></section>`
+  return `<section class="ex-row" data-k="ex-row" data-kv=""><h3 class="ex-h">${esc(W.finishedTitle(sh))}</h3><dl class="mb-readout">${rows}</dl><p class="mb-note">${esc(W.finishedNote(sh, st.missed, COME_BACK))}</p></section>`
+}
+
+/** "Next molecule" is always there, so a student can skip. It is the main button only once the sheet
+ *  is done: when an answer takes its control away, the module moves the focus to the main button,
+ *  and a second Enter there would skip the molecule and empty its sheet. Before that it is a quiet
+ *  button, so the focus parks on the sheet, where Enter does nothing. */
+function nextButton(done: boolean): string {
+  return `<button class="mb-btn ${done ? 'mb-btn-main' : 'mb-btn-quiet'} ex-next" data-act="ex-next" data-key="ex-next" data-cue="ex-next">${esc(W.EX_WORDS.next)}</button>`
 }
 
 function panel(s: State): string {
@@ -270,8 +279,8 @@ function panel(s: State): string {
     netPart(sh, st, t),
   ].join('')
   return `${header(s, sh)}
-    <div class="mb-scroll ex-scroll"><div class="mb-step ex-sheet" tabindex="-1" data-ex-plain="${[...t.plain].join(' ')}">${body}</div></div>
-    <footer class="mb-foot"><button class="mb-btn mb-btn-main" data-act="ex-next" data-key="ex-next" data-cue="ex-next">${esc(W.EX_WORDS.next)}</button></footer>`
+    <div class="mb-scroll ex-scroll"><div class="mb-step ex-sheet" tabindex="-1" data-ex-plain="${[...t.plain].join('|')}">${body}</div></div>
+    <footer class="mb-foot">${nextButton(done)}</footer>`
 }
 
 // ---------------------------------------------------------------- above the board
@@ -333,9 +342,13 @@ function act(el: HTMLElement, s: State): boolean {
     case 'ex-next':
       go(nextAt(st, s.solved))
       return true
-    case 'ex-pick':
-      go(Number(el.dataset.at))
+    case 'ex-pick': {
+      // the molecule already on screen: the picker closes and the sheet stays
+      const at = Number(el.dataset.at)
+      if (pickAt(st, at) === st) store.update({ pickerOpen: false })
+      else go(at)
       return true
+    }
     case 'ex-valence':
       commit(checkValence(st, sh))
       return true
@@ -441,4 +454,6 @@ export const exercisePart: Part = {
   key,
   cue,
   done: (s) => sheetDone(s.exercise, sheetNow(s)),
+  // the same terms the panel prints plain: their cards would give an open part away
+  blockedTerms: (s) => plainNow(sheetNow(s), s.exercise),
 }

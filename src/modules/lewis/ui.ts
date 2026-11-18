@@ -10,11 +10,13 @@ import { shapeOf, type ShapeInfo, type ShapeName } from '../../chem/vsepr'
 import {
   ALL_TERMS,
   BIN_WORDS,
+  GROUPS_VIEW_WORDS,
   FREE_POLAR_WORDS,
   bondKindsOn,
   freeBondLine,
   freeNetLine,
   geometryPicks,
+  PICKS_NAME,
   geometryQuestion,
   groupsQuestion,
   shapeQuestion,
@@ -854,7 +856,7 @@ function stepShape(s: State, p: Problem): string {
     return `${fb(sh.groupsFeedback, 'good')}
       <p class="mb-q">${rich(q.ask)}</p>
       <p class="mb-body mb-sub">${rich(q.sub)}</p>
-      <div class="mb-choices" data-cue="geometry">${chips}</div>
+      <div class="mb-choices" data-cue="geometry"><span class="mb-choices-name">${PICKS_NAME.geometry}</span>${chips}</div>
       ${coach(sh.geometryCoach)}`
   }
   if (!sh.pick) {
@@ -865,7 +867,7 @@ function stepShape(s: State, p: Problem): string {
     return `${fb(sh.groupsFeedback, 'good')}${fb(sh.geometryFeedback, 'good')}
       <p class="mb-q">${rich(q.ask)}</p>
       <p class="mb-body mb-sub">${rich(q.sub)}</p>
-      <div class="mb-choices" data-cue="shapes">${chips}</div>`
+      <div class="mb-choices" data-cue="shapes"><span class="mb-choices-name">${PICKS_NAME.shapes}</span>${chips}</div>`
   }
   return `${sh.pickRight ? fb(sh.pickFeedback, 'good') : coach(sh.pickCoach)}${readout(p, p.center, info, mixedOuter(s.s))}`
 }
@@ -1108,7 +1110,16 @@ function dock(s: State): string {
       </div>`
     : ''
   let middle = ''
-  if (s.selection && canEdit) middle = selectionCard(s, s.s)
+  let kind = s.selection && canEdit ? 'selection' : 'tray'
+  // On the lifted model, a middle atom with a lone pair has two geometries, and the switch shows
+  // either one. It waits for the lift, so it never answers a question asked before the lift.
+  const lifted = canShape && s.view === 'shape' ? shapeOf(store.boardStructure(s)) : null
+  if (lifted && !lifted.diatomic && lifted.lonePairs > 0 && store.canSwitchGroups(s)) {
+    const choice = (v: 'all' | 'atoms') =>
+      `<button role="tab" aria-selected="${s.groupsView === v}" data-act="groups-view" data-groups="${v}" data-key="groups-${v}">${GROUPS_VIEW_WORDS[v]}</button>`
+    middle = `<div class="mb-views mb-groups" role="tablist" aria-label="${GROUPS_VIEW_WORDS.label}">${choice('all')}${choice('atoms')}</div>`
+    kind = 'groups'
+  } else if (s.selection && canEdit) middle = selectionCard(s, s.s)
   else if (canEdit) {
     const items = store.trayItems(s).filter((x) => x.n > 0)
     if (items.length) {
@@ -1120,7 +1131,7 @@ function dock(s: State): string {
         .join('')}</div>`
     }
   }
-  return `${tools}<div class="mb-dock-mid" data-kind="${s.selection && canEdit ? 'selection' : 'tray'}">${middle}</div>${views}`
+  return `${tools}<div class="mb-dock-mid" data-kind="${kind}">${middle}</div>${views}`
 }
 
 /** Everything in a redrawn region that moves once when it appears: numbers that pop, boxes that
@@ -1901,6 +1912,8 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
       draw: drawFor(s, st),
       // an atom dropped from the tray onto another atom is bonded to it, except in the place step, where bonding is the next step
       dropBonds: s.mode === 'free' || s.step === 'bond' || s.step === 'check',
+      // the switch on the lifted model is the guided steps' and free build's; a part draws its own model
+      groupsView: store.groupsViewShown(s),
       // the net dipole runs along the same line as an angle's label, so the two are never drawn together
       angles: shown && !showsDipoles(s) && !freeNetShown(s, st) ? angleMarks(s.mode === 'guided' ? store.problemOf(s) : null, shown, mixedOuter(st)) : [],
     }
@@ -2042,6 +2055,9 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
       case 'clear':
         store.clearBoard()
         break
+      case 'groups-view':
+        store.setGroupsView(t.dataset.groups === 'atoms' ? 'atoms' : 'all')
+        break
       case 'e-plus':
         if (sel?.kind === 'atom') store.plusElectron(sel.id)
         break
@@ -2143,7 +2159,8 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
       const handSeen = hand.classList.contains('is-on') && h.opacity > 0.5 && h.x + h.w > 0 && h.y + h.h > 0 && h.x < window.innerWidth && h.y < window.innerHeight
       const eyes = carried.classList.contains('is-on') ? carried.querySelector('.mb-eyes') : null
       return {
-        cue: store.cue(),
+        // in a part the cue is the part's own
+        cue: PARTS[store.getState().mode] ? (PARTS[store.getState().mode]!.cue?.(store.getState()) ?? null) : store.cue(),
         hand: handSeen ? cueShown.hand : 'off',
         halos: halos.filter((n) => n.classList.contains('is-on')).map(seen),
         /** The atom the hand carries: how wide its eyes are drawn, or null when no atom is carried. */

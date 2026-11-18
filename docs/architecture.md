@@ -44,7 +44,7 @@ Only the web build and the iOS Simulator have been tried so far (W-003). D-0002 
 - A module never imports another module or the shell, so a module team can change any file inside its folder without reading another team's code.
 - The shell reads the list of modules from `src/modules/registry.ts` and imports no other file under `src/modules/`.
 - Scripts import nothing from `src/`. Tests may import anything.
-- By convention, a route imports only its module's top component and the types its props need. The check enforces the folder (`src/modules/`), and a reviewer checks the rest.
+- By convention, a route imports only its module's top component, the types its props need, and the plain values in the module's `contract.ts` (a file with no imports of its own). The check enforces the folder (`src/modules/`), and a reviewer checks the rest.
 - A new folder under `src/` fails the check until it has an owner and a row here.
 - One exception is on file in `docs/ownership.json`: the home screen's atoms in the shell import the element ball colors from the Lewis module's `palette.ts` (W-011).
 

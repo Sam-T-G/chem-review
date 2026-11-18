@@ -38,7 +38,8 @@ const w = (id: string, formula: [El, number][], charge: number, center: El, name
 
 export const WORKED: Worked[] = [
   // the example row the instructor printed: 8, tetrahedral, bent, less than 109.5, O–H 1.4, polar
-  w('H2O', [['H', 2], ['O', 1]], 0, 'O', 'water', 8, false, 'tetrahedral', 'bent', 'less than 109.5°', { H: ['1.4', true] }, true, 'toward the 2 lone pairs'),
+  // the direction by the atoms, the worksheet's "up through oxygen": lone pairs add nothing to the sum of bond dipoles
+  w('H2O', [['H', 2], ['O', 1]], 0, 'O', 'water', 8, false, 'tetrahedral', 'bent', 'less than 109.5°', { H: ['1.4', true] }, true, 'away from the 2 hydrogen atoms'),
   // C–H 2.5 − 2.1 = 0.4 is nonpolar, C–Cl 3.0 − 2.5 = 0.5 is polar, so only the chlorines pull
   w('CH2Cl2', [['C', 1], ['H', 2], ['Cl', 2]], 0, 'C', 'dichloromethane', 20, false, 'tetrahedral', 'tetrahedral', '109.5°', { H: ['0.4', false], Cl: ['0.5', true] }, true, 'toward the 2 chlorine atoms'),
   w('SiCl4', [['Si', 1], ['Cl', 4]], 0, 'Si', 'silicon tetrachloride', 32, false, 'tetrahedral', 'tetrahedral', '109.5°', { Cl: ['1.2', true] }, false, null),
@@ -52,21 +53,22 @@ export const WORKED: Worked[] = [
   // seesaw: the two axial Se–Cl dipoles cancel, the two equatorial ones add up on the side away from the lone pair
   w('SeCl4', [['Se', 1], ['Cl', 4]], 0, 'Se', 'selenium tetrachloride', 34, false, 'trigonal bipyramidal', 'seesaw', 'less than 90° and less than 120°', { Cl: ['0.6', true] }, true, 'toward the 4 chlorine atoms'),
   w('CH3+', [['C', 1], ['H', 3]], 1, 'C', 'the methyl cation', 6, false, 'trigonal planar', 'trigonal planar', '120°', { H: ['0.4', false] }, false, null),
-  // square pyramidal: the 4 base dipoles cancel, the top I–Cl dipole points at its chlorine
-  w('ICl5', [['I', 1], ['Cl', 5]], 0, 'I', 'iodine pentachloride', 42, false, 'octahedral', 'square pyramidal', 'less than 90°', { Cl: ['0.5', true] }, true, 'toward the 5 chlorine atoms'),
+  // square pyramidal: the 4 base dipoles cancel in pairs, and the I–Cl dipole across from the lone pair is left
+  w('ICl5', [['I', 1], ['Cl', 5]], 0, 'I', 'iodine pentachloride', 42, false, 'octahedral', 'square pyramidal', 'less than 90°', { Cl: ['0.5', true] }, true, 'toward the chlorine atom across from the lone pair'),
   w('IF', [['I', 1], ['F', 1]], 0, 'I', 'iodine monofluoride', 14, false, 'linear', 'linear', 'none', { F: ['1.5', true] }, true, 'from iodine toward fluorine'),
   w('ICl2-', [['I', 1], ['Cl', 2]], -1, 'I', 'the dichloroiodate ion', 22, false, 'trigonal bipyramidal', 'linear', '180°', { Cl: ['0.5', true] }, false, null),
-  // T-shaped: the two axial dipoles cancel and the equatorial one is left
-  w('ICl3', [['I', 1], ['Cl', 3]], 0, 'I', 'iodine trichloride', 28, false, 'trigonal bipyramidal', 'T-shaped', 'less than 90°', { Cl: ['0.5', true] }, true, 'toward the 3 chlorine atoms'),
+  // T-shaped: the two axial dipoles cancel, and the I–Cl dipole in the flat triangle with the 2 lone pairs is left
+  w('ICl3', [['I', 1], ['Cl', 3]], 0, 'I', 'iodine trichloride', 28, false, 'trigonal bipyramidal', 'T-shaped', 'less than 90°', { Cl: ['0.5', true] }, true, 'toward the chlorine atom in the flat triangle with the 2 lone pairs'),
   w('CO3 2-', [['C', 1], ['O', 3]], -2, 'C', 'the carbonate ion', 24, true, 'trigonal planar', 'trigonal planar', '120°', { O: ['1.0', true] }, false, null),
   // the slides' odd case: ΔEN 0, and the formal charges (+1 in the middle) still make the bonds polar
-  w('O3', [['O', 3]], 0, 'O', 'ozone', 18, true, 'trigonal planar', 'bent', 'less than 120°', { O: ['0.0', true] }, true, 'toward the 2 oxygen atoms'),
+  w('O3', [['O', 3]], 0, 'O', 'ozone', 18, true, 'trigonal planar', 'bent', 'less than 120°', { O: ['0.0', true] }, true, 'toward the 2 outer oxygen atoms'),
   w('XeF4', [['Xe', 1], ['F', 4]], 0, 'Xe', 'xenon tetrafluoride', 36, false, 'octahedral', 'square planar', '90°', { F: ['1.4', true] }, false, null),
   // two atoms: no middle atom, both geometries linear, no bond angle
   w('HCl', [['H', 1], ['Cl', 1]], 0, 'H', 'hydrogen chloride', 8, false, 'linear', 'linear', 'none', { Cl: ['0.9', true] }, true, 'from hydrogen toward chlorine'),
   // the second atom in the middle slot this time, as the pool may name either one
-  w('HF', [['H', 1], ['F', 1]], 0, 'F', 'hydrogen fluoride', 8, false, 'linear', 'linear', 'none', { H: ['1.9', true] }, true, 'from hydrogen toward fluorine'),
-  w('HBr', [['H', 1], ['Br', 1]], 0, 'Br', 'hydrogen bromide', 8, false, 'linear', 'linear', 'none', { H: ['0.7', true] }, true, 'from hydrogen toward bromine'),
+  // the bond is named with hydrogen first, H–F, as the course writes it, so its row is keyed by fluorine
+  w('HF', [['H', 1], ['F', 1]], 0, 'F', 'hydrogen fluoride', 8, false, 'linear', 'linear', 'none', { F: ['1.9', true] }, true, 'from hydrogen toward fluorine'),
+  w('HBr', [['H', 1], ['Br', 1]], 0, 'Br', 'hydrogen bromide', 8, false, 'linear', 'linear', 'none', { Br: ['0.7', true] }, true, 'from hydrogen toward bromine'),
   w('F2', [['F', 2]], 0, 'F', 'fluorine', 14, false, 'linear', 'linear', 'none', { F: ['0.0', false] }, false, null),
   w('Cl2', [['Cl', 2]], 0, 'Cl', 'chlorine', 14, false, 'linear', 'linear', 'none', { Cl: ['0.0', false] }, false, null),
   w('Br2', [['Br', 2]], 0, 'Br', 'bromine', 14, false, 'linear', 'linear', 'none', { Br: ['0.0', false] }, false, null),
@@ -74,8 +76,26 @@ export const WORKED: Worked[] = [
   w('O2', [['O', 2]], 0, 'O', 'oxygen', 12, false, 'linear', 'linear', 'none', { O: ['0.0', false] }, false, null),
   // P–H 2.1 − 2.1 = 0.0: no polar bond, so nothing to add up
   w('PH2-', [['P', 1], ['H', 2]], -1, 'P', 'the phosphanide ion', 8, false, 'tetrahedral', 'bent', 'less than 109.5°', { H: ['0.0', false] }, false, null),
+  // the other 15 molecules of the pool, worked the same way (round 3 of the review, so every pool molecule has a hand row)
+  w('CCl4', [['C', 1], ['Cl', 4]], 0, 'C', 'carbon tetrachloride', 32, false, 'tetrahedral', 'tetrahedral', '109.5°', { Cl: ['0.5', true] }, false, null),
+  // C–H 0.4 is nonpolar, so the 3 C–Cl dipoles add up opposite the hydrogen
+  w('CHCl3', [['C', 1], ['H', 1], ['Cl', 3]], 0, 'C', 'chloroform', 26, false, 'tetrahedral', 'tetrahedral', '109.5°', { H: ['0.4', false], Cl: ['0.5', true] }, true, 'toward the 3 chlorine atoms'),
+  w('NF3', [['N', 1], ['F', 3]], 0, 'N', 'nitrogen trifluoride', 26, false, 'tetrahedral', 'trigonal pyramidal', 'less than 109.5°', { F: ['1.0', true] }, true, 'toward the 3 fluorine atoms'),
+  w('OF2', [['O', 1], ['F', 2]], 0, 'O', 'oxygen difluoride', 20, false, 'tetrahedral', 'bent', 'less than 109.5°', { F: ['0.5', true] }, true, 'toward the 2 fluorine atoms'),
+  // C=O and 2 C–Cl, all formal charges 0; C–O 1.0 against 2 × 0.5 × cos 60° = 0.5 toward the chlorine side
+  w('COCl2', [['C', 1], ['O', 1], ['Cl', 2]], 0, 'C', 'phosgene', 24, false, 'trigonal planar', 'trigonal planar', '120°', { O: ['1.0', true], Cl: ['0.5', true] }, true, 'toward the oxygen atom'),
+  w('CS2', [['C', 1], ['S', 2]], 0, 'C', 'carbon disulfide', 16, false, 'linear', 'linear', '180°', { S: ['0.0', false] }, false, null),
+  // D-0005: 3 S=O with sulfur at 12 is the one drawing with every formal charge 0, so no resonance
+  w('SO3', [['S', 1], ['O', 3]], 0, 'S', 'sulfur trioxide', 24, false, 'trigonal planar', 'trigonal planar', '120°', { O: ['1.0', true] }, false, null),
+  w('H3O+', [['O', 1], ['H', 3]], 1, 'O', 'the hydronium ion', 8, false, 'tetrahedral', 'trigonal pyramidal', 'less than 109.5°', { H: ['1.4', true] }, true, 'away from the 3 hydrogen atoms'),
+  w('NH2-', [['N', 1], ['H', 2]], -1, 'N', 'the amide ion', 8, false, 'tetrahedral', 'bent', 'less than 109.5°', { H: ['0.9', true] }, true, 'away from the 2 hydrogen atoms'),
+  w('NO3-', [['N', 1], ['O', 3]], -1, 'N', 'the nitrate ion', 24, true, 'trigonal planar', 'trigonal planar', '120°', { O: ['0.5', true] }, false, null),
+  w('BrF4-', [['Br', 1], ['F', 4]], -1, 'Br', 'the tetrafluorobromate ion', 36, false, 'octahedral', 'square planar', '90°', { F: ['1.2', true] }, false, null),
+  w('BeCl2', [['Be', 1], ['Cl', 2]], 0, 'Be', 'beryllium chloride', 16, false, 'linear', 'linear', '180°', { Cl: ['1.5', true] }, false, null),
+  w('BCl3', [['B', 1], ['Cl', 3]], 0, 'B', 'boron trichloride', 24, false, 'trigonal planar', 'trigonal planar', '120°', { Cl: ['1.0', true] }, false, null),
+  w('AsF5', [['As', 1], ['F', 5]], 0, 'As', 'arsenic pentafluoride', 40, false, 'trigonal bipyramidal', 'trigonal bipyramidal', '90° and 120°', { F: ['2.0', true] }, false, null),
+  w('ClF5', [['Cl', 1], ['F', 5]], 0, 'Cl', 'chlorine pentafluoride', 42, false, 'octahedral', 'square pyramidal', 'less than 90°', { F: ['1.0', true] }, true, 'toward the fluorine atom across from the lone pair'),
 ]
-
 /** Worked by hand, where the engine gives another answer today. Each one is a finding for the chem
  *  team; tests/exercise.test.ts checks that the disagreement is still there, so a row moves into
  *  WORKED the day the engine changes. Empty since 2026-11-17: PH2− was here until polarity.ts kept

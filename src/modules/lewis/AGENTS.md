@@ -14,6 +14,7 @@ one DOM component.
 - `face.ts`: the atoms' faces on the 3D board.
 - `fx.ts`: sparks, rings on the board, and the glow around electrons.
 - `font.ts`: registers the module's fonts.
+- `contract.ts`: the mode names and the prefixes of saved ids, the only values a route may import. No imports of its own.
 - `parts.ts`: the contract a part of the module follows, and the list of parts. The shapes quiz is in `shapes/` and the exercises are in `exercise/`, each with its own `AGENTS.md`.
 
 ## Read first

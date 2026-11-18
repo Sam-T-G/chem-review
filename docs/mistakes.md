@@ -92,4 +92,62 @@ What went wrong, what it cost, and the rule or check that catches it next time. 
 - What happened: a code reviewer traced a path in which the panel's one-time scroll to a question undoes the panel's scroll to a new explanation. The reviewer had no browser and said so. The lead changed the scroll to be decided once, on the first frame after the question arrives. On a phone the answer buttons of step 6 arrive in view and are then pushed down by text that is still growing above them, and the old code scrolled them back. With the change they stayed half hidden, and the phone run timed out on a tap for PCl5 and SF6.
 - Cost: two rounds of browser checks, about 90 minutes, on the day Sam asked for the release as soon as possible. Nothing reached a student.
 - Prevention: a finding that was traced and never run gets a browser check that shows the fault before any code changes. If the check cannot show it, the finding goes to `HANDOFF.md` as open and the code stays. The change was taken out, and CODE2-1 is listed as open.
+- Correction, later the same day: the cause named above was not proven, and the evidence now points elsewhere. The same failure came back after the change had been taken out (SF6, phone, 2 runs of 4), and M-0020 has what the lead then found: the check itself pressed the wrong atom. One passing run after the change was removed was read as proof. The rule above still stands. The claim that this change broke the taps does not.
+
+## M-0014 True bond angles were offered as wrong answers
+
+- Date: 2026-11-17. Team: lewis, chem.
+- What happened: the shape table gives one label per row ("90° and 120°", "90°"). The quiz and the exercises filled their wrong picks from the other rows' labels, so PCl5 offered 180° and 120° as wrong, and SF6 and XeF4 offered 180°. Each is a real angle between two bonds of that molecule, and the card said it did not belong to it.
+- Cost: none reached a student. A reviewer who read every printed card found it while both parts were still closed.
+- Prevention: `alsoAngles` in `src/chem/vsepr.ts` lists the angles a row holds besides its label, with a hand-written table and a check against the ideal positions (`tests/vsepr.test.ts`). Both parts' tests hold every wrong angle pick against it. A wrong pick is drawn from answers that are false for the item, never from "the other rows".
+
+## M-0015 A card or a reveal gave away an answer that was still open, six times, each through a path the tests did not look at
+
+- Date: 2026-11-17. Team: lewis, learning.
+- What happened: in the quiz and the exercises, an answer still open on screen was stated by something else:
+  - a key-term card whose example had the same counts as the row asked (the electron group card on a row of 3 bonded atoms and 1 lone pair);
+  - a reveal for one part that named the next part's answer (the quiz's counts question, and M-0010 in step 5);
+  - a card that gave another row's angle for the same molecular geometry;
+  - the bond dipole card on HCl, which states the direction asked;
+  - the polar bond card ("ΔEN is 0"), on molecules of one element;
+  - a hint for ozone's direction that stated its formal charges while resonance was open.
+  Three more came from fixes: the bond angle card's corrected note named square planar and linear, which answered step 5 for XeF4 and XeF2.
+- Cost: none reached a student, because both parts stayed closed until the checks passed. It took three review rounds on the exercises and two on the quiz.
+- Prevention: each part's test now states every open part's answer by hand, in the words a card could use, and holds every card that can open against it (`tests/exercise-terms.test.ts`, "holds every hand fact"; `tests/shapes-words.test.ts`). A test that copies the rule it checks cannot catch a wrong rule: two of these got past such a test. When a sentence changes on a card, read it against every screen the card can open on, not only the screen that prompted the change.
+
+## M-0016 A second Enter skipped a molecule and wiped its answers
+
+- Date: 2026-11-17. Team: lewis.
+- What happened: when the control that had the focus leaves the panel, the module moves the focus to the panel's main button. In the guided steps that button is off until the step is done. In the exercises it was "Next molecule", always on, so Enter after any answer went on to the next molecule and emptied the sheet. Pressing the molecule already on screen in the picker did the same.
+- Cost: none reached a student. A code reviewer traced it, and the fix has a browser check that presses Enter twice.
+- Prevention: a part's main button is the panel's main button only when the screen is finished. `scripts/check-exercise.mjs` types an answer, presses Enter twice and checks the molecule and its answer are still there.
+
+## M-0017 The switch between the two geometries carried into steps that talk about lone pairs
+
+- Date: 2026-11-17. Team: lewis.
+- What happened: a pick of "Molecular geometry" on step 5's model stayed set for step 6, step 7 and the next molecule. Step 6 then asked a student to aim the net dipole at a lone pair the model did not draw. The builder's own test asserted that the pick is kept across modes and molecules. In the exercises the switch showed and did nothing.
+- Cost: none reached a student. A review of the package found both before the push.
+- Prevention: the store ends the pick when the mode, the molecule, the step or the board changes, or the model comes down, and offers the switch only where `canSwitchGroups` says (`tests/board.test.ts`). `scripts/check-browser.mjs` presses the switch in step 5 of every molecule with a lone pair and checks step 6 draws every group. A view setting gets a test for every screen it must not leak into.
+
+## M-0018 A list of ids in an attribute was split on spaces, and one id holds a space
+
+- Date: 2026-11-17. Team: lewis.
+- What happened: the exercises wrote the key terms they keep shut into one attribute, separated by spaces. The id `shape:trigonal planar` has a space in it, so the browser check read the list wrong.
+- Cost: a check that looked at the wrong terms. A test written to fail when the hook returns fewer terms than the panel found it.
+- Prevention: the list is split on a character no id holds, and a unit test parses it back. A list of ids in an attribute needs a separator that cannot appear in an id.
+
+## M-0019 A browser step pressed a control the board refuses, so the step never ran
+
+- Date: 2026-11-17. Team: lewis, platform.
+- What happened: the exercises' browser check tested the card for a wrong structure by pressing "+ electron" on water's hydrogen. The board refuses that, because the shell is full, so nothing changed and the check judged a card that was never shown.
+- Cost: a failing check that pointed at the wrong fault.
+- Prevention: the step now takes an electron off and puts it back. A browser step that changes the board asserts that the board changed before it judges what the panel says.
+
+## M-0020 A browser check failed now and then for weeks of runs, and each time the failure was pinned on whatever had just changed
+
+- Date: 2026-11-17. Team: platform, lead.
+- What happened: on the phone size, step 6 of SF6 (and once PCl5) sometimes ended with the bond never answered and a tap that timed out. The check draws the bond's arrow by pressing a point on the middle atom that is clear of every other atom by 9 px. On a touch screen the board gives each atom 10 to 12 px of slack and takes the atom nearer the viewer, so when the slowly turning model had a fluorine just in front of sulfur, the press landed on that fluorine. The arrow ran from fluorine to fluorine, the board ignored it, and the check tried the same thing four times. Whether it failed depended on where the model's slow turn was when the step opened.
+- Cost: the lead blamed it on his own scroll change (M-0013) and took that out, then blamed machine load, then the 3D board package after a build before it passed once and a build after it failed once. About two hours of the release went to this. The app was never at fault.
+- How it was found: the check was run with a line printed at each drag and no extra waiting, until a run failed. The failing run showed four drags from near sulfur's edge, each reported as pointing at fluorine and none accepted.
+- Prevention: the check's clear margin is 14 px on the phone size, more than the board's largest touch slack (`clearPoint` in `scripts/check-browser.mjs`). After the change SF6 passed 6 runs of 6 under a load average of 30 to 60. A check that fails some of the time is run again with its own steps printed until a failing run is caught, before anything is blamed. One passing run after a change is not evidence that the change fixed it: say how many runs failed before, and run at least that many after.
 

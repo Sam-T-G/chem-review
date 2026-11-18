@@ -30,7 +30,7 @@ function Bubble({ left, d, seconds, wait, height }: { left: number; d: number; s
 export function Sky() {
   const { height } = useWindowDimensions()
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="none" accessible={false} importantForAccessibility="no-hide-descendants" aria-hidden>
+    <View style={[StyleSheet.absoluteFill, styles.clip]} pointerEvents="none" accessible={false} importantForAccessibility="no-hide-descendants" aria-hidden>
       {BUBBLES.map(([left, d, seconds, wait], i) => (
         <Bubble key={i} left={left} d={d} seconds={seconds} wait={wait} height={height} />
       ))}
@@ -39,5 +39,7 @@ export function Sky() {
 }
 
 const styles = StyleSheet.create({
+  // a bubble near the right edge sways 14 px past it, which let a phone scroll the home screen sideways
+  clip: { overflow: 'hidden' },
   bubble: { position: 'absolute', bottom: -40, backgroundColor: 'rgba(255, 255, 255, 0.22)', borderWidth: 1.5, borderColor: 'rgba(255, 255, 255, 0.75)' },
 })

@@ -19,9 +19,17 @@ import { NO_ANGLE, PART_ORDER, type BondKind, type Direction, type PartId, type 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 const list = (parts: string[], and = 'and') => (parts.length <= 1 ? parts.join('') : `${parts.slice(0, -1).join(', ')} ${and} ${parts[parts.length - 1]}`)
 const pairs = (n: number) => (n === 0 ? 'no lone pairs' : plural(n, 'lone pair'))
-const center = (sh: Sheet) => lower(sh.p.center)
+/** "the lone pair", "the 2 lone pairs". */
+const theLone = (n: number) => (n === 1 ? 'the lone pair' : `the ${n} lone pairs`)
+/** The middle atom's name: "oxygen", or "the middle oxygen atom" when an outer atom is the same element (ozone, FE-9). */
+const center = (sh: Sheet) => (!sh.diatomic && sameAsMiddle(sh) ? `the middle ${lower(sh.p.center)} atom` : lower(sh.p.center))
+const sameAsMiddle = (sh: Sheet) => sh.bonds.some((k) => k.b === sh.p.center)
 /** The other atom of a molecule of two atoms. */
 const other = (sh: Sheet) => sh.bonds[0]!.b
+/** "a" or "an" before a geometry name: "an octahedral", "a tetrahedral". */
+const article = (word: string) => (/^[aeiou]/i.test(word) ? 'an' : 'a')
+/** "180° is the bond angle", "90° and 120° are the bond angles". */
+const angleIs = (angle: string) => (angle.includes(' and ') ? `${cap(angle)} are the bond angles` : `${cap(angle)} is the bond angle`)
 const bondWord = (order: number) => (order === 1 ? 'single bond' : order === 2 ? 'double bond' : 'triple bond')
 export type Known = ReadonlySet<PartId>
 
@@ -41,7 +49,7 @@ export const PART_TITLES: Record<PartId, string> = {
 export const EX_WORDS = {
   tab: 'Exercises',
   checkTotal: 'Check the total',
-  checkStructure: 'Check my structure',
+  checkStructure: 'Check the structure',
   checkDeltas: 'Check ΔEN',
   yes: 'Yes',
   no: 'No',
@@ -60,8 +68,9 @@ export const EX_WORDS = {
   unshared: 'Unshared',
   valenceBox: 'Valence electrons in total',
   deltaBox: (k: BondKind) => `ΔEN for the ${bondName(k)} bond`,
-  tableTitle: 'The finished row',
 }
+/** The heading over the table of every answer, once the sheet is finished. */
+export const finishedTitle = (sh: Sheet) => `The answers for ${sh.p.name}`
 export const bondName = (k: Pick<BondKind, 'a' | 'b'>) => `${k.a}–${k.b}`
 export const geometryLabel = (g: Geometry | ShapeName) => cap(g)
 export const angleLabel = (a: string) => (a === NO_ANGLE ? 'No bond angle' : cap(a))
@@ -80,7 +89,7 @@ export function prompts(sh: Sheet) {
     bonds: 'For each kind of bond, type ΔEN from the electronegativity table, then say whether the bond is polar or nonpolar.',
     // the guide's line about the middle atom does not fit a molecule of two atoms
     net: sh.diatomic ? { ...netQuestion(sh.p), sub: 'A polar bond has a dipole that points at its δ− atom.' } : netQuestion(sh.p),
-    netWait: 'The net dipole is the bond dipoles added up in the molecular geometry, so answer Molecular geometry and Bond polarity first.',
+    netWait: 'The net dipole adds up the bond dipoles, and which way they point depends on the molecular geometry. Answer Molecular geometry and Bond polarity first.',
     resonanceWait: 'Check the Lewis structure first.',
     direction: `Which way does the net dipole of ${n} point?`,
     liftWait: 'Finish the Lewis structure on the board to see the 3D shape.',
@@ -118,10 +127,13 @@ export function structureAnswer(sh: Sheet): string {
     g.n++
     groups.set(key, g)
   }
+  // ozone: the outer atoms are oxygen too, so they are called outer and the middle one middle
+  const mid2 = center(sh)
+  const outerName = (el: El) => `${el === mid.el ? 'outer ' : ''}${lower(el)}`
   const lines = [...groups.values()].map((g) =>
-    g.n === 1 ? `1 ${lower(g.el)} atom has a ${bondWord(g.order)} to ${c} and ${pairs(g.lone / 2)}.` : `${g.n} ${lower(g.el)} atoms each have a ${bondWord(g.order)} to ${c} and ${pairs(g.lone / 2)}.`,
+    g.n === 1 ? `1 ${outerName(g.el)} atom has a ${bondWord(g.order)} to ${mid2} and ${pairs(g.lone / 2)}.` : `${g.n} ${outerName(g.el)} atoms each have a ${bondWord(g.order)} to ${mid2} and ${pairs(g.lone / 2)}.`,
   )
-  return `In the Lewis structure of ${sh.p.name}, ${c} has ${pairs(mid.lone / 2)}. ${lines.join(' ')}`
+  return `In the Lewis structure of ${sh.p.name}, ${mid2} has ${pairs(mid.lone / 2)}. ${lines.join(' ')}`
 }
 
 const SHORT_ASK = (sh: Sheet) =>
@@ -152,21 +164,38 @@ export function structureCoach(sh: Sheet, s: Structure, tries: number, known: Kn
     const k = Math.abs(have - need)
     const w = chargeWord(p.charge)
     const neutral = neutralElectrons(p)
+    // the second wrong check says where to watch the count: the tile over the board
+    const tile = `“${EX_WORDS.onBoard}”`
     if (have > need) {
       return {
         lead: known.has('valence') ? `The board has ${plural(have, 'electron')}, ${k} more than ${p.name} has.` : `The board has ${plural(have, 'electron')}, more than ${p.name} has.`,
         why: p.charge > 0 && have === neutral ? `The ${w} charge means the ion has fewer electrons than its atoms bring.` : `A Lewis structure has only the valence electrons of ${p.name}, so electrons can't be added to fill a shell.`,
-        ask: known.has('valence') ? `Take ${plural(k, 'electron')} off: tap an atom, then “− electron”.` : 'Work out the total under Valence electrons, then take the extra electrons off: tap an atom, then “− electron”.',
+        ask: known.has('valence')
+          ? tries >= 2
+            ? `Take ${plural(k, 'electron')} off: tap an atom, then “− electron”, until ${tile} reads ${need}.`
+            : `Take ${plural(k, 'electron')} off: tap an atom, then “− electron”.`
+          : tries >= 2
+            ? `Work out the total under Valence electrons, then take electrons off until ${tile} matches that total.`
+            : 'Work out the total under Valence electrons, then take the extra electrons off: tap an atom, then “− electron”.',
       }
     }
     return {
       lead: known.has('valence') ? `The board has ${plural(have, 'electron')}, ${k} fewer than ${p.name} has.` : `The board has ${plural(have, 'electron')}, fewer than ${p.name} has.`,
       why: p.charge < 0 && have === neutral ? `The ${w} charge means the ion has more electrons than its atoms bring.` : `Every valence electron of ${p.name} has to be in the drawing.`,
-      ask: known.has('valence') ? `Add ${plural(k, 'electron')}: tap an atom, then “+ electron”.` : 'Work out the total under Valence electrons, then add the missing electrons: tap an atom, then “+ electron”.',
+      ask: known.has('valence')
+        ? tries >= 2
+          ? `Add ${plural(k, 'electron')}: tap an atom, then “+ electron”, until ${tile} reads ${need}.`
+          : `Add ${plural(k, 'electron')}: tap an atom, then “+ electron”.`
+        : tries >= 2
+          ? `Work out the total under Valence electrons, then add electrons until ${tile} matches that total.`
+          : 'Work out the total under Valence electrons, then add the missing electrons: tap an atom, then “+ electron”.',
     }
   }
   if (first?.kind === 'over') {
-    return { lead: `${atomsWord(s, first.ids)} more electrons than the outer shell holds here.`, why: 'Each atom ends with a full outer shell, and no more than that.', ask: 'Swipe across a bond to take one line off, or tap the atom and use “− electron”.' }
+    // assess() lets only a period 3 or later atom bonded to 2 or more atoms go past 8 (iodine holds 12 in ICl5 and 8 in IF)
+    const hydrogen = first.ids.some((id) => s.atoms.find((a) => a.id === id)?.el === 'H')
+    const why = hydrogen ? 'A hydrogen atom holds 2 electrons at most.' : 'Only a middle atom from period 3 onward, with 2 or more atoms bonded to it, can hold more than 8 electrons.'
+    return { lead: `${atomsWord(s, first.ids)} more electrons than the outer shell holds here.`, why, ask: 'Swipe across a bond to take one line off, or tap the atom and use “− electron”.' }
   }
   if (first?.kind === 'short') {
     return { lead: `${atomsWord(s, first.ids)} fewer electrons than a full outer shell.`, why: 'Each atom ends with a full outer shell. An atom that is short can share 1 more pair in a bond.', ask: SHORT_ASK(sh) }
@@ -189,7 +218,21 @@ function atomsWord(s: Structure, ids: string[]): string {
   if (els.length > 1) return `${cap(list(els.map((el) => lower(el))))} have`
   const el = els[0]!
   const same = s.atoms.filter((a) => a.el === el).length
+  if (ids.length === 1 && same > 1 && s.atoms.length > 2) {
+    // ozone: say which oxygen atom, the middle one (bonded to 2 or more) or an outer one
+    const degree = s.bonds.filter((b) => b.a === ids[0] || b.b === ids[0]).length
+    return degree >= 2 ? `The middle ${lower(el)} atom has` : `1 outer ${lower(el)} atom has`
+  }
   if (ids.length === 1) return same === 1 ? `${cap(lower(el))} has` : `1 ${lower(el)} atom has`
+  // ozone: when the middle atom is this element too, say which ones (FX-8)
+  const degree = (id: string) => s.bonds.filter((b) => b.a === id || b.b === id).length
+  const middleHere = s.atoms.length > 2 && s.atoms.some((a) => a.el === el && degree(a.id) >= 2)
+  if (middleHere) {
+    const mid = ids.filter((id) => degree(id) >= 2).length
+    const outer = ids.length - mid
+    const outerWords = `${outer} outer ${lower(el)} ${outer === 1 ? 'atom' : 'atoms'}`
+    return mid ? `The middle ${lower(el)} atom and ${outerWords} have` : `${outerWords} have`
+  }
   return `${ids.length} ${lower(el)} atoms have`
 }
 export function structureRightText(sh: Sheet): string {
@@ -219,10 +262,54 @@ const GROUPS: Record<Geometry, number> = { linear: 2, 'trigonal planar': 3, tetr
 /** Shared pairs in the finished structure's bonds, a double bond counted twice. */
 const pairSum = (sh: Sheet) => sh.ref.bonds.reduce((n, b) => n + b.order, 0)
 
-function countAsk(sh: Sheet, known: Known): string {
+/** The second try's ask: the counts on the middle atom once the structure is answered, then what to do with them. */
+function countAsk(sh: Sheet, known: Known, part: 'eg' | 'mg' | 'angle'): string {
   const c = center(sh)
   const { bonded, lonePairs } = sh.info
-  return known.has('structure') ? `${cap(c)} has ${plural(bonded, 'bonded atom')} and ${pairs(lonePairs)}.` : `Build the Lewis structure on the board, then count the bonded atoms and the lone pairs on ${c}.`
+  if (!known.has('structure')) return `Build the Lewis structure on the board, then count the bonded atoms and the lone pairs on ${c}.`
+  const counts = `${plural(bonded, 'bonded atom')} and ${pairs(lonePairs)}`
+  // the molecular geometry and angle cards often say the bonded atoms already, so their ask names the counts once
+  if (part === 'eg') return `${cap(c)} has ${counts}. Add the bonded atoms and the lone pairs together, and pick the electron geometry for that many electron groups.`
+  return `Pick the ${part === 'mg' ? 'molecular geometry' : 'bond angle'} for ${counts} on ${c}.`
+}
+
+/** Where the lone pairs go, for the bond angle ask (the electron geometry is answered there). With 5 groups they
+ *  take the places of the flat triangle around the middle; 2 lone pairs on 6 groups sit on opposite sides
+ *  (OpenStax 7.6). For 3, 4 or 6 groups with 1 lone pair any place gives the same molecular geometry. */
+function putLone(sh: Sheet): string {
+  const { lonePairs: lp, groups, geometry } = sh.info
+  const c = center(sh)
+  if (groups === 5) return `Put ${theLone(lp)} in ${lp === 3 ? 'all 3' : `${lp} of the 3`} places of the flat triangle around ${c}`
+  if (groups === 6 && lp === 2) return `Put the 2 lone pairs on opposite sides of ${c}`
+  return `Put ${theLone(lp)} on ${c} in ${lp} of the ${groups} places of ${article(geometry)} ${geometry} electron geometry`
+}
+/** The molecular geometry ask once the structure is answered: how many places there are around the middle
+ *  atom, without naming the electron geometry (that part may be open), then where the lone pairs go (FX-5). */
+function placesAsk(sh: Sheet): string {
+  const { lonePairs: lp, groups, bonded } = sh.info
+  const c = center(sh)
+  const then = `then name where the ${bonded} outer atoms sit.`
+  if (groups === 5) return `${cap(c)} has 5 places for electron groups: 3 in a flat triangle around it, 1 above and 1 below. Put ${theLone(lp)} in the triangle, where ${lp === 1 ? 'it has' : 'they have'} the most room, ${then}`
+  if (groups === 6 && lp === 2) return `${cap(c)} has 6 places for electron groups, at the 2 ends of 3 lines that cross at ${c}. Put the 2 lone pairs on opposite sides, as far apart as they can get, ${then}`
+  return `Put ${theLone(lp)} in ${lp} of the ${groups} places around ${c}, ${then}`
+}
+/** Why lone pairs leave the angle as it is: on opposite sides of an octahedron (square planar), or filling the
+ *  flat triangle of a trigonal bipyramid (linear). `angle` adds the angle, for the third try only (FX-6). */
+function balanced(sh: Sheet, angle: boolean): string {
+  const c = center(sh)
+  const end = angle ? `stay ${sh.angle} apart` : 'are not squeezed'
+  return sh.info.groups === 5 ? `The lone pairs on ${c} sit in the flat triangle around it and push both bonds equally, so the bonds ${end}.` : `The lone pairs on ${c} sit on opposite sides of it and push the bonds equally, so the bonds ${end}.`
+}
+/** The third-try reason for a net dipole when some dipoles cancel in pairs: a square pyramid, a T-shape, a seesaw (FX-4). */
+function rowWhy(sh: Sheet): string | null {
+  const polar = sh.bonds.filter((k) => k.polar)
+  if (polar.length !== 1 || sh.diatomic) return null
+  const name = bondName(polar[0]!)
+  const { bonded, lonePairs } = sh.info
+  if (bonded === 5 && lonePairs === 1) return `The 4 ${name} dipoles of the square cancel in pairs, so only the dipole of the ${name} bond across from the lone pair is left.`
+  if (bonded === 3 && lonePairs === 2) return `The 2 ${name} dipoles across from each other cancel, so only the dipole of the ${name} bond in the flat triangle is left.`
+  if (bonded === 4 && lonePairs === 1) return `The 2 ${name} dipoles across from each other cancel, and the other 2 add up, pointing away from the lone pair.`
+  return null
 }
 
 export function geometryRight(sh: Sheet): string {
@@ -234,19 +321,31 @@ export function geometryCoach(sh: Sheet, pick: Geometry, tries: number, known: K
   const c = center(sh)
   const n = GROUPS[pick]
   if (tries >= 3) {
-    const why = sh.diatomic ? `${cap(p.name)} has 2 atoms and no middle atom, and 2 atoms always sit on a straight line.` : known.has('structure') ? `${cap(c)} has ${plural(info.groups, 'electron group')}: ${plural(info.bonded, 'bonded atom')} and ${pairs(info.lonePairs)}.` : `${cap(c)} has ${plural(info.groups, 'electron group')}.`
+    // before the structure is answered the lone pairs are not counted out loud: the structure part asks for them
+    const why = sh.diatomic
+      ? `${cap(p.name)} has 2 atoms and no middle atom, and 2 atoms always sit on a straight line.`
+      : known.has('structure')
+        ? `${cap(c)} has ${plural(info.groups, 'electron group')}: ${plural(info.bonded, 'bonded atom')} and ${pairs(info.lonePairs)}.`
+        : `${cap(c)} has ${plural(info.groups, 'electron group')}, counting each of its ${plural(info.bonded, 'bonded atom')} and each lone pair on ${c} as 1 group.`
     return { lead: `The electron geometry of ${p.name} is ${info.geometry}.`, why, ask: '' }
   }
-  if (sh.diatomic) return { lead: `${cap(pick)} is the electron geometry for ${n} electron groups around a middle atom.`, why: `${cap(p.name)} has 2 atoms and no middle atom.`, ask: 'Pick the arrangement 2 atoms make.' }
+  if (sh.diatomic) {
+    const ask = tries === 2 ? `${cap(p.name)} has 1 bond between its 2 atoms. Picture where the 2 atoms sit, then pick the electron geometry for that.` : 'Pick the electron geometry that 2 atoms make.'
+    return { lead: `${cap(pick)} is the electron geometry for ${n} electron groups around a middle atom.`, why: `${cap(p.name)} has 2 atoms and no middle atom.`, ask }
+  }
   let coach: Coach
   if (info.lonePairs > 0 && n === info.bonded) {
     coach = { lead: `${cap(pick)} is the electron geometry for ${n} electron groups, the number of atoms bonded to ${c}.`, why: `Each lone pair on ${c} is an electron group too.`, ask: `Count the lone pairs on ${c} as well.` }
   } else if (known.has('structure') && pairSum(sh) !== info.bonded && n === pairSum(sh) + info.lonePairs) {
     coach = { lead: `${cap(pick)} counts each shared pair of a double or triple bond as its own group.`, why: 'A double or triple bond points one way, so the whole bond is 1 electron group.', ask: 'Count each bond once.' }
   } else {
-    coach = { lead: `${cap(pick)} is the electron geometry for ${n} electron groups.`, why: `${cap(c)} in ${p.name} has a different number.`, ask: `Count the atoms bonded to ${c} and the lone pairs on ${c}: each one is 1 electron group.` }
+    coach = {
+      lead: `${cap(pick)} is the electron geometry for ${n} electron groups.`,
+      why: `Each atom bonded to ${c} is 1 electron group, and each lone pair on ${c} is 1 more.`,
+      ask: `Count the electron groups on ${c} in ${p.name}, then pick the electron geometry for that many.`,
+    }
   }
-  return tries === 2 ? { ...coach, ask: countAsk(sh, known) } : coach
+  return tries === 2 ? { ...coach, ask: countAsk(sh, known, 'eg') } : coach
 }
 
 // ---------------------------------------------------------------- molecular geometry
@@ -259,24 +358,31 @@ export function shapeCoach(sh: Sheet, pick: ShapeName, tries: number, known: Kno
   const { info, p } = sh
   const c = center(sh)
   if (tries >= 3) {
-    const why = sh.diatomic ? `${cap(p.name)} has 2 atoms and no middle atom, and 2 atoms always sit on a straight line.` : known.has('structure') ? `${cap(c)} has ${plural(info.bonded, 'bonded atom')} and ${pairs(info.lonePairs)}.` : ''
+    const why = sh.diatomic
+      ? `${cap(p.name)} has 2 atoms and no middle atom, and 2 atoms always sit on a straight line.`
+      : known.has('structure')
+        ? `${cap(c)} has ${plural(info.bonded, 'bonded atom')} and ${pairs(info.lonePairs)}.`
+        : `${cap(c)} has ${plural(info.bonded, 'bonded atom')}, and the molecular geometry names where those atoms sit, with any lone pairs on ${c} left out.`
     return { lead: `The molecular geometry of ${p.name} is ${info.shape}.`, why, ask: '' }
   }
   const cases = shapeCases(pick)
-  if (sh.diatomic) return { lead: `A ${pick} molecule has ${cases[0]!.bonded + 1} atoms.`, why: `${cap(p.name)} has 2 atoms and no middle atom.`, ask: 'Pick the molecular geometry 2 atoms make.' }
+  if (sh.diatomic) {
+    const ask = tries === 2 ? `${cap(p.name)} has 1 bond between its 2 atoms. Picture where the 2 atoms sit, then pick the molecular geometry for that.` : 'Pick the molecular geometry that 2 atoms make.'
+    return { lead: `${cap(article(pick))} ${pick} molecule has ${cases[0]!.bonded + 1} atoms.`, why: `${cap(p.name)} has 2 atoms and no middle atom.`, ask }
+  }
   let coach: Coach
   if (info.lonePairs > 0 && pick === info.geometry && known.has('eg')) {
-    coach = { lead: `${cap(pick)} is the electron geometry of ${p.name}: where all ${info.groups} electron groups point, lone pairs included.`, why: 'The molecular geometry is named for where the atoms are, and a lone pair is not an atom.', ask: 'Name the arrangement of the atoms only.' }
+    coach = { lead: `${cap(pick)} is the electron geometry of ${p.name}: where all ${info.groups} electron groups point, lone pairs included.`, why: 'The molecular geometry is named for where the atoms are, and a lone pair is not an atom.', ask: `Pick the molecular geometry for the atoms around ${c} only.` }
   } else if (info.lonePairs > 0 && pick === classify(info.bonded, 0)?.shape && known.has('structure')) {
-    coach = { lead: `${cap(pick)} would be the molecular geometry if ${c} had no lone pairs.`, why: `${cap(c)} has ${pairs(info.lonePairs)}, and each lone pair takes up room around ${c} too.`, ask: 'Pick again with the lone pairs in their places.' }
+    coach = { lead: `${cap(pick)} would be the molecular geometry if ${c} had no lone pairs.`, why: `${cap(c)} has ${pairs(info.lonePairs)}, and each lone pair takes up room around ${c} too.`, ask: placesAsk(sh) }
   } else if (info.shape === 'tetrahedral' && pick === 'square planar') {
     coach = { lead: 'Square planar is how 4 bonds look in a flat drawing, 90° apart.', why: 'In 3D, 4 electron groups around 1 atom spread further apart than 90°.', ask: 'Pick the molecular geometry the atoms make in 3D.' }
   } else {
-    const lp = cases.length === 1 ? pairs(cases[0]!.lonePairs) : `${cases.map((k) => k.lonePairs).join(' or ')} lone pairs`
-    const why = cases[0]!.bonded !== info.bonded ? `${cap(c)} has ${plural(info.bonded, 'bonded atom')}.` : `With ${plural(info.bonded, 'bonded atom')}, the number of lone pairs on ${c} decides the molecular geometry.`
+    const lp = list(cases.map((k) => pairs(k.lonePairs)), 'or')
+    const why = cases[0]!.bonded !== info.bonded ? `${cap(c)} has ${plural(info.bonded, 'bonded atom')}.` : `The molecular geometries with ${plural(info.bonded, 'bonded atom')} differ in the number of lone pairs on the middle atom.`
     coach = { lead: `${cap(pick)} is the molecular geometry for ${plural(cases[0]!.bonded, 'bonded atom')} and ${lp} around the middle atom.`, why, ask: `Count the bonded atoms and the lone pairs on ${c}, then pick again.` }
   }
-  return tries === 2 ? { ...coach, ask: countAsk(sh, known) } : coach
+  return tries === 2 ? { ...coach, ask: countAsk(sh, known, 'mg') } : coach
 }
 
 // ---------------------------------------------------------------- bond angle
@@ -293,30 +399,56 @@ export function angleCoach(sh: Sheet, pick: string, tries: number, known: Known)
   const squeezed = sh.angle.startsWith('less')
   if (tries >= 3) {
     if (sh.diatomic) return { lead: `${cap(p.name)} has no bond angle.`, why: `A bond angle is between 2 bonds that meet at a middle atom, and ${p.name} has 2 atoms, 1 bond and no middle atom.`, ask: '' }
-    return { lead: `The bond ${isAre(sh.angle)} ${p.name} ${sh.angle.includes(' and ') ? 'are' : 'is'} ${sh.angle}.`, why: squeezed ? `A lone pair pushes harder than a bond, so the bonds on ${c} end up closer together.` : '', ask: '' }
+    // how the angle is built, without counting the lone pairs out loud (the structure part may be open)
+    const why = squeezed
+      ? `A lone pair pushes harder than a bond, so the bonds on ${c} end up closer together.`
+      : info.lonePairs > 0
+        ? balanced(sh, true)
+        : `The electron groups around ${c} push each other as far apart as they can get, which leaves the bonds ${sh.angle} apart.`
+    return { lead: `The bond ${isAre(sh.angle)} ${p.name} ${sh.angle.includes(' and ') ? 'are' : 'is'} ${sh.angle}.`, why, ask: '' }
   }
-  if (sh.diatomic) return { lead: `${cap(pick)} is an angle between 2 bonds.`, why: `${cap(p.name)} has 2 atoms, 1 bond and no middle atom, and a bond angle needs 2 bonds that meet at a middle atom.`, ask: 'Pick again.' }
-  if (pick === NO_ANGLE) return { lead: 'Only a molecule of 2 atoms has no bond angle.', why: `${cap(p.name)} has ${plural(info.bonded + 1, 'atom')}, so its bonds meet at ${c}.`, ask: `Pick the angle between 2 bonds on ${c}.` }
+  if (sh.diatomic) {
+    // try 1 gives the rule, try 2 the count for this molecule
+    // try 2 gives the count, never the answer (FX-11); a double or triple bond is still 1 bond (FX-10, N2 and O2)
+    const why = tries === 2 ? `${cap(p.name)} has only 2 atoms, so 1 bond joins them. A double or triple bond still counts as 1 bond.` : 'A bond angle needs 2 bonds that meet at a middle atom.'
+    return { lead: `${cap(pick)} is an angle between 2 bonds.`, why, ask: tries === 2 ? 'Pick again.' : `Count the bonds in ${p.name}, then pick again.` }
+  }
+  if (pick === NO_ANGLE) return { lead: 'Only a molecule of 2 atoms has no bond angle.', why: `${cap(p.name)} has ${plural(info.bonded + 1, 'atom')}, so its bonds meet at ${c}.`, ask: tries === 2 ? `Picture 2 of the bonds on ${c}, and pick the angle between them.` : `Pick the angle between 2 bonds on ${c}.` }
   let coach: Coach
   if (squeezed && pick === classify(info.groups, 0)?.angle && known.has('eg') && known.has('mg')) {
-    coach = { lead: `${cap(pick)} is the bond angle when all ${info.groups} electron groups are bonded atoms.`, why: `A lone pair pushes harder than a bond, so the bonds on ${c} end up closer together.`, ask: 'Pick again.' }
+    coach = { lead: `${angleIs(pick)} when all ${info.groups} electron groups are bonded atoms.`, why: `A lone pair pushes harder than a bond, so the bonds on ${c} end up closer together.`, ask: 'Pick again.' }
   } else if (!squeezed && pick.startsWith('less') && (known.has('structure') || known.has('mg'))) {
     coach = {
       lead: `${cap(pick)} is a bond angle squeezed by lone pairs.`,
-      why: info.lonePairs === 0 ? `${cap(c)} has no lone pairs, so nothing squeezes its bonds.` : `The ${plural(info.lonePairs, 'lone pair')} on ${c} sit where their pushes balance, so the bonds are not squeezed.`,
+      why: info.lonePairs === 0 ? `${cap(c)} has no lone pairs, so nothing squeezes its bonds.` : balanced(sh, false),
       ask: 'Pick again.',
     }
   } else if (info.groups === 4 && pick === '90°' && known.has('eg')) {
     coach = { lead: `90° is how ${info.bonded} bonds look in a flat drawing.`, why: 'In 3D, 4 electron groups spread further apart than 90°.', ask: 'Pick again.' }
   } else {
     const cases = ALL_CASES.filter((k) => k.angle === pick)
-    coach = {
-      lead: `${cap(pick)} is the bond angle for ${list(cases.map((k) => `${plural(k.bonded, 'bonded atom')} and ${pairs(k.lonePairs)}`), 'or')}.`,
-      why: `The bond angle comes from the electron geometry and the molecular geometry of ${p.name}.`,
-      ask: known.has('eg') && known.has('mg') ? `${cap(p.name)} has a ${info.geometry} electron geometry and a ${info.shape} molecular geometry.` : 'Work out the electron geometry and the molecular geometry first.',
-    }
+    const eg = info.geometry
+    // with both geometries answered, the ask hands back a smaller job: the places of the electron
+    // geometry, the lone pairs in some of them, the bonds in the rest. No angle is named, because
+    // with no lone pairs the electron geometry's angle is the answer
+    const geos = known.has('eg') && known.has('mg')
+    const ask = !geos
+      ? 'Work out the electron geometry and the molecular geometry first.'
+      : info.lonePairs === 0
+        ? `Pick the bond angle of ${article(eg)} ${eg} electron geometry.`
+        : `${putLone(sh)}. Find the ${info.bonded === 2 ? 'angle' : 'angles'} between the bonds in the places left, then decide whether ${info.lonePairs === 1 ? 'the lone pair squeezes' : 'the lone pairs squeeze'} them.`
+    // no claim that lone pairs squeeze: some molecules have none, and some have lone pairs that balance (FE-6)
+    const why = !geos
+      ? 'The bond angle comes from the electron geometry, and from any lone pairs on the middle atom.'
+      : info.lonePairs === 0
+        ? `With no lone pairs on ${c}, the bond angle is the angle of the electron geometry.`
+        : squeezed
+          ? `The bond angle starts from the angle of the electron geometry, and ${theLone(info.lonePairs)} on ${c} can change it.`
+          : `The bond angle starts from the angle of the electron geometry. Check whether the lone pairs on ${c} push some bonds harder than others.`
+    coach = { lead: `${angleIs(pick)} for ${cases.map((k) => `${plural(k.bonded, 'bonded atom')} with ${pairs(k.lonePairs)}`).join(', or ')}.`, why, ask }
   }
-  return tries === 2 && known.has('structure') ? { ...coach, ask: countAsk(sh, known) } : coach
+  // try 2 always says something new: the counts once the structure is answered, or how to get them (FE-4)
+  return tries === 2 ? { ...coach, ask: countAsk(sh, known, 'angle') } : coach
 }
 
 // ---------------------------------------------------------------- bond polarity
@@ -375,19 +507,26 @@ export function bondPickText(k: BondKind, polar: boolean): { right: boolean; tex
 export function netText(sh: Sheet, polar: boolean): { right: boolean; text: string; coach: Coach | null } {
   const f = netFeedback(sh.p, sh.m, sh.info.diatomic ? null : sh.info, polar)
   if (f.right || !f.coach || !sh.diatomic || sh.m.why !== 'shape') return f
-  const coach = { ...f.coach, lead: `${cap(sh.p.name)} has only 1 bond, so nothing cancels its dipole.` }
+  const k = sh.bonds[0]!
+  const coach = { ...f.coach, lead: `${cap(sh.p.name)} has only 1 bond, so nothing cancels its dipole.`, why: `ΔEN for ${bondName(k)} is ${k.pol.delta}, so the bond is polar.` }
   return { right: false, text: coachText(coach), coach }
 }
 
-export function directionLabel(sh: Sheet, d: Direction): string {
+/** The words for a direction. `full` adds where the arrow passes for "away from" (the class
+ *  worksheet's "up through oxygen"): the sentence that gives the answer and the finished row use it,
+ *  the chips do not. */
+export function directionLabel(sh: Sheet, d: Direction, full = false): string {
   const el = d.el ? lower(d.el) : ''
-  const atoms = d.count === 1 ? `the ${el} atom` : `the ${d.count} ${el} atoms`
+  const mid = lower(sh.m.center.el)
+  // ozone: the middle atom is oxygen too, so "the 2 oxygen atoms" could be any 2 of the 3
+  const outer = d.el === sh.m.center.el ? 'outer ' : ''
+  const atoms = d.count === 1 ? `the ${outer}${el} atom` : `the ${d.count} ${outer}${el} atoms`
   const lone = d.count === 1 ? 'the lone pair' : `the ${d.count} lone pairs`
   switch (d.kind) {
     case 'to':
       return `toward ${atoms}`
     case 'from':
-      return `away from ${atoms}`
+      return full ? `away from ${atoms}, through the ${outer ? 'middle ' : ''}${mid} atom` : `away from ${atoms}`
     case 'lone-to':
       return `toward ${lone}`
     case 'lone-from':
@@ -396,30 +535,59 @@ export function directionLabel(sh: Sheet, d: Direction): string {
       return `along 1 ${sh.m.center.el}–${d.el} bond`
     case 'pair':
       return `from ${lower(d.from!)} toward ${el}`
+    case 'axis':
+      return d.where === 'square' ? `toward the ${el} atom across from the lone pair` : `toward the ${el} atom in the flat triangle with the 2 lone pairs`
+    case 'side':
+      return d.where === 'square' ? `toward 1 of the 4 ${el} atoms in the square` : `toward 1 of the 2 ${el} atoms across from each other`
   }
 }
 /** The words on a direction's chip. */
 export const directionChip = (sh: Sheet, d: Direction) => cap(directionLabel(sh, d))
 const rightDirection = (sh: Sheet) => sh.directions!.choices.find((c) => c.id === sh.directions!.right)!
 export function directionRight(sh: Sheet): string {
-  return `The net dipole points ${directionLabel(sh, rightDirection(sh))}.`
+  return `The net dipole points ${directionLabel(sh, rightDirection(sh), true)}.`
 }
+/** "the other C–Cl dipole", "the 2 C–Cl dipoles". */
+const dipoles = (n: number, name: string, other = false) => (n === 1 ? `the ${other ? 'other ' : ''}${name} dipole` : `the ${other ? 'other ' : ''}${n} ${name} dipoles`)
 export function directionCoach(sh: Sheet, pickId: string, tries: number): Coach {
-  if (tries >= 3) return { lead: directionRight(sh), why: 'Each bond dipole points at its δ− atom, and the net dipole is the bond dipoles added together.', ask: '' }
+  const polarKinds = sh.bonds.filter((k) => k.polar)
+  const k = polarKinds[0]!
+  // a molecule with 1 bond dipole (two atoms): its net dipole is that dipole
+  const single = polarKinds.reduce((n, x) => n + x.count, 0) === 1
+  const sumWhy = single
+    ? `The ${bondName(k)} bond dipole points at its δ− atom, and it is the only bond dipole, so the net dipole points the same way.`
+    : 'Each bond dipole points at its δ− atom, and the net dipole is the bond dipoles added together.'
+  if (tries >= 3) return { lead: directionRight(sh), why: rowWhy(sh) ?? sumWhy, ask: '' }
   const pick = sh.directions!.choices.find((c) => c.id === pickId)!
   const right = rightDirection(sh)
   const label = directionLabel(sh, pick)
-  const polarKinds = sh.bonds.filter((k) => k.polar)
-  const k = polarKinds[0]!
-  const deltaMinus = k.byCharge ? '' : k.pol.negative ? `In each ${bondName(k)} bond, ${lower(k.pol.negative)} is δ−.` : ''
-  const ask = tries === 2 && deltaMinus && polarKinds.length === 1 ? `${deltaMinus} Pick again.` : 'Pick again.'
+  // try 2 names the δ− end of every polar kind of bond, and the largest dipole when there are 2 kinds (FE-10)
+  const ends = polarKinds.map((x) =>
+    x.byCharge
+      ? `in each ${bondName(x)} bond, the outer ${lower(x.b)} atom is δ−`
+      : x.pol.negative
+        ? `in ${x.count === 1 ? 'the' : 'each'} ${bondName(x)} bond, ${lower(x.pol.negative)} is δ−`
+        : '',
+  ).filter(Boolean)
+  const largest = polarKinds.length > 1 && !polarKinds.some((x) => x.byCharge) ? [...polarKinds].sort((a, b) => b.pol.tenths - a.pol.tenths) : []
+  const biggest = largest.length && largest[0]!.pol.tenths > largest[1]!.pol.tenths ? ` The ${bondName(largest[0]!)} dipole is the largest, with ΔEN ${largest[0]!.pol.delta}.` : ''
+  const deltaMinus = ends.length ? `${cap(ends.join(', and '))}.${biggest}` : ''
+  const ask = tries === 2 && deltaMinus ? `${deltaMinus} Pick again.` : 'Pick again.'
   const dot = pick.dir[0] * right.dir[0] + pick.dir[1] * right.dir[1] + pick.dir[2] * right.dir[2]
-  if (dot < -0.9) return { lead: `${cap(label)} is the opposite way.`, why: 'Each bond dipole points at its δ− atom, and the net dipole points the way the bond dipoles add up.', ask }
+  if (dot < -0.9) return { lead: `${cap(label)} is the opposite way.`, why: sumWhy, ask }
   if (pick.kind === 'one') {
-    const n = sh.bonds.find((b) => b.b === pick.el)!.count
-    return { lead: `${cap(label)} follows only 1 of the ${n} ${bondName({ a: sh.m.center.el, b: pick.el! })} bonds.`, why: `The net dipole is all the bond dipoles added together, so the other ${n - 1 === 1 ? 'dipole moves' : 'dipoles move'} the sum off that bond.`, ask }
+    // every other dipole that is really there: the rest of this kind, and every other polar kind (phosgene's C–O)
+    const kind = sh.bonds.find((b) => b.b === pick.el)!
+    const name = bondName(kind)
+    const others = [...(kind.count > 1 ? [dipoles(kind.count - 1, name, true)] : []), ...polarKinds.filter((x) => x !== kind).map((x) => dipoles(x.count, bondName(x)))]
+    const many = kind.count - 1 + polarKinds.filter((x) => x !== kind).reduce((n, x) => n + x.count, 0) > 1
+    return {
+      lead: `${cap(label)} follows only 1 of the ${kind.count} ${name} bonds.`,
+      why: `The net dipole adds up every bond dipole, and ${list(others)} ${many ? 'point other ways' : 'points another way'}, so the total does not lie along that bond.`,
+      ask,
+    }
   }
-  return { lead: `The net dipole of ${sh.p.name} does not point ${label}.`, why: 'The net dipole is the bond dipoles added together, and each one points at its δ− atom.', ask }
+  return { lead: `The net dipole of ${sh.p.name} does not point ${label}.`, why: sumWhy, ask }
 }
 
 // ---------------------------------------------------------------- the finished row
@@ -435,13 +603,13 @@ export function finishedRows(sh: Sheet): { label: string; value: string }[] {
     { label: PART_TITLES.mg, value: cap(sh.info.shape) },
     { label: PART_TITLES.angle, value: sh.diatomic ? 'No bond angle' : r.angle },
     { label: PART_TITLES.bonds, value: sh.bonds.map((k) => `${bondName(k)}: ΔEN ${k.pol.delta}, ${k.polar ? 'polar' : 'nonpolar'}`).join('; ') },
-    { label: PART_TITLES.net, value: sh.directions ? `${net}, ${directionLabel(sh, rightDirection(sh))}` : net },
+    { label: PART_TITLES.net, value: sh.directions ? `${net}, ${directionLabel(sh, rightDirection(sh), true)}` : net },
   ]
 }
 /** Under the finished row: whether the molecule comes back, and why. */
 export function finishedNote(sh: Sheet, missed: PartId[], comeBack: number): string {
   if (!missed.length) return `Every part of ${sh.p.name} was right the first time.`
   const names = PART_ORDER_WORDS(missed)
-  return `${cap(sh.p.name)} comes back after ${comeBack} more molecules, because ${list(names)} had a wrong answer.`
+  return `${cap(sh.p.name)} comes back after you finish ${comeBack} more molecules, because ${list(names)} had a wrong answer.`
 }
 const PART_ORDER_WORDS = (missed: PartId[]) => PART_ORDER.filter((id) => missed.includes(id)).map((id) => PART_TITLES[id])

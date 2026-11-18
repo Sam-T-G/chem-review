@@ -26,6 +26,9 @@
 .mb .ex-bond[data-state='done'] { display: none; }
 .mb .ex-part .mb-en { margin-bottom: 12px; }
 
+/* "Next molecule" fills the footer, as a quiet button until the sheet is done and the main one after */
+.mb .mb-foot .ex-next { flex: 1; min-width: 0; }
+
 /* "Finished" under the molecule's name once it is saved */
 .mb .ex-done { display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; padding: 2px 10px 2px 4px; border-radius: 999px; background: var(--mint-soft); color: var(--mint-deep); font-size: 13px; font-weight: 800; }
 .mb .ex-done svg { width: 16px; height: 16px; padding: 2px; border-radius: 50%; background: var(--mint-deep); color: #fff; stroke-width: 3; }

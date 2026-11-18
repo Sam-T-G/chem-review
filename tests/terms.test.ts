@@ -3,6 +3,7 @@
 // terms of chapters 2, 6, 7 and 8, and section 7.6 for the shapes) and the course's chapter 7 and
 // 8 slides, never copied from what the code returns.
 import { describe, expect, it } from 'vitest'
+import { ALL_SHAPES } from '../src/chem/vsepr'
 import { ELEMENTS, type El } from '../src/chem/elements'
 import { sigmaPi } from '../src/chem/orbitals'
 import { bondPolarity, moleculePolarity } from '../src/chem/polarity'
@@ -308,8 +309,9 @@ describe('what the cards say', () => {
     expect(termCard('shape:trigonal bipyramidal').example).toBe('The molecular geometry of phosphorus pentafluoride, PF₅, is trigonal bipyramidal. The bond angles are 90° and 120°.')
     // the five names that are also electron geometries say so; a name that leaves out lone pairs says that
     expect(termCard('shape:tetrahedral').note).toBe('Tetrahedral is also the electron geometry of a middle atom with 4 electron groups, lone pairs included.')
-    expect(termCard('shape:linear').note).toBe('Linear is also the electron geometry of a middle atom with 2 electron groups, lone pairs included. A molecular geometry names where the atoms are. The lone pairs on the middle atom take up room and are left out of the name.')
-    expect(termCard('shape:bent').note).toBe('A molecular geometry names where the atoms are. The lone pairs on the middle atom take up room and are left out of the name.')
+    // 2 groups leave no room for a lone pair, so linear drops "lone pairs included" (COPY2-15); the name is passive, not "names" (COPY2-10)
+    expect(termCard('shape:linear').note).toBe('Linear is also the electron geometry of a middle atom with 2 electron groups. A molecular geometry is named for where the atoms sit. The lone pairs on the middle atom take up room and are left out of the name.')
+    expect(termCard('shape:bent').note).toBe('A molecular geometry is named for where the atoms sit. The lone pairs on the middle atom take up room and are left out of the name.')
     expect(termCard('shape:bent').related.map((r) => r.id)).toEqual(['shape', 'electron-geometry', 'bond-angle'])
   })
 })
@@ -591,5 +593,39 @@ describe('which words are highlighted', () => {
       expect(plainTerms(step).sort()).toEqual(['bond', 'ion', 'lewis', 'middle', 'shell', 'valence'])
       expect(terms('Is the C–O bond polar in the ammonium ion?', plainTerms(step))).toEqual(['polar=polar'])
     }
+  })
+})
+
+// The review round of 2026-11-17 (REVIEW-COPY, REVIEW-CHEM2, REVIEW-COPY2). Each note is written by
+// hand and checked against the molecules it can open on.
+describe('review fixes: the notes on the cards', () => {
+  it('COPY-8 and FG-1: the bond angle note says lone pairs usually squeeze the bonds, and names no molecular geometry or angle', () => {
+    // section 7.6: lone pairs repel more than bonding pairs; square planar keeps 90° and linear with 3 lone pairs keeps 180°.
+    // The note says "usually" for those two and does not name them: the card opens from the Molecular geometry card
+    // in step 5, before the molecular geometry is picked, so naming them would answer that pick for XeF4 and XeF2.
+    const note = termCard('bond-angle').note!
+    expect(note).toBe('Lone pairs push harder than bonds do, so a lone pair on the middle atom usually squeezes the bonds a little closer together. When the lone pairs are spread evenly around the middle atom, their pushes balance and the bond angle stays the same.')
+    for (const name of ALL_SHAPES) expect(note.toLowerCase(), name).not.toContain(name.toLowerCase())
+    expect(note).not.toMatch(/\d°/)
+  })
+  it('CHEM2-1: the more-than-8 note gives the leftover electrons as a reason', () => {
+    // xenon difluoride: 22 electrons, 2 bonds take 4, the fluorine atoms take 12, and 6 are left for xenon (section 7.3)
+    expect(termCard('expanded').note).toBe('A middle atom ends up with more than 8 in three ways: it has more than 4 atoms to bond to, an extra bond brings the formal charges closer to 0, or electrons are left over once every outer atom is full, and they go on the middle atom as lone pairs.')
+  })
+  it('CHEM2-2: the hybridization note makes no claim about pi bonds that sulfate or sulfur dioxide breaks', () => {
+    expect(termCard('hybridization').note).toBe('A double or triple bond still counts as 1 electron group, because only its sigma bond uses a hybrid orbital. For a middle atom from period 2, the pi bonds use p orbitals that were left out of the mix.')
+  })
+  it('CHEM2-3: the cancel note says unlike outer atoms usually do not cancel, and when they can', () => {
+    expect(termCard('cancel').note).toBe('Different outer atoms give arrows of different sizes, so those arrows usually do not cancel. They can still cancel when the atoms of each element are spread evenly around the middle atom, such as 2 atoms of one element on opposite sides.')
+  })
+  it('COPY2-10, COPY2-11 and COPY2-15: the geometry cards', () => {
+    const shape = termCard('shape')
+    expect(shape.means).toBe('The molecular geometry is where the atoms sit around the middle atom. The electron groups push each other as far apart as they can get, and that sets where the atoms go. The lone pairs take up room and are left out of the name.')
+    expect(shape.note).toBe('Two molecules with the same electron geometry can have different molecular geometries, because a lone pair takes up one of the corners and has no atom there.')
+    expect(termCard('electron-geometry').note).toBe('The electron geometry and the molecular geometry have the same name only when the middle atom has no lone pairs. A molecule of 2 atoms has no middle atom, and both of its geometries are given the same name.')
+    // linear as an electron geometry has 2 groups and so no lone pairs: "lone pairs included" is dropped there only
+    expect(termCard('shape:linear').note).toBe('Linear is also the electron geometry of a middle atom with 2 electron groups. A molecular geometry is named for where the atoms sit. The lone pairs on the middle atom take up room and are left out of the name.')
+    expect(termCard('shape:bent').note).toBe('A molecular geometry is named for where the atoms sit. The lone pairs on the middle atom take up room and are left out of the name.')
+    expect(termCard('shape:tetrahedral').note).toBe('Tetrahedral is also the electron geometry of a middle atom with 4 electron groups, lone pairs included.')
   })
 })

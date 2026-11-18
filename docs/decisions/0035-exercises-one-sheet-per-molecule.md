@@ -27,7 +27,7 @@ How to build it was this session's choice. Options looked at:
   no step rail and no Hint button.
 - Picks (electron geometry, molecular geometry, bond angle, resonance, polar or nonpolar, the net dipole's
   direction) are judged when pressed. Typed answers (the valence electron total, each ΔEN) have a check button and
-  take Enter. The structure is built on the board and judged by "Check my structure".
+  take Enter. The structure is built on the board and judged by "Check the structure".
 - A right part is marked and locks. A wrong part gets the three-part card (D-0017) with the wrong idea named. The
   answer comes on the third wrong try, except for the two-way picks (resonance, polar or nonpolar), where the first
   pick is final and the card gives the answer, as in step 6 (L3).
@@ -38,6 +38,8 @@ How to build it was this session's choice. Options looked at:
   of checks leaves out the electron total until the valence part is right, the 3D shape opens only with both
   geometries right and the finished structure on the board, the angle labels appear only once the angle is right, a
   card never states the answer of another open part, and key terms whose cards would are left plain.
+- "Next molecule" is a quiet button until the sheet is done, so a repeated Enter after an answer stays on the sheet
+  (review round 1, CODE-2).
 - "Next molecule" goes to a molecule finished with a missed part once 3 more molecules are finished, then to the
   next unfinished one in the picker's order. Details and the rule's tests are in `docs/learning/exercises.md`.
 

@@ -53,4 +53,4 @@ export const PARTS: Partial<Record<Mode, Part>> = { shapes: shapesPart, exercise
 /** The parts a student can open. A part that is built but still has review findings to fix stays
  *  out of this list: its tab is not drawn, and its route opens the guided steps. The home screen
  *  has the same switch for the two cards (`OPEN` in `src/modules/registry.ts`): change both together. */
-export const OPEN_PARTS: readonly Mode[] = []
+export const OPEN_PARTS: readonly Mode[] = ['shapes', 'exercise']
