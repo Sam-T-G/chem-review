@@ -2,6 +2,20 @@
 
 Dated entries, newest first. Each says what was run, on which build, by whom, and what it did not cover. Add an entry when you verify something a reader would otherwise have to take on trust. A claim with no entry here has not been checked.
 
+## 2026-11-17: free build shows electronegativity, each bond's ΔEN and the dipoles, with the key terms (build session, team lewis)
+
+Run in the main checkout on the branch `lewis/key-terms`, on the working tree that holds both the key terms (D-0028) and the free build dipoles (D-0029), before the commit.
+
+- `pnpm verify` exits 0: typecheck, lint, 455 unit tests in 11 files, `check-repo: ok`, and the production web build.
+- Browser, real input (headless Chromium with a software renderer), against that build served on port 5210:
+  - All 20 molecules start to finish with touch at 390 x 844: 1213 checks, 0 failed. With a mouse at 1360 x 840, run beside the phone run: 1249 passed and 1 failed (XeF4: the model was 0.96 of the way up where the check wants above 0.99). Run alone twice more: CH4 failed the same check at 0.97 while another session's browser checks were running on the machine (M-0007), then 1250 checks, 0 failed.
+  - The extras: 349 checks with a mouse and 265 with touch, 0 failed, each run alone. Run side by side once, the desktop run failed "Flat drawing puts the model back on the board" one time and passed alone. Both misses are the 3D model's lift read before it finished, under the load of two runs.
+  - The key terms: 79 checks with a mouse and 71 with touch, 0 failed.
+  - Home screen, opening the module, the way back and saved progress: 79 checks with a mouse and 77 with touch, 0 failed.
+- Looked at by the session that built it, in screenshots: free build water on the flat drawing (desktop) and on the 3D shape (desktop and phone). The arrows point at oxygen, δ+ and δ− sit on the right atoms, and the net dipole points out of oxygen away from the hydrogens.
+- Other sessions ran browser checks from their own worktrees during these runs, so the machine was loaded (load average 20 to 34 on 14 cores).
+- Not checked: a real phone or tablet (W-003), Safari's engine (W-012), and free build boards other than water in the browser (aluminum fluoride, ozone and ethane are covered by unit tests only).
+
 ## 2026-11-16: the glow and the hand, the strip of checks, one-move controls, aim points (build session, team lewis)
 
 Run in the main checkout on the branch `lewis/prompts-and-checks`, on the working tree on top of 292b38b before it was committed. `pnpm verify` was run once more on that tree just before the commit and passed with the same numbers. The browser checks were not rerun after that.

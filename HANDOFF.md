@@ -2,6 +2,31 @@
 
 Add your entry on top, under a heading in exactly this form: `## 2026-11-13 (team) What changed`. Say what changed, what you checked and how, what you ask of other teams or of Sam, and the next step.
 
+## 2026-11-17 (lewis) Free build shows electronegativity, each bond's ΔEN and the dipoles
+
+**State.** Built in the main checkout on the branch `lewis/key-terms`, on top of the key terms work. On 2026-11-17 Sam wrote "commit push deploy". Another session had already committed the same working tree as 63c3a57 (the snapshot that `lewis/review-modes`, `lewis/board-3d`, `lewis/exercises`, `lewis/geometry-names`, `lewis/shapes-quiz` and `chem/exercise-pool` start from), so this commit sits on top of that snapshot and holds only the docs that came after it. main moves from 63d657d through 63c3a57 to this commit, and those branches keep their history.
+
+Sam wrote on 2026-11-17: "check the chemistry review module we made, i want to also import the dipole and electronegativity features into the free build". Asked how, he picked "Show them live" over running step 6's drawing exercise in free build. D-0029 quotes both.
+
+**Changed**
+- `src/modules/lewis/guide.ts`: `FREE_POLAR_WORDS`, `freeBondLine` (one kind of bond, with "Ionic" above 2.0 and the ozone case), `freeNetLine`, and `bondKindsOn` (each pair of elements once, for any board, chains too).
+- `src/modules/lewis/ui.ts`: `freePolar()` adds to the free build panel the electronegativity table for the elements on the board, a row per kind of bond, and the net dipole line once every shell is full. `dipolesFor()` draws the polar bonds' arrows with δ+ and δ− in free build, and the net dipole on the 3D shape of a finished polar molecule (`freeNetShown`), where the angle marks then step aside. A tapped atom shows its electronegativity and a tapped bond its ΔEN, in free build only. The polarity line that sat under the 3D shape is now the net dipole line.
+- `src/modules/lewis/styles.css`: `.mb-h3` and `.mb-pol`.
+- `tests/guide.test.ts`: five tests for free build (water, Al–F ionic, ozone, ethane, polar and nonpolar lines), and the scan of every sentence now reads the free build lines for all twenty problems and those three boards.
+- `scripts/check-browser.mjs`, extras: in free build, the table, the O–H line, water's verdict, both arrows on the flat drawing and no net dipole, a tapped oxygen's electronegativity, the net dipole on the 3D shape, and "Fill every shell" once oxygen is short.
+- Docs: D-0029, `docs/learning/guided-steps.md`, `docs/design/look-and-motion.md`, `docs/chemistry/sources.md`.
+
+**Found on the way.** With the middle atom one electron short, the engine gives no polarity, and the first draft then said dipoles are added up only for molecules with one middle atom, which is false for water. It now says to fill every shell. The browser check caught it.
+
+**Checked.** The entry dated 2026-11-17 in `docs/verified.md`.
+
+**Asks**
+- Sam: the wording of the free build lines, "Ionic" for a ΔEN above 2.0, and the electronegativity on a tapped atom's card (D-0029, Consequences).
+- Whoever ran browser checks from another worktree at about 16:10 on 2026-11-17: this session killed every headless Chromium on the machine then, taking one for its own leftover (M-0007). A run of yours may have stopped with "Target page, context or browser has been closed". Run it again.
+- design: on a phone the "net dipole" label above the 3D model sits under the strip of checks. Guided step 6 does the same (`shots/phone-H2O-polar.png`), so it is older than this change. On the flat drawing a δ+ tag can cover an atom's electron count.
+
+**Next step.** Sam reads the free build lines and the key terms cards on the live site and confirms or changes D-0028 and the wording in D-0029.
+
 ## 2026-11-16 (lewis) Key terms are highlighted, and each opens a card with its meaning, an example and a picture
 
 **State.** Built on the branch `lewis/key-terms`, on top of 63d657d. Not committed: Sam asked for the feature and has not asked for a commit, a push or a deploy (R9).
