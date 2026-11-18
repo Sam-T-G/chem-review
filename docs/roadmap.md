@@ -6,7 +6,8 @@ What is being worked on, what comes next, and what is waiting. The lead orders i
 
 | ID | Team | Item | Notes |
 |---|---|---|---|
-| | | Nothing is being built. The open findings from the reviews of 2026-11-17 are listed in the top entry of `HANDOFF.md` | |
+| | | Nothing is being built. The open findings from the reviews of 2026-11-17 are listed in the lead's entry of 2026-11-17 in `HANDOFF.md` | |
+| W-029 | lewis, design | On a phone, the middle atom's δ+ on PCl5 and SF6 (and ClF3's net dipole label once) can land on another atom when the turning model leaves no clear place | Known failure of the tag check at phone size, about 1 run in 3 for those molecules. Shipped open on Sam's word, 2026-11-18. `HANDOFF.md`, the lewis entry of 2026-11-18 |
 
 ## Next
 

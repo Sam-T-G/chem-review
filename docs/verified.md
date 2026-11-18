@@ -2,6 +2,20 @@
 
 Dated entries, newest first. Each says what was run, on which build, by whom, and what it did not cover. Add an entry when you verify something a reader would otherwise have to take on trust. A claim with no entry here has not been checked.
 
+## 2026-11-18: δ tags and the net dipole label stay off the atoms, the electron counts, the dock and each other (build session, team lewis)
+
+Run in the main checkout on `main` at 2628bd1 with the change uncommitted, under `browser.lock` (one run at a time on the machine). Load average 2 to 13 (`uptime`).
+
+- `pnpm verify` exits 0: 987 unit tests, `check-repo: ok`, the production web build.
+- Browser, real input, against that build on port 5210, on the build before the last two fixes (the dock read again after its buttons arrive, and the placement rings):
+  - Free build: phone 318 passed, 1 failed (water's δ+ on the 3D shape under the "Electron geometry" button, which the dock had measured at 0.4 of its size). Desktop 419 passed, 0 failed.
+  - `check-board.mjs`: phone 162, desktop 165, 0 failed.
+  - All 20 molecules: desktop 1568 passed, 0 failed; phone 1529 passed, 1 failed (SF6's δ+ over two atoms).
+- On the build with both fixes: free build phone 319 and desktop 419, 0 failed; `check-board.mjs` phone 162 and desktop 165, 0 failed; all 20 molecules desktop 1568, 0 failed; phone 1527 passed, 3 failed (PCl5's and SF6's δ+ over an outer atom, ClF3's net label on a δ− tag).
+- Alone, on the phone, after the last ring change: SF6 2 of 3 runs passed (the failing run's δ+ lay fully over a fluorine), PCl5 0 of 1 (2 px into a chlorine), ClF3 1 of 1. This is W-029, shipped open.
+- Looked at by the session: `shots/phone-SF6-polar.png`, `shots/phone-ClF3-polar.png`, `shots/desktop-free-water.png` before the change.
+- Not checked: a real phone (W-003), Safari's engine (W-012).
+
 ## 2026-11-18: the shapes quiz, the exercises and the board, all open (lead session)
 
 Run in the worktree `chem-review-review` on the branch `lewis/review-modes`, on the tree that was pushed to main. The web build under test was made at e4c9516; the commits after it change check scripts and docs only. It was served on port 5220. The runs started late on 2026-11-17 and ended after midnight.

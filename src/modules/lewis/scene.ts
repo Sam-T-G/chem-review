@@ -104,6 +104,8 @@ interface ArrowView {
   crosses: SVGLineElement[]
 }
 const SVG_NS = 'http://www.w3.org/2000/svg'
+/** A rectangle on screen, in pixels. */
+type Box = { l: number; t: number; r: number; b: number }
 
 export interface Insets {
   top: number
@@ -113,6 +115,10 @@ export interface Insets {
   /** Where the panels over the board's top end. On a phone the board reaches under part of the
    *  strip of checks (`top` is above this), but a label there would be hidden. */
   clear: number
+  /** Controls that stand over the board (the dock's buttons, the switch between the two geometries
+   *  at a phone's left edge), as boxes in the board's pixels. A δ tag or the net dipole label never
+   *  goes under one. */
+  avoid: Box[]
 }
 
 const COLOR = { electron: 0xffc93c, electronGlow: 0xff9d00, ink: 0x3a3358, bond: 0x7467c2, bondSel: 0x5a4daa, board: 0xcfebdb, boardEdge: 0xb5dcc6, ring: 0x7467c2, drop: 0xffb81f, lobe: 0xffe08a }
@@ -244,7 +250,7 @@ export class Scene {
   private ghost: { el: El; mesh: THREE.Mesh; startX: number; startY: number; moved: boolean } | null = null
 
   private input: SceneInput = { s: { atoms: [], bonds: [], seq: 1 }, editable: false, selection: null, view: 'flat', specimen: false, showCounts: false, showCharges: false, shells: new Map(), refused: null, point: null, angles: [], dipoles: null, draw: null, dropBonds: false }
-  private insets: Insets = { top: 96, right: 16, bottom: 132, left: 16, clear: 96 }
+  private insets: Insets = { top: 96, right: 16, bottom: 132, left: 16, clear: 96, avoid: [] }
   private halfW = 5.6
   private halfH = 3.5
   private boardKey = ''
@@ -422,9 +428,9 @@ export class Scene {
   // ------------------------------------------------------------------ public
 
   setInsets(insets: Insets) {
-    // `clear` only places labels, so a change to it alone does not move the camera.
+    // `clear` and `avoid` only place labels, so a change to them alone does not move the camera.
     const same = (['top', 'right', 'bottom', 'left'] as const).every((k) => Math.abs(insets[k] - this.insets[k]) < 2)
-    this.insets = same ? { ...this.insets, clear: insets.clear } : insets
+    this.insets = same ? { ...this.insets, clear: insets.clear, avoid: insets.avoid } : insets
     if (!same) this.fit()
   }
 
@@ -1673,6 +1679,43 @@ export class Scene {
     return true
   }
 
+  /** An overlay element's size, read again only when its text changes (a read forces layout). */
+  private readonly tagSizes = new WeakMap<HTMLElement, { key: string; w: number; h: number }>()
+  private sizeOf(el: HTMLElement): { w: number; h: number } {
+    const key = el.innerHTML
+    const known = this.tagSizes.get(el)
+    if (known && known.key === key && known.w > 0) return known
+    const size = { key, w: el.offsetWidth, h: el.offsetHeight }
+    this.tagSizes.set(el, size)
+    return size
+  }
+
+  /** Of the places a tag could go (centers, best first), the first that covers nothing in `taken`
+   *  and stays on screen below the panels; when every place covers something, the one that covers
+   *  least. */
+  private placeTag(size: { w: number; h: number }, places: { x: number; y: number }[], taken: Box[]): { x: number; y: number } {
+    const W = this.wrap.clientWidth
+    const H = this.wrap.clientHeight
+    let best = places[0]!
+    let bestCost = Infinity
+    for (const p of places) {
+      const box = { l: p.x - size.w / 2, t: p.y - size.h / 2, r: p.x + size.w / 2, b: p.y + size.h / 2 }
+      let cost = 0
+      if (box.t < this.insets.clear + 2 || box.l < 4 || box.r > W - 4 || box.b > H - 4) cost += 1e6
+      for (const o of taken) {
+        const w = Math.min(box.r, o.r) - Math.max(box.l, o.l)
+        const h = Math.min(box.b, o.b) - Math.max(box.t, o.t)
+        if (w > 0 && h > 0) cost += w * h
+      }
+      if (cost === 0) return p
+      if (cost < bestCost) {
+        bestCost = cost
+        best = p
+      }
+    }
+    return best
+  }
+
   /** Bond dipoles as arrows beside their bonds, δ+ and δ− beside the atoms, and on the lifted
    *  model the net dipole through the middle atom. The net arrow is the sum of the bond arrows as
    *  the model has them now, so it swings when a student pulls an atom aside. */
@@ -1707,6 +1750,24 @@ export class Scene {
     // δ+ and δ− beside the atoms: outside an outer atom, and on the open side of the middle atom
     for (const [id, tag] of this.deltaTags) {
       if (!signs.get(id)) tag.style.opacity = '0'
+    }
+    // What a tag must not cover: every atom, and each electron count while the flat drawing shows them.
+    const taken: Box[] = [...this.insets.avoid]
+    const atomBox = new Map<string, Box>()
+    const countsShown = lift < 0.25 && this.input.showCounts
+    for (const view of this.atoms.values()) {
+      const c = this.toScreen(view.pos)
+      const r = this.pxRadius(view.pos, view.r)
+      // a ball is round: a square 0.8 of its radius on each side covers about as much as the ball does
+      const k = r * 0.8
+      const box = { l: c.x - k, t: c.y - k, r: c.x + k, b: c.y + k }
+      atomBox.set(view.id, box)
+      taken.push(box)
+      if (countsShown) {
+        const side = this.openSide(view, c)
+        const size = this.sizeOf(view.badge)
+        taken.push({ l: c.x + side.x - size.w / 2, t: c.y + side.y - size.h / 2, r: c.x + side.x + size.w / 2, b: c.y + side.y + size.h / 2 })
+      }
     }
     if (d && center) {
       const pc = this.toScreen(center.pos)
@@ -1747,7 +1808,23 @@ export class Scene {
         }
         tag.textContent = text
         tag.dataset.sign = text === d.minus ? 'minus' : 'plus'
-        tag.style.transform = `translate(${(c.x + ox * (r + 15)).toFixed(1)}px, ${(c.y + oy * (r + 15)).toFixed(1)}px) translate(-50%, -50%)`
+        // The best place is straight out from the bonds; the rest turn away from it a step at a
+        // time, so the tag goes round its atom past an electron count or another tag.
+        const size = this.sizeOf(tag)
+        const a0 = Math.atan2(oy, ox)
+        // Two rings round the atom, close first and then a little farther out. Last, places that
+        // lie partly on the atom's own ball: when outer atoms stand on every side (SF6 on a phone)
+        // the tag is better on its own atom than on a neighbor.
+        const turns = [0, 0.4, -0.4, 0.8, -0.8, 1.2, -1.2, 1.6, -1.6, 2, -2, 2.4, -2.4, 2.8, -2.8, Math.PI]
+        const places = [0, 0.55, -0.6].flatMap((more) => turns.map((da) => {
+          const a = a0 + da
+          const reach = r * (1 + more) + 4 + Math.abs(Math.cos(a)) * size.w / 2 + Math.abs(Math.sin(a)) * size.h / 2
+          return { x: c.x + Math.cos(a) * reach, y: c.y + Math.sin(a) * reach }
+        }))
+        const own = atomBox.get(id)
+        const at = this.placeTag(size, places, taken.filter((b) => b !== own))
+        taken.push({ l: at.x - size.w / 2, t: at.y - size.h / 2, r: at.x + size.w / 2, b: at.y + size.h / 2 })
+        tag.style.transform = `translate(${at.x.toFixed(1)}px, ${at.y.toFixed(1)}px) translate(-50%, -50%)`
         tag.style.opacity = '1'
       }
     }
@@ -1814,20 +1891,19 @@ export class Scene {
         if (net && !partner) {
           const len = Math.hypot(to.x - from.x, to.y - from.y) || 1
           this.netTag.textContent = d.netLabel
-          let tx = to.x + ((to.x - from.x) / len) * 16
-          let ty = to.y + ((to.y - from.y) / len) * 16
-          // Past the arrowhead the label can land under the panels over the board's top (on a
-          // phone, the strip of checks). Then it sits beside the arrowhead, on the side the arrow
-          // leans toward, and below the panels.
-          const tw = this.netTag.offsetWidth
-          const th = this.netTag.offsetHeight
-          if (ty - th / 2 < this.insets.clear + 4) {
-            const side = to.x - from.x >= 0 ? 1 : -1
-            tx = to.x + side * (tw / 2 + 14)
-            ty = Math.max(to.y, this.insets.clear + 4 + th / 2)
-            const W = this.wrap.clientWidth
-            if (tx + tw / 2 > W - 8 || tx - tw / 2 < 8) tx = to.x - side * (tw / 2 + 14)
-          }
+          // Past the arrowhead first, then beside it on the side the arrow leans toward, then the
+          // other side, then beside the arrow's middle: the first place that covers no atom, no
+          // δ tag and no panel over the board.
+          const size = this.sizeOf(this.netTag)
+          const ux = (to.x - from.x) / len
+          const uy = (to.y - from.y) / len
+          const lean = ux >= 0 ? 1 : -1
+          const past = 16 + (Math.abs(ux) * size.w + Math.abs(uy) * size.h) / 2 - 10
+          const beside = (along: number, side: number) => ({ x: from.x + ux * along * len + side * (size.w / 2 + 14), y: from.y + uy * along * len })
+          const places = [{ x: to.x + ux * past, y: to.y + uy * past }, beside(0.92, lean), beside(0.92, -lean), beside(0.6, lean), beside(0.6, -lean), beside(0.3, lean), beside(0.3, -lean)]
+          const at = this.placeTag(size, places, taken)
+          const tx = at.x
+          const ty = at.y
           this.netTag.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) translate(-50%, -50%)`
         }
       }

@@ -151,3 +151,10 @@ What went wrong, what it cost, and the rule or check that catches it next time. 
 - How it was found: the check was run with a line printed at each drag and no extra waiting, until a run failed. The failing run showed four drags from near sulfur's edge, each reported as pointing at fluorine and none accepted.
 - Prevention: the check's clear margin is 14 px on the phone size, more than the board's largest touch slack (`clearPoint` in `scripts/check-browser.mjs`). After the change SF6 passed 6 runs of 6 under a load average of 30 to 60. A check that fails some of the time is run again with its own steps printed until a failing run is caught, before anything is blamed. One passing run after a change is not evidence that the change fixed it: say how many runs failed before, and run at least that many after.
 
+## M-0021 The net dipole label fix checked the label against the panels only
+
+- Date: 2026-11-17. Team: lewis.
+- What happened: af57d17 moved the net dipole label beside the arrowhead when it would sit under the strip of checks on a phone, and its browser check tested the label against `.mb-top`, `.mb-ledger` and `.mb-checkbar` only. The phone screenshot of ClF3 in step 6 then showed the moved label under an F atom and its δ− tag. The same session had also left open, from the entry before, that δ tags sit on the electron counts on the flat drawing, which has the same cause: each tag went to one fixed place with no look at what was already there. The fix was deployed with both.
+- Cost: one deploy with a label that could still be covered.
+- Prevention: the scene places the δ tags and the net dipole label with `placeTag()`, which tries places in order and takes the first that covers no atom, count, tag or panel. `scripts/check-browser.mjs` (`tagClashes()`) checks every shown δ tag and net dipole label against the atoms, the counts and each other for every polar molecule in step 6 and for free build water on the flat drawing and the 3D shape.
+

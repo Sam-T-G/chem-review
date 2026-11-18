@@ -238,6 +238,30 @@ const EN = { H: 21, Be: 15, B: 20, C: 25, N: 30, O: 35, F: 40, P: 21, S: 25, Cl:
 const POLAR = new Set(['NH3', 'H2O', 'CH2O', 'HCN', 'SF4', 'ClF3', 'BrF5', 'SO2', 'NO2-'])
 const PI = { CO2: 2, CH2O: 1, HCN: 2, 'NO2-': 1, 'CO3 2-': 1, SO2: 2, 'SO4 2-': 2, 'PO4 3-': 1 }
 const HYBRID = ['sp', 'sp2', 'sp3', 'sp3d', 'sp3d2']
+/** Which shown δ tags and net dipole label cover an electron count, a dock button, an atom or another tag
+ *  (more than 1 px). Atoms are read as circles from their hit buttons. */
+const tagClashes = () => mb(() => {
+  const shown = (el) => el && getComputedStyle(el).opacity !== '0' && el.getBoundingClientRect().width > 0
+  const name = (el) => (el.classList.contains('mb-count') ? `count ${el.innerText.replace(/\s+/g, ' ')}` : el.tagName === 'BUTTON' ? `button ${el.innerText.replace(/\s+/g, ' ')}` : `tag ${el.innerText}`)
+  const tags = [...document.querySelectorAll('.mb-delta:not(.is-cap)')].filter(shown)
+  const counts = [...document.querySelectorAll('.mb-count'), ...document.querySelectorAll('.mb-dock button')].filter(shown)
+  const atoms = [...document.querySelectorAll('.mb-hit')].map((el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, r: r.width / 2 } })
+  const cut = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1
+  const out = []
+  tags.forEach((t, i) => {
+    const a = t.getBoundingClientRect()
+    for (const o of [...tags.slice(i + 1), ...counts]) {
+      const b = o.getBoundingClientRect()
+      if (cut(a, b)) out.push(`${name(t)} / ${name(o)} (${Math.round(Math.min(a.right, b.right) - Math.max(a.left, b.left))} x ${Math.round(Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top))} px)`)
+    }
+    // an atom counts as covered when the tag reaches 2 px inside its circle
+    const inside = (c) => c.r - Math.hypot(Math.max(a.left, Math.min(c.x, a.right)) - c.x, Math.max(a.top, Math.min(c.y, a.bottom)) - c.y)
+    const own = atoms.filter((c) => inside(c) > 2)
+    // a δ tag may touch the edge of its own atom, so only the net label is held to every atom
+    if (t.classList.contains('is-net') ? own.length : own.length > 1) out.push(`${name(t)} / ${own.length} atom(s) (${own.map((c) => `${Math.round(inside(c))} of ${Math.round(c.r)} px in`).join(', ')})`)
+  })
+  return out
+})
 /** Whether the net dipole's label is on screen and clear of the panels over the board's top. */
 const netTagClear = () => mb(() => {
   const tag = document.querySelector('.mb-delta.is-net')
@@ -638,6 +662,8 @@ async function solve(p, wrong = {}) {
     const tag = await netTagClear()
     ok(tag.shown && tag.clear, `${p.id}: the net dipole label is on screen and clear of the panels (${JSON.stringify(tag)})`)
   }
+  const clash6 = await tagClashes()
+  ok(clash6.length === 0, `${p.id}: on the 3D model the δ tags and the net dipole label cover no atom, count or other tag (${clash6.join('; ')})`)
   await shot(`${p.id.replace(/\W/g, '')}-polar`)
   await press('[data-key="next"]')
 
@@ -969,6 +995,8 @@ async function extras() {
   ok(/electronegativity 3\.5/.test(await text('.mb-sel')), 'free: a tapped oxygen shows its electronegativity')
   await tapAt(await emptySpot())
   await shot('free-water')
+  const clashFlat = await tagClashes()
+  ok(clashFlat.length === 0, `free: on the flat drawing no δ tag covers an electron count, an atom or another tag (${clashFlat.join('; ')})`)
   await press('[data-key="see-shape"]')
   await wait(2200)
   ok((await page.locator('.mb-readout dd.is-big').innerText()).toLowerCase() === 'bent', 'free: See the 3D shape names water bent')
@@ -977,6 +1005,8 @@ async function extras() {
   ok((await angles()).every((a) => a > 95 && a < 109), 'free: the H–O–H angle in the model is below 109.5')
   const freeTag = await netTagClear()
   ok(freeTag.shown && freeTag.clear, `free: the net dipole label is on screen and clear of the panels (${JSON.stringify(freeTag)})`)
+  const clash3d = await tagClashes()
+  ok(clash3d.length === 0, `free: on the 3D shape the δ tags and the net dipole label cover no atom, count or other tag (${clash3d.join('; ')})`)
   await shot('free-water-3d')
   ok(await page.locator('[data-tray]').count() === 0, 'free: the atom tray steps aside while the 3D shape is showing')
   await press('[data-key="view-flat"]')

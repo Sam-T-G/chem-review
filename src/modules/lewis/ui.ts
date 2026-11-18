@@ -1850,7 +1850,12 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
     // taller; it is allowed to overlap the board's edge so the board does not jump when it opens.
     if (!regions.dock.querySelector('.mb-sel')) dockRest = dr.height ? sr.bottom - dr.top : 0
     const clear = Math.max(lr.height ? lr.bottom : 0, cr.height ? cr.bottom : 0, tr.bottom) - sr.top
-    scene.setInsets({ top, bottom: dockRest + 18, left: 14, right: 14, clear })
+    // the dock's own boxes span whole grid columns, so read its buttons and the selection card
+    const avoid = [...regions.dock.querySelectorAll('button, .mb-sel')]
+      .map((el) => el.getBoundingClientRect())
+      .filter((r) => r.width > 0 && r.height > 0)
+      .map((r) => ({ l: r.left - sr.left - 4, t: r.top - sr.top - 4, r: r.right - sr.left + 4, b: r.bottom - sr.top + 4 }))
+    scene.setInsets({ top, bottom: dockRest + 18, left: 14, right: 14, clear, avoid })
   }
 
   const render = (s: State) => {
@@ -2122,6 +2127,9 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
     store.typeTotal(digits === '' ? null : Number(digits))
   }, on)
 
+  // The dock's buttons grow into place, so the boxes the board's labels keep clear of are read
+  // again once they have arrived.
+  regions.dock.addEventListener('animationend', () => measure(), on)
   const ro = new ResizeObserver(() => {
     measure()
     placeTerm()

@@ -2,6 +2,26 @@
 
 Add your entry on top, under a heading in exactly this form: `## 2026-11-13 (team) What changed`. Say what changed, what you checked and how, what you ask of other teams or of Sam, and the next step.
 
+## 2026-11-18 (lewis) δ tags and the net dipole label stay off the atoms, the electron counts and each other
+
+Sam wrote on 2026-11-17: "look at other fixes we can make and undertake". The phone screenshots after af57d17 showed two cases of one bug: on ClF3 the moved net dipole label sat under an F atom and its δ− tag (M-0021), and on the flat drawing each δ tag sat on its atom's electron count (from the entry below, `shots/desktop-free-water.png`).
+
+**Changed**
+- `src/modules/lewis/scene.ts`: `placeTag()` takes a tag's places, best first, and returns the first that covers nothing already placed and stays on screen below the panels (else the one that covers least). `sizeOf()` reads a tag's size only when its text changes. `updateDipoles()` collects the atoms and, on the flat drawing, the electron counts; each δ tag tries 16 directions round its atom in two rings, then places partly on its own ball; atoms count as a square 0.8 of their radius each side, and the net dipole label tries past the arrowhead, then beside it, then beside the arrow's middle.
+- `src/modules/lewis/ui.ts`: `measure()` passes the dock's buttons and the selection card as `Insets.avoid`, so on a phone a tag stays off the switch between the two geometries at the board's left edge (open in the lead's entry of 2026-11-17). The dock measures again when an animation inside it ends, because its buttons grow into place and were first read at 0.4 of their size.
+- `scripts/check-browser.mjs`: `tagClashes()` (atoms, electron counts, dock buttons, other tags; it prints how far each overlap goes), checked for every polar molecule in step 6 and for free build water on the flat drawing and the 3D shape.
+- Docs: M-0021, `docs/design/look-and-motion.md`.
+
+**State.** Built on af57d17, then moved onto 8732a4d and then 2628bd1 (both pushed by the `lewis/review-modes` session, which asked that main hold still until they landed). The only conflict each time was the mistake number: those commits used M-0008 to M-0020, so this one is M-0021. A phone run on 8732a4d failed SF6's bond arrows; M-0020 traces that to the check's press point, fixed in 2628bd1.
+
+**Checked.** The entry dated 2026-11-18 (tag placement) in `docs/verified.md`.
+
+**Open: a known failure on the phone (W-029).** On the phone size the middle atom of PCl5 and SF6 has outer atoms on every side, and at some turns of the model no place round it is clear. Its δ+ then lands on an outer atom, once fully over a fluorine, and the check "on the 3D model the δ tags and the net dipole label cover no atom, count or other tag" fails for that molecule (SF6 1 run in 3 alone, PCl5 1 in 2; ClF3's net label once). Desktop never failed. The check was left as strict as it was written (R12). If you see this failure on PCl5, SF6 or ClF3 at phone size, it is W-029, not your change. Sam chose on 2026-11-18 to ship with it open ("Ship, log phone as open").
+
+**Asks.** lewis or design: W-029. Ideas not tried: when nothing is clear, keep the tag where it was last frame (it moves less), or turn the slow idle spin so the middle atom has a gap; and say in the check whether the covered atom is behind the middle atom (hidden, so the overlap cannot be seen).
+
+**Next step.** W-029.
+
 ## 2026-11-17 (lead) The shapes quiz, the exercises and the 3D board's switch are open, with the fix rounds from the reviews
 
 **State.** Sam wrote on 2026-11-17, after the two geometry names went live as 8732a4d: "ship the next push the same way when checks pass". This push opens the two parts that were closed and adds the board package and the fix rounds. `OPEN_PARTS` in `src/modules/lewis/parts.ts` and `OPEN` in `src/modules/registry.ts` list both parts, so the home screen shows three cards and the module four tabs.
@@ -74,7 +94,6 @@ Add your entry on top, under a heading in exactly this form: `## 2026-11-13 (tea
 **Asks.** lewis (`ui.ts` owner) or lead: the ion question "Do the bond dipoles in the methyl cation cancel?" still has "They cancel" as its answer for an ion with no bond dipoles. `netQuestion(p)` cannot see the structure; a fix needs the caller to pass the molecule's polarity.
 
 **Next step.** The lead merges this branch with the quiz and exercise fixes and reruns the browser checks.
-
 ## 2026-11-17 (lead) The two geometry names go to main first; the shapes quiz and the exercises are merged and closed
 
 **State.** Sam wrote on 2026-11-17: "lets expedite the feature to differentiate between the different geometries. I want that finalized and pushed to live ASAP". Earlier the same day he wrote "once all the agents are done, commit and push to main". So this push holds everything that is merged on `lewis/review-modes`, with the two parts that still have review findings closed to students:
@@ -92,7 +111,7 @@ Add your entry on top, under a heading in exactly this form: `## 2026-11-13 (tea
   - The right-answer lines say which geometry they name. The step's title and the finished line use both names in full.
   - The same wrong pick pressed again is not a new try.
 - Free build: the net line for the triiodide ion no longer throws (M-0012), two atoms of one element with unlike formal charges read polar in both lines, and the two-atom line gives the straight line as the reason for the molecular geometry only.
-- Docs: D-0030 (Sam's ask), D-0031 (parts, routes, saved lists, the switch), `docs/architecture.md`, `docs/roadmap.md`, `docs/mistakes.md` (M-0008 to M-0013), `docs/chemistry/sources.md`, D-0033 and the two learning docs for the step 5 changes.
+- Docs: D-0030 (Sam's ask), D-0031 (parts, routes, saved lists, the switch), `docs/architecture.md`, `docs/roadmap.md`, `docs/mistakes.md` (M-0014 to M-0013), `docs/chemistry/sources.md`, D-0033 and the two learning docs for the step 5 changes.
 
 **Checked.** The entry dated 2026-11-17 (the two geometry names) in `docs/verified.md`.
 
