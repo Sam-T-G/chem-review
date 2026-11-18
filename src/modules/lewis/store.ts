@@ -21,6 +21,8 @@ import { hybridFor, type Hybrid } from '../../chem/orbitals'
 import type { SeenBond } from '../../chem/polarity'
 import type { V3 } from '../../chem/repulsion'
 import { shapeOf, type ShapeName } from '../../chem/vsepr'
+import { exerciseBoardChanged, exerciseCanLift, exerciseProblem, freshExercise, type ExerciseState } from './exercise/state'
+import { freshShapes, shapesBoard, type ShapesState } from './shapes/state'
 import {
   AFTER_SHAPE,
   NET_SIDE,
@@ -31,6 +33,7 @@ import {
   bondCounts,
   bondRight,
   countCoach,
+  geometryFeedback,
   drawRefusal,
   elementsOf,
   groupFacts,
@@ -57,7 +60,10 @@ import {
   type StepId,
 } from './guide'
 
-export type Mode = 'guided' | 'free'
+/** 'guided' and 'free' are the module's own modes. 'shapes' (the shapes quiz) and 'exercise' are parts: parts.ts has their contract. */
+export type Mode = 'guided' | 'free' | 'shapes' | 'exercise'
+/** A finished item of a part is saved with the part's prefix, so the three lists never share an id. */
+export const PART_IDS = { shapes: 'shape:', exercise: 'ex:' } as const
 export interface Selection {
   kind: 'atom' | 'bond'
   id: string
@@ -89,6 +95,15 @@ export interface ShapeState {
   groupsFeedback: string | null
   /** What the panel says about the last wrong count. `n` goes up with each wrong answer, so the board rings the groups once. */
   groupsCoach: (Coach & { n: number }) | null
+  /** The electron geometry, asked after the groups. The student picks until it is right (D-0033). */
+  geometry: ShapeName | null
+  geometryRight: boolean
+  geometryTries: number
+  /** The line shown once the electron geometry is right. */
+  geometryFeedback: string | null
+  /** What the panel says about the last wrong electron geometry. `n` goes up with each one, so the board rings the groups once. */
+  geometryCoach: (Coach & { n: number }) | null
+  /** The molecular geometry. The first pick is final, and the model lifts into 3D. */
   pick: ShapeName | null
   pickRight: boolean
   /** The line shown for a right pick. */
@@ -133,6 +148,10 @@ export interface State {
   shape: ShapeState
   polar: PolarState
   orbitals: OrbitalState
+  /** The shapes quiz. Its fields belong to shapes/state.ts. */
+  shapes: ShapesState
+  /** The exercises. Its fields belong to exercise/state.ts. */
+  exercise: ExerciseState
   s: Structure
   past: Structure[]
   selection: Selection | null
@@ -150,7 +169,22 @@ export interface State {
 }
 
 const freshCount = (): CountState => ({ answers: {}, right: {}, tries: {}, feedback: {}, changed: {}, total: null, totalRight: false, totalTries: 0, totalFeedback: null })
-const freshShape = (): ShapeState => ({ groups: null, groupsRight: false, groupsTries: 0, groupsFeedback: null, groupsCoach: null, pick: null, pickRight: false, pickFeedback: null, pickCoach: null })
+const freshShape = (): ShapeState => ({
+  groups: null,
+  groupsRight: false,
+  groupsTries: 0,
+  groupsFeedback: null,
+  groupsCoach: null,
+  geometry: null,
+  geometryRight: false,
+  geometryTries: 0,
+  geometryFeedback: null,
+  geometryCoach: null,
+  pick: null,
+  pickRight: false,
+  pickFeedback: null,
+  pickCoach: null,
+})
 const freshMiddle = (): State['middle'] => ({ pick: null, right: false, text: null, coach: null })
 const freshPolar = (): PolarState => ({ bonds: {}, net: { ...unanswered(), pick: null }, arrow: { ...unanswered(), drawn: null }, aim: 0 })
 const freshOrbitals = (): OrbitalState => ({ sigma: 0, pi: 0, counts: unanswered(), hybrid: { ...unanswered(), pick: null } })
@@ -183,6 +217,8 @@ function initial(): State {
     count: freshCount(),
     middle: freshMiddle(),
     ...freshAnswers(),
+    shapes: freshShapes(),
+    exercise: freshExercise(),
     s: EMPTY,
     past: [],
     selection: null,
@@ -216,7 +252,14 @@ function set(patch: Partial<State>) {
   for (const fn of listeners) fn(state)
 }
 
+/** Change the state from a part's own file (parts.ts). The module's own actions are the functions below. */
+export function update(patch: Partial<State>) {
+  set(patch)
+}
+
+/** The molecule being worked on: the guided problem, or the exercise on screen. */
 export function problemOf(s: State = state): Problem {
+  if (s.mode === 'exercise') return exerciseProblem(s.exercise)
   return PROBLEMS[s.problem]!
 }
 
@@ -232,12 +275,13 @@ export function isSpecimen(s: State = state): boolean {
 }
 /** What the board shows. */
 export function boardStructure(s: State = state): Structure {
+  if (s.mode === 'shapes') return shapesBoard(s.shapes)
   return isSpecimen(s) ? specimen(s) : s.s
 }
 /** Atoms can be moved, bonded and edited. Frozen in the count step and in the shape step. */
 export function editable(s: State = state): boolean {
-  if (s.view === 'shape') return false
-  if (s.mode === 'free') return true
+  if (s.view === 'shape' || s.mode === 'shapes') return false
+  if (s.mode === 'free' || s.mode === 'exercise') return true
   return s.step === 'place' || s.step === 'bond' || s.step === 'check'
 }
 
@@ -313,6 +357,8 @@ export type Cue =
 
 export function cue(s: State = state): Cue | null {
   if (s.pickerOpen) return null
+  // a part names its own next action (Part.cue in parts.ts)
+  if (s.mode === 'shapes' || s.mode === 'exercise') return null
   if (s.mode === 'free') {
     // free build has no questions: only an empty board points at the atoms
     const first = trayItems(s)[0]
@@ -341,7 +387,7 @@ export function cue(s: State = state): Cue | null {
     return s.s.bonds.length === 0 ? { kind: 'drag', from: loose[0]!.id, to: center.id } : { kind: 'atoms', ids: loose.map((a) => a.id) }
   }
   if (s.step === 'check') return { kind: 'ask', key: 'checks' }
-  if (s.step === 'shape') return { kind: 'ask', key: s.shape.groupsRight ? 'shapes' : 'groups' }
+  if (s.step === 'shape') return { kind: 'ask', key: !s.shape.groupsRight ? 'groups' : !s.shape.geometryRight ? 'geometry' : 'shapes' }
   if (s.step === 'polar') {
     const m = polarity(s.s)
     const asked = bondAsked(s)
@@ -378,8 +424,12 @@ export function trayItems(s: State = state): { el: El; n: number }[] {
 export function totalNext(s: State = state): boolean {
   return s.step === 'count' && elementsOf(problemOf(s)).every((el) => s.count.right[el])
 }
+/** Which question of step 5 is open. */
+function shapeAt(s: State): 'groups' | 'geometry' | 'molecular' {
+  return !s.shape.groupsRight ? 'groups' : !s.shape.geometryRight ? 'geometry' : 'molecular'
+}
 function stepHints(s: State): string[] {
-  return hintsFor(s.step, problemOf(s), s.s, totalNext(s), netArrowAsked(s))
+  return hintsFor(s.step, problemOf(s), s.s, totalNext(s), netArrowAsked(s), shapeAt(s))
 }
 export function currentHints(s: State = state): string[] {
   if (s.mode !== 'guided') return []
@@ -413,7 +463,8 @@ export function setMode(mode: Mode) {
     const { positions: _p, ...rest } = saved
     set({ ...rest, mode, selection: null, pickerOpen: false, cleared: null })
   } else {
-    set({ ...resetBoard(state.problem), mode, step: mode === 'free' ? 'check' : 'count' })
+    // every mode but the guided one starts on a board that is already open; the shapes quiz starts on the 3D model
+    set({ ...resetBoard(state.problem), mode, step: mode === 'guided' ? 'count' : 'check', view: mode === 'shapes' ? 'shape' : 'flat' })
   }
 }
 
@@ -439,10 +490,18 @@ export function next() {
 /** Add finished problems the app shell already knows about (its saved progress). */
 export function mergeSolved(ids: string[]) {
   const known = new Set(PROBLEMS.map((p) => p.id))
-  const merged = [...new Set([...state.solved, ...ids.filter((id) => known.has(id))])]
+  const merged = [...new Set([...state.solved, ...ids.filter((id) => known.has(id) || Object.values(PART_IDS).some((prefix) => id.startsWith(prefix)))])]
   if (merged.length === state.solved.length) return
   saveSolved(merged)
   set({ solved: merged })
+}
+
+/** Record one more finished item: a guided problem's id, or a part's item with its prefix (PART_IDS). */
+export function markSolved(id: string) {
+  if (state.solved.includes(id)) return
+  const solved = [...state.solved, id]
+  saveSolved(solved)
+  set({ solved })
 }
 
 export function togglePicker(open?: boolean) {
@@ -507,8 +566,12 @@ export function pickMiddle(el: El) {
 
 // ---------------------------------------------------------------- the board
 
+/** What a change to the board throws away: the answers about the finished structure, and in an exercise whatever its own file says. */
+function afterChange(s: Structure): Partial<State> {
+  return { ...freshAnswers(), ...(state.mode === 'exercise' ? { exercise: exerciseBoardChanged(state.exercise, s) } : {}) }
+}
 function commit(s: Structure, extra: Partial<State> = {}) {
-  set({ s, past: [...state.past.slice(-60), state.s], ...freshAnswers(), cleared: null, ...extra })
+  set({ s, past: [...state.past.slice(-60), state.s], ...afterChange(s), cleared: null, ...extra })
 }
 function apply(op: Op, ids: string[], extra: Partial<State> = {}): boolean {
   if (op.ok) {
@@ -542,8 +605,9 @@ function freeSpot(preferCenter: boolean): P2 {
 /** Put an atom on the board. `at` is where it was dropped; null picks a free spot. */
 export function place(el: El, at: P2 | null): string | null {
   if (!editable()) return null
-  if (state.mode === 'guided' && (trayItems().find((x) => x.el === el)?.n ?? 0) < 1) return null
-  const isCenter = state.mode === 'guided' ? el === problemOf().center : state.s.atoms.length === 0
+  // a guided problem and an exercise both have a set of atoms; free build has no limit
+  if (state.mode !== 'free' && (trayItems().find((x) => x.el === el)?.n ?? 0) < 1) return null
+  const isCenter = state.mode !== 'free' ? el === problemOf().center : state.s.atoms.length === 0
   const r = addAtom(state.s, el)
   positions.set(r.id, at ? { ...at } : freeSpot(isCenter))
   commit(r.s, { selection: null })
@@ -582,7 +646,7 @@ export function undo() {
     set({ s: prev, past: state.past.slice(0, -1), selection: null, step: was.step, view: was.view, hints: was.hints, shape: was.shape, polar: was.polar, orbitals: was.orbitals, cleared: null })
     return
   }
-  set({ s: prev, past: state.past.slice(0, -1), selection: null, ...freshAnswers(), cleared: null })
+  set({ s: prev, past: state.past.slice(0, -1), selection: null, ...afterChange(prev), cleared: null })
 }
 /** Empties the board. On the flat board in a step that builds the structure, that is all. From
  *  the 3D model, or from a step that works on the finished structure, the flat board comes back
@@ -629,16 +693,32 @@ export function answerGroups(n: number) {
   const f = groupFacts(state.s)
   if (!f || state.shape.groupsRight) return
   const center = problemOf().center
-  if (n === f.groups) set({ shape: { ...state.shape, groups: n, groupsRight: true, groupsFeedback: groupsRight(center, f), groupsCoach: null } })
+  // the hints start again for the electron geometry
+  if (n === f.groups) set({ shape: { ...state.shape, groups: n, groupsRight: true, groupsFeedback: groupsRight(center, f), groupsCoach: null }, hints: 0 })
   else {
     const tries = state.shape.groupsTries + 1
     set({ shape: { ...state.shape, groups: n, groupsTries: tries, groupsCoach: { ...groupsCoach(center, f, n, tries), n: ++toastSeq } } })
   }
 }
-/** The student commits to a shape; right or wrong, the model then lifts into 3D. */
+/** The electron geometry, once the groups are counted. A wrong pick is explained and the student
+ *  picks again: the third miss gives the answer (D-0033). */
+export function pickGeometry(g: ShapeName) {
+  const info = shapeInfoFor(state.s)
+  const f = groupFacts(state.s)
+  const sh = state.shape
+  if (!info || !f || !sh.groupsRight || sh.geometryRight) return
+  // the same wrong pick pressed again is not a new try
+  if (g === sh.geometry && g !== info.geometry) return
+  const center = problemOf().center
+  const tries = sh.geometryTries + (g === info.geometry ? 0 : 1)
+  const r = geometryFeedback(center, info, g, tries, f)
+  if (r.right) set({ shape: { ...sh, geometry: g, geometryRight: true, geometryFeedback: r.text, geometryCoach: null }, hints: 0 })
+  else set({ shape: { ...sh, geometry: g, geometryTries: tries, geometryCoach: { ...r.coach!, n: ++toastSeq } } })
+}
+/** The student commits to a molecular geometry; right or wrong, the model then lifts into 3D. */
 export function pickShape(name: ShapeName) {
   const info = shapeInfoFor(state.s)
-  if (!info || state.shape.pick || !state.shape.groupsRight) return
+  if (!info || state.shape.pick || !state.shape.geometryRight) return
   const r = shapeFeedback(problemOf().center, info, name)
   set({ shape: { ...state.shape, pick: name, pickRight: r.right, pickFeedback: r.right ? r.text : null, pickCoach: r.coach }, view: 'shape', selection: null })
 }
@@ -742,7 +822,7 @@ export function pickHybrid(h: Hybrid) {
 export function setView(view: 'flat' | 'shape') {
   if (view === state.view) return
   if (view === 'shape') {
-    const ok = state.mode === 'guided' ? onModel() : assess(state.s).complete && shapeOf(state.s) !== null
+    const ok = state.mode === 'guided' ? onModel() : state.mode === 'exercise' ? exerciseCanLift(state.exercise, state.s) : state.mode === 'shapes' || (assess(state.s).complete && shapeOf(state.s) !== null)
     if (!ok) return
   }
   set({ view, selection: null })

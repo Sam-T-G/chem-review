@@ -94,3 +94,33 @@ export function nitrousOxideTwoDoubles(): { s: Structure; ids: string[] } {
 export function nitrousOxide(): { s: Structure; ids: string[] } {
   return star(['N', 'N', 'O'], [3, 1])
 }
+
+/** Draws a molecule with one middle atom (or two atoms) from a drawing worked by hand, with the app's moves:
+ *  place the atoms, add or take away electrons until each atom holds what it keeps plus one electron per bond,
+ *  then share. `orders` is the bond order to each outer atom, in `terminals` order. Every outer atom ends with a
+ *  full shell (2 for hydrogen, 8 for the rest). The middle atom ends with `centerLone` unshared electrons. */
+export function drawn(center: El, terminals: El[], orders: number[], centerLone: number): { s: Structure; ids: string[] } {
+  const must = (op: ReturnType<typeof share>, what: string): Structure => {
+    if (!op.ok) throw new Error(`${what}: the board refused (${op.why})`)
+    return op.s
+  }
+  let s = EMPTY
+  const ids: string[] = []
+  const keep = [centerLone + orders.reduce((a, b) => a + b, 0), ...terminals.map((el, i) => (el === 'H' ? 2 : 8) - orders[i]!)]
+  for (const el of [center, ...terminals]) {
+    const r = addAtom(s, el)
+    s = r.s
+    ids.push(r.id)
+  }
+  ids.forEach((id, i) => {
+    for (;;) {
+      const lone = s.atoms.find((a) => a.id === id)!.lone
+      if (lone === keep[i]) break
+      s = must(lone < keep[i]! ? addElectron(s, id) : removeElectron(s, id), `setting ${id} to ${keep[i]}`)
+    }
+  })
+  orders.forEach((n, i) => {
+    for (let k = 0; k < n; k++) s = must(share(s, ids[0]!, ids[i + 1]!), `bond ${i + 1}`)
+  })
+  return { s, ids }
+}

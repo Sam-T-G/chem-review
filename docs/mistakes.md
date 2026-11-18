@@ -50,3 +50,46 @@ What went wrong, what it cost, and the rule or check that catches it next time. 
 - What happened: two full desktop runs in the main checkout each failed one "lift finished" check (XeF4 at 0.96, then CH4 at 0.97): the 3D model had not finished rising after the fixed wait. The load average was about 30 on 14 cores, and `ps -Ao pcpu,comm -r` showed a headless Chromium at about 660% CPU. The session took it for a browser left behind by its own stopped runs and ran `pkill -f chrome-headless-shell`. Later it found that other sessions were running browser checks from their own worktrees at the same time (`node scripts/check-shapes.mjs phone`, from `chem-review-quiz`), so the browser it killed was most likely theirs.
 - Cost: another session's check run was probably cut off without warning. The two timing failures in the main checkout came from sharing the machine, not from the change under test. The run after that passed (1250 checks).
 - Prevention: before killing a browser, find its parent with `ps -o ppid= -p <pid>` and `lsof -a -p <ppid> -d cwd`, and kill only the processes of your own run. Before reading a timing failure in these checks, look at the load average and at `pgrep -fl check-`, and say in the handoff when another session's checks were running.
+
+## M-0008 A rule the slides give for ozone was coded as a check on a number, so it fired for other molecules
+
+- Date: 2026-11-17. Team: chem.
+- What happened: `src/chem/polarity.ts` made a bond with ΔEN 0 polar when its two atoms carry unlike formal charges. The slides give that rule for ozone, where the atoms are the same element. The code tested `ΔEN === 0`, which is also true of P–H, C–S, C–I and N–Cl on the course's rounded table, so PH2− came out polar. The builder's own tests passed, because they expected what the engine returned.
+- Cost: none reached a student. A reviewer who worked all 43 pool molecules by hand found it before the pool was used.
+- Prevention: the rule now needs the two atoms to be the same element, with a test for a middle atom whose unlike neighbours have equal table values (`tests/polarity.test.ts`). A new pool or rule gets a row-by-row review by someone who did not write it, working each answer by hand from `docs/chemistry/sources.md`.
+
+## M-0009 A rule added for one worksheet molecule (CH3+) let stripped atoms pass in free build
+
+- Date: 2026-11-17. Team: chem.
+- What happened: `src/chem/assess.ts` learned to accept a middle atom that is short of a full shell when its best drawing is short (CH3+ holds 6). With no target molecule the charge is read off the board, so an oxygen with its lone pairs removed, CH2 2+ and BH2+ each matched their own best drawing and were called complete.
+- Cost: none reached a student. The same review found it.
+- Prevention: with no target, the rule needs the middle atom at exactly 6 electrons and a formal charge of at most +1. `tests/assess.test.ts` holds six stripped boards that must stay incomplete. A rule that loosens a check gets tests for what must still fail.
+
+## M-0010 A wrong-answer card named the answer to the next question
+
+- Date: 2026-11-17. Team: lewis, learning.
+- What happened: step 5 asks for the electron geometry, then the molecular geometry, whose first pick is final. For xenon difluoride, picking linear for the electron geometry got "Linear is where the 2 atoms bonded to xenon sit: the molecular geometry." The package's test checked that no early card names the electron geometry, the open question. Nothing checked the question after it.
+- Cost: none reached a student. The wording review caught it before the push.
+- Prevention: `tests/guide.test.ts` holds every electron geometry card, for every problem and pick, to never say "the molecular geometry". `scripts/check-browser.mjs` checks the same on water. When two questions follow each other, a card for the first is tested against the answer of the second.
+
+## M-0011 The question built to tell the two geometries apart could not be answered with the wrong kind of name
+
+- Date: 2026-11-17. Team: lewis, learning.
+- What happened: Sam asked for the app to tell electron geometry and molecular geometry apart. The electron geometry question offered the five electron geometries only, so a student could not answer "bent" for water. Of 80 possible wrong picks over the 20 molecules, 1 was a molecular geometry.
+- Cost: caught in review before the push. The first build would have shipped a question that tests the count of groups and little else.
+- Prevention: the picks now hold the molecular geometries that the same number of groups can make (`geometryPicks`, D-0033), with a card for that mistake. For a feature that exists to separate two ideas, list the mistake it must catch and test that a student can make it.
+
+## M-0012 Free build threw on a finished triiodide ion
+
+- Date: 2026-11-17. Team: lewis.
+- What happened: `netReason` in `guide.ts` read the first polar bond to say why the dipoles cancel. In I3− no bond is polar by ΔEN, and the dipoles that cancel come from formal charges, so the list was empty and the panel threw. The code had been live since steps 6 and 7 landed. A reviewer printing free build lines for 27 boards found it.
+- Cost: a student who built I3− in free build got a panel that stopped updating. No report.
+- Prevention: the sentence now covers that case, with a test (`tests/guide.test.ts`, the triiodide ion). The free build tests need boards beyond the guided molecules: ions, molecules with no polar bond, and atoms of one element with unlike formal charges.
+
+## M-0013 A fix made from a reviewer's reasoning, with no run behind it, broke taps on a phone
+
+- Date: 2026-11-17. Team: lead, lewis.
+- What happened: a code reviewer traced a path in which the panel's one-time scroll to a question undoes the panel's scroll to a new explanation. The reviewer had no browser and said so. The lead changed the scroll to be decided once, on the first frame after the question arrives. On a phone the answer buttons of step 6 arrive in view and are then pushed down by text that is still growing above them, and the old code scrolled them back. With the change they stayed half hidden, and the phone run timed out on a tap for PCl5 and SF6.
+- Cost: two rounds of browser checks, about 90 minutes, on the day Sam asked for the release as soon as possible. Nothing reached a student.
+- Prevention: a finding that was traced and never run gets a browser check that shows the fault before any code changes. If the check cannot show it, the finding goes to `HANDOFF.md` as open and the code stays. The change was taken out, and CODE2-1 is listed as open.
+

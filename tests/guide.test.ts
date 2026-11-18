@@ -2,11 +2,11 @@ import { writeFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { ELEMENTS, EL_ORDER, shellsOf, type El } from '../src/chem/elements'
 import { PROBLEMS, speciesOf, type Problem } from '../src/chem/problems'
-import { addAtom, addElectron, removeElectron, share, type Structure } from '../src/chem/structure'
+import { EMPTY, addAtom, addElectron, removeElectron, share, type Structure } from '../src/chem/structure'
 import { HYBRIDS, domainsOf, hybridFor } from '../src/chem/orbitals'
-import { bondPolarity } from '../src/chem/polarity'
+import { bondPolarity, moleculePolarity } from '../src/chem/polarity'
 import { idealDirs, type V3 } from '../src/chem/repulsion'
-import { ALL_SHAPES, classify, shapeCases } from '../src/chem/vsepr'
+import { ALL_CASES, ALL_SHAPES, classify, shapeCases, shapeOf, type Geometry } from '../src/chem/vsepr'
 import {
   ALL_TERMS,
   BASE_TERMS,
@@ -44,6 +44,13 @@ import {
   finishedLine,
   finishedNotes,
   formalChargeSum,
+  geometryChoices,
+  geometryFeedback,
+  geometryPicks,
+  geometryQuestion,
+  groupsQuestion,
+  shapeQuestion,
+  twoAtomsLine,
   termCard,
   termPieces,
   groupFacts,
@@ -91,7 +98,7 @@ import {
   totalTally,
   type Coach,
 } from '../src/modules/lewis/guide'
-import { applyMove, nitrousOxide, solveLikeAStudent, star } from './helpers'
+import { applyMove, drawn, nitrousOxide, solveLikeAStudent, star } from './helpers'
 
 const P = (id: string): Problem => PROBLEMS.find((p) => p.id === id)!
 const must = (op: ReturnType<typeof share>): Structure => {
@@ -710,7 +717,7 @@ describe('the checks that stay over the board', () => {
   })
 })
 
-describe('step 5: the shape', () => {
+describe('step 5: the electron groups and the molecular geometry', () => {
   it('counts groups and names the usual miscounts, with the groups to ring on the board', () => {
     const co2 = solveLikeAStudent('CO2')
     const f = groupFacts(co2)!
@@ -721,7 +728,7 @@ describe('step 5: the shape', () => {
       ask: 'Count each bond once.',
       show: { kind: 'groups', which: 'multiple' },
     })
-    expect(groupsCoach('C', f, 6, 1)).toMatchObject({ lead: '6 counts the lone pairs on the outer atoms.', why: 'Only the groups on carbon set the shape around carbon.', show: { kind: 'groups', which: 'all' } })
+    expect(groupsCoach('C', f, 6, 1)).toMatchObject({ lead: '6 counts the lone pairs on the outer atoms.', why: 'Those lone pairs sit on the outer atoms, so they are not groups around carbon.', show: { kind: 'groups', which: 'all' } })
     expect(groupsCoach('C', f, 3, 1)).toMatchObject({ lead: '3 counts carbon as a group.', why: 'The groups are the bonds and lone pairs around carbon.', show: { kind: 'groups', which: 'all' } })
     expect(coachText(groupsCoach('C', f, 5, 1))).toBe("Carbon doesn't have 5 groups around it. Count the atoms bonded to carbon, then the lone pairs on carbon.")
     expect(groupsCoach('C', f, 5, 1).show).toBeUndefined()
@@ -757,7 +764,7 @@ describe('step 5: the shape', () => {
       }
     }
   })
-  it('offers four shapes that always include the right one and the arrangement of all the groups', () => {
+  it('offers four molecular geometries that always include the right one and the electron geometry', () => {
     for (const p of PROBLEMS) {
       const info = shapeInfoFor(solveLikeAStudent(p.id))!
       const choices = shapeChoices(info)
@@ -768,48 +775,48 @@ describe('step 5: the shape', () => {
       for (const c of choices) expect(ALL_SHAPES).toContain(c)
     }
   })
-  it('explains why the arrangement of the groups is not the shape', () => {
+  it('explains why the electron geometry is not the molecular geometry', () => {
     const info = shapeInfoFor(solveLikeAStudent('NH3'))!
     const r = shapeFeedback('N', info, 'tetrahedral')
     expect(r.right).toBe(false)
     expect(r.coach).toEqual({
-      lead: 'Tetrahedral is the arrangement of all 4 groups around nitrogen, lone pairs included.',
-      why: 'The 4 groups point to the corners of a tetrahedron, and 1 corner holds a lone pair. A shape is named for where the atoms are.',
-      ask: 'The shape is trigonal pyramidal.',
+      lead: 'Tetrahedral is the electron geometry: all 4 electron groups around nitrogen, lone pairs included.',
+      why: 'The 4 electron groups point to the corners of a tetrahedron, and 1 corner holds a lone pair. The molecular geometry names only where the atoms are.',
+      ask: 'The molecular geometry is trigonal pyramidal.',
     })
     expect(r.text).toBe(coachText(r.coach!))
     const xef4 = shapeInfoFor(solveLikeAStudent('XeF4'))!
     expect(shapeFeedback('Xe', xef4, 'octahedral').text).toMatch(/corners of an octahedron, and 2 corners hold lone pairs/)
-    expect(shapeFeedback('N', info, 'trigonal pyramidal')).toEqual({ right: true, text: 'Trigonal pyramidal: 3 atoms and 1 lone pair around nitrogen.', coach: null })
+    expect(shapeFeedback('N', info, 'trigonal pyramidal')).toEqual({ right: true, text: 'The molecular geometry is trigonal pyramidal: 3 atoms and 1 lone pair around nitrogen.', coach: null })
   })
-  it('a shape picked as if the lone pairs were not there says so', () => {
+  it('a molecular geometry picked as if the lone pairs were not there says so', () => {
     const nh3 = shapeInfoFor(solveLikeAStudent('NH3'))!
     expect(shapeFeedback('N', nh3, 'trigonal planar').coach).toEqual({
-      lead: 'Trigonal planar would be the shape if nitrogen had no lone pairs.',
-      why: 'Nitrogen has 1 lone pair, and each lone pair takes up room around nitrogen too. The 4 groups point to the corners of a tetrahedron, and the bonded atoms sit at 3 of them.',
-      ask: 'The shape is trigonal pyramidal.',
+      lead: 'Trigonal planar would be the molecular geometry if nitrogen had no lone pairs.',
+      why: 'Nitrogen has 1 lone pair, and each lone pair takes up room around nitrogen too. The 4 electron groups point to the corners of a tetrahedron, and the bonded atoms sit at 3 of them.',
+      ask: 'The molecular geometry is trigonal pyramidal.',
     })
     const h2o = shapeInfoFor(solveLikeAStudent('H2O'))!
-    expect(shapeFeedback('O', h2o, 'linear').coach!.lead).toBe('Linear would be the shape if oxygen had no lone pairs.')
+    expect(shapeFeedback('O', h2o, 'linear').coach!.lead).toBe('Linear would be the molecular geometry if oxygen had no lone pairs.')
     expect(shapeFeedback('O', h2o, 'linear').coach!.why).toMatch(/^Oxygen has 2 lone pairs, .* the bonded atoms sit at 2 of them\.$/)
   })
-  it('square planar for a tetrahedral molecule is the flat drawing; any other wrong shape is named by what it needs', () => {
+  it('square planar for a tetrahedral molecule is the flat drawing; any other wrong molecular geometry is named by what it needs', () => {
     const ch4 = shapeInfoFor(solveLikeAStudent('CH4'))!
     expect(shapeFeedback('C', ch4, 'square planar').coach).toEqual({
       lead: 'Square planar is how the 4 bonds look in a flat drawing, 90° apart.',
-      why: 'In 3D the 4 groups get further apart than that: 109.5°, at the corners of a tetrahedron.',
-      ask: 'The shape is tetrahedral.',
+      why: 'In 3D the 4 electron groups get further apart than that: 109.5°, at the corners of a tetrahedron.',
+      ask: 'The molecular geometry is tetrahedral.',
     })
     expect(shapeFeedback('C', ch4, 'seesaw').coach).toEqual({
-      lead: 'Seesaw is the shape for 4 atoms and 1 lone pair around the middle atom.',
+      lead: 'Seesaw is the molecular geometry for 4 atoms and 1 lone pair around the middle atom.',
       why: 'Carbon has 4 atoms and no lone pairs around it.',
-      ask: 'The shape is tetrahedral.',
+      ask: 'The molecular geometry is tetrahedral.',
     })
     const xef2 = shapeInfoFor(solveLikeAStudent('XeF2'))!
-    expect(shapeFeedback('Xe', xef2, 'bent').coach!.lead).toBe('Bent is the shape for 2 atoms and 1 or 2 lone pairs around the middle atom.')
-    expect(shapeFeedback('C', ch4, 'linear').coach!.lead).toBe('Linear is the shape for 2 atoms and 0 or 3 lone pairs around the middle atom.')
+    expect(shapeFeedback('Xe', xef2, 'bent').coach!.lead).toBe('Bent is the molecular geometry for 2 atoms and 1 or 2 lone pairs around the middle atom.')
+    expect(shapeFeedback('C', ch4, 'linear').coach!.lead).toBe('Linear is the molecular geometry for 2 atoms and 0 or 3 lone pairs around the middle atom.')
   })
-  it('every wrong shape, for every problem: the claim about the picked shape matches the shape table, and the right shape is given', () => {
+  it('every wrong molecular geometry, for every problem: the claim about the pick matches the shape table, and the right one is given', () => {
     expect(shapeCases('bent')).toEqual([{ bonded: 2, lonePairs: 1 }, { bonded: 2, lonePairs: 2 }])
     expect(shapeCases('seesaw')).toEqual([{ bonded: 4, lonePairs: 1 }])
     for (const p of PROBLEMS) {
@@ -821,14 +828,14 @@ describe('step 5: the shape', () => {
           continue
         }
         const c = r.coach!
-        expect(c.ask, `${p.id} ${pick}`).toBe(`The shape is ${p.shape}.`)
+        expect(c.ask, `${p.id} ${pick}`).toBe(`The molecular geometry is ${p.shape}.`)
         expect(c.lead.toLowerCase().startsWith(pick.toLowerCase()), `${p.id} ${pick}: ${c.lead}`).toBe(true)
-        if (/would be the shape if/.test(c.lead)) {
+        if (/would be the molecular geometry if/.test(c.lead)) {
           expect(info.lonePairs, `${p.id} ${pick}`).toBeGreaterThan(0)
           expect(classify(info.bonded, 0)!.shape, `${p.id} ${pick}`).toBe(pick)
         }
-        if (/is the arrangement of all/.test(c.lead)) expect(info.geometry, `${p.id} ${pick}`).toBe(pick)
-        if (/is the shape for/.test(c.lead)) {
+        if (/is the electron geometry: all/.test(c.lead)) expect(info.geometry, `${p.id} ${pick}`).toBe(pick)
+        if (/is the molecular geometry for/.test(c.lead)) {
           // every count named in the line is in the shape table under the picked name, with the same number of atoms
           const cases = shapeCases(pick)
           for (const k of cases) expect(classify(k.bonded, k.lonePairs)!.shape, `${p.id} ${pick}`).toBe(pick)
@@ -884,6 +891,234 @@ describe('step 5: the shape', () => {
     expect(why('SF4')).toMatch(/seats around the middle of a trigonal bipyramid/)
     expect(why('XeF4')).toMatch(/opposite sides of xenon/)
     expect(why('XeF2')).toMatch(/3 lone pairs spread evenly/)
+  })
+})
+
+describe('step 5: the electron geometry', () => {
+  // OpenStax Chemistry 2e, section 7.6: the electron-pair geometry follows the number of electron groups
+  const BY_GROUPS: Record<number, Geometry> = { 2: 'linear', 3: 'trigonal planar', 4: 'tetrahedral', 5: 'trigonal bipyramidal', 6: 'octahedral' }
+  const groupsOfPick = (g: Geometry) => Number(Object.keys(BY_GROUPS).find((n) => BY_GROUPS[Number(n)] === g))
+
+  it('asks for the electron groups, the electron geometry and then the molecular geometry, each in its own words', () => {
+    expect(groupsQuestion('N')).toEqual({ ask: 'How many electron groups are around nitrogen?', sub: 'A lone pair (2 unshared electrons on one atom) is 1 group. A bond is 1 group, even a double or triple bond.' })
+    expect(geometryQuestion('N')).toEqual({
+      ask: 'What is the electron geometry around nitrogen?',
+      sub: 'The electron geometry is how every electron group around nitrogen is spread out, lone pairs included. The groups push each other as far apart as they can get.',
+    })
+    expect(shapeQuestion('N')).toEqual({
+      ask: 'What is the molecular geometry around nitrogen?',
+      sub: 'The molecular geometry names where the atoms are. Lone pairs still take up room, and they are left out of the name.',
+    })
+    expect(geometryChoices()).toEqual(['linear', 'trigonal planar', 'tetrahedral', 'trigonal bipyramidal', 'octahedral'])
+  })
+  it('a right pick names the electron geometry and the number of groups', () => {
+    const nh3 = shapeInfoFor(solveLikeAStudent('NH3'))!
+    expect(geometryFeedback('N', nh3, 'tetrahedral')).toEqual({ right: true, text: 'The electron geometry is tetrahedral: 4 electron groups around nitrogen.', coach: null })
+  })
+  it('the electron geometry for the bonded atoms alone: the lone pairs were left out', () => {
+    const nh3 = shapeInfoFor(solveLikeAStudent('NH3'))!
+    expect(geometryFeedback('N', nh3, 'trigonal planar').coach).toEqual({
+      lead: 'Trigonal planar is the electron geometry for 3 electron groups: one for each atom bonded to nitrogen.',
+      why: 'Nitrogen also has 1 lone pair, and each lone pair is an electron group too.',
+      ask: 'Count the lone pair on nitrogen as a group too, then pick again.',
+      show: { kind: 'groups', which: 'lone' },
+    })
+    const h2o = shapeInfoFor(solveLikeAStudent('H2O'))!
+    expect(geometryFeedback('O', h2o, 'linear').coach).toMatchObject({
+      lead: 'Linear is the electron geometry for 2 electron groups: one for each atom bonded to oxygen.',
+      why: 'Oxygen also has 2 lone pairs, and each lone pair is an electron group too.',
+      ask: 'Count the 2 lone pairs on oxygen as groups too, then pick again.',
+    })
+  })
+  it('linear for xenon difluoride: the lone pairs were left out, and the card does not say linear is its molecular geometry', () => {
+    // xenon difluoride: 2 atoms and 3 lone pairs around xenon. Linear is also its molecular geometry, the
+    // next question, whose first pick is final, so the card may not confirm it.
+    const xef2 = shapeInfoFor(solveLikeAStudent('XeF2'))!
+    const r = geometryFeedback('Xe', xef2, 'linear')
+    expect(r.right).toBe(false)
+    expect(r.coach).toEqual({
+      lead: 'Linear is the electron geometry for 2 electron groups: one for each atom bonded to xenon.',
+      why: 'Xenon also has 3 lone pairs, and each lone pair is an electron group too.',
+      ask: 'Count the 3 lone pairs on xenon as groups too, then pick again.',
+      show: { kind: 'groups', which: 'lone' },
+    })
+    expect(r.text).toBe(coachText(r.coach!))
+    expect(r.text).not.toMatch(/molecular geometry/)
+  })
+  it('offers the molecular geometries of the same number of groups beside the five electron geometries', () => {
+    // written by hand from the shape table (OpenStax 7.6): the molecular geometries that 3, 4, 5 and 6 electron groups make
+    const BY: Record<number, string[]> = {
+      2: ['linear', 'trigonal planar', 'bent', 'tetrahedral', 'trigonal bipyramidal', 'octahedral'],
+      3: ['linear', 'trigonal planar', 'bent', 'tetrahedral', 'trigonal bipyramidal', 'octahedral'],
+      4: ['linear', 'trigonal planar', 'bent', 'tetrahedral', 'trigonal pyramidal', 'trigonal bipyramidal', 'octahedral'],
+      5: ['linear', 'trigonal planar', 'tetrahedral', 'trigonal bipyramidal', 'seesaw', 'T-shaped', 'octahedral'],
+      // square planar alone: a seventh pick with two long names takes a fourth row on a phone and no longer fits the panel
+      6: ['linear', 'trigonal planar', 'tetrahedral', 'trigonal bipyramidal', 'octahedral', 'square planar'],
+    }
+    for (const info of ALL_CASES) {
+      expect(geometryPicks(info), `${info.bonded}+${info.lonePairs}`).toEqual(BY[info.groups])
+      // the picks depend on the count of groups alone, so two molecules with the same count get the same picks
+      expect(geometryPicks(info)).toContain(info.geometry)
+    }
+    // water and methane both have 4 groups: the same picks, so they say nothing about the lone pairs
+    expect(geometryPicks(shapeInfoFor(solveLikeAStudent('H2O'))!)).toEqual(geometryPicks(shapeInfoFor(solveLikeAStudent('CH4'))!))
+  })
+  it('a molecular geometry picked where the electron geometry is asked: the card says what kind of name it is', () => {
+    const h2o = shapeInfoFor(solveLikeAStudent('H2O'))!
+    const r = geometryFeedback('O', h2o, 'bent')
+    expect(r.right).toBe(false)
+    expect(r.coach).toEqual({
+      lead: 'Bent is a molecular geometry: it describes where the atoms are and leaves the lone pairs out.',
+      why: 'The electron geometry describes where all 4 electron groups around oxygen point, lone pairs included.',
+      ask: 'Pick the electron geometry for 4 electron groups. It is one of these 5: linear, trigonal planar, tetrahedral, trigonal bipyramidal and octahedral.',
+      show: { kind: 'groups', which: 'all' },
+    })
+    // methane has no lone pairs, and the card reads the same way
+    const ch4 = shapeInfoFor(solveLikeAStudent('CH4'))!
+    expect(geometryFeedback('C', ch4, 'trigonal pyramidal').coach).toEqual({
+      lead: 'Trigonal pyramidal is a molecular geometry: it describes where the atoms are and leaves the lone pairs out.',
+      why: 'The electron geometry describes where all 4 electron groups around carbon point, lone pairs included.',
+      ask: 'Pick the electron geometry for 4 electron groups. It is one of these 5: linear, trigonal planar, tetrahedral, trigonal bipyramidal and octahedral.',
+      show: { kind: 'groups', which: 'all' },
+    })
+    // the second miss gives the rule and the third the answer, as for any other pick
+    expect(geometryFeedback('O', h2o, 'bent', 2).coach!.ask).toMatch(/^The electron geometry follows the number of electron groups/)
+    expect(geometryFeedback('O', h2o, 'bent', 3).coach).toEqual({ lead: 'The electron geometry is tetrahedral: 4 electron groups around oxygen.', why: '', ask: '' })
+  })
+  it('a double bond counted as 2 groups, when the board says so', () => {
+    const co2 = solveLikeAStudent('CO2')
+    const info = shapeInfoFor(co2)!
+    const f = groupFacts(co2)!
+    expect(geometryFeedback('C', info, 'tetrahedral', 1, f).coach).toEqual({
+      lead: 'Tetrahedral is the electron geometry for 4 electron groups, which counts each shared pair of a double or triple bond as its own group.',
+      why: 'The pairs in a double or triple bond sit between the same 2 atoms, so the whole bond is 1 electron group.',
+      ask: 'Count each bond on carbon once, then pick again.',
+      show: { kind: 'groups', which: 'multiple' },
+    })
+    // without the board's bonds (the shapes quiz), the card says what the pick goes with
+    expect(geometryFeedback('C', info, 'tetrahedral').coach).toEqual({
+      lead: 'Tetrahedral is the electron geometry for 4 electron groups.',
+      why: 'Carbon has 2 electron groups around it.',
+      ask: 'Pick the electron geometry for 2 electron groups.',
+    })
+  })
+  it('gives the rule on the second miss and the answer only on the third', () => {
+    const co2 = solveLikeAStudent('CO2')
+    const info = shapeInfoFor(co2)!
+    const f = groupFacts(co2)!
+    expect(geometryFeedback('C', info, 'octahedral', 2, f).coach).toEqual({
+      lead: 'Octahedral is the electron geometry for 6 electron groups.',
+      why: 'Carbon has 2 electron groups around it.',
+      ask: 'The electron geometry follows the number of electron groups: 2 is linear, 3 is trigonal planar, 4 is tetrahedral, 5 is trigonal bipyramidal and 6 is octahedral.',
+    })
+    expect(geometryFeedback('C', info, 'octahedral', 3, f).coach).toEqual({ lead: 'The electron geometry is linear: 2 electron groups around carbon.', why: '', ask: '' })
+  })
+  it('every wrong pick, for every problem and every case of the shape table: each claim is true, and no early miss names the answer', () => {
+    const boards = PROBLEMS.map((p) => {
+      const s = solveLikeAStudent(p.id)
+      return { id: p.id, center: p.center, info: shapeInfoFor(s)!, f: groupFacts(s) }
+    })
+    const cases = ALL_CASES.map((info) => ({ id: `${info.bonded}+${info.lonePairs}`, center: 'C' as const, info, f: null }))
+    let checked = 0
+    for (const { id, center, info, f } of [...boards, ...cases]) {
+      expect(BY_GROUPS[info.groups], id).toBe(info.geometry)
+      for (const pick of geometryPicks(info)) {
+        if (pick === info.geometry) {
+          expect(geometryFeedback(center, info, pick, 1, f).right, id).toBe(true)
+          continue
+        }
+        for (const tries of [1, 2, 3]) {
+          const r = geometryFeedback(center, info, pick, tries, f)
+          const c = r.coach!
+          const what = `${id} ${pick} try ${tries}: ${r.text}`
+          expect(r.right, what).toBe(false)
+          if (tries >= 3) {
+            expect(c.lead, what).toBe(`The electron geometry is ${info.geometry}: ${info.groups} electron groups around ${lower(center)}.`)
+            continue
+          }
+          checked++
+          expect(c.lead.toLowerCase().startsWith(pick.toLowerCase()), what).toBe(true)
+          // the answer is held back: no first or second miss names the right electron geometry outside the rule
+          expect(`${c.lead} ${c.why}`, what).not.toMatch(new RegExp(`\\b${info.geometry}\\b`, 'i'))
+          // no card says which name is this molecule's molecular geometry: that question comes next and its first pick is final
+          expect(r.text, what).not.toMatch(/the molecular geometry|is where the/i)
+          if (!(geometryChoices() as string[]).includes(pick)) {
+            // a name only a molecular geometry has: the card lists all five electron geometries and picks none of them out
+            expect(c.lead, what).toBe(`${pick.charAt(0).toUpperCase()}${pick.slice(1)} is a molecular geometry: it describes where the atoms are and leaves the lone pairs out.`)
+            expect(c.why, what).toBe(`The electron geometry describes where all ${info.groups} electron groups around ${lower(center)} point, lone pairs included.`)
+            if (tries === 1) expect(c.ask, what).toBe(`Pick the electron geometry for ${info.groups} electron groups. It is one of these 5: linear, trigonal planar, tetrahedral, trigonal bipyramidal and octahedral.`)
+            continue
+          }
+          if (tries === 1) expect(c.ask, what).not.toMatch(new RegExp(`\\b${info.geometry}\\b`, 'i'))
+          const n = /for (\d+) electron groups?/.exec(c.lead)
+          if (n) expect(BY_GROUPS[Number(n[1])], what).toBe(pick)
+          if (/one for each atom bonded/.test(c.lead)) {
+            expect(Number(n![1]), what).toBe(info.bonded)
+            expect(info.lonePairs, what).toBeGreaterThan(0)
+          }
+          if (/each shared pair/.test(c.lead)) {
+            expect(f, what).not.toBeNull()
+            expect(f!.bondPairs, what).toBeGreaterThan(f!.bonded)
+            expect(groupsOfPick(pick as Geometry), what).toBe(f!.bondPairs + f!.lonePairs)
+          }
+          const has = /has (\d+) electron groups? around it/.exec(c.why)
+          if (has) expect(Number(has[1]), what).toBe(info.groups)
+          const also = /also has (\d+) lone pairs?/.exec(c.why)
+          if (also) expect(Number(also[1]), what).toBe(info.lonePairs)
+          const all = /all (\d+) electron groups around \w+, and (\d+) of them (?:is a lone pair|are lone pairs)/.exec(c.why)
+          if (all) expect([Number(all[1]), Number(all[2])], what).toEqual([info.groups, info.lonePairs])
+          if (c.show?.kind === 'groups' && c.show.which === 'lone') expect(info.lonePairs, what).toBeGreaterThan(0)
+          if (c.show?.kind === 'groups' && c.show.which === 'multiple') expect(f!.bondPairs, what).toBeGreaterThan(f!.bonded)
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(200)
+  })
+  it('a molecule of two atoms: both geometries are linear, with no middle atom and no count of groups named', () => {
+    // iodine monofluoride, hydrogen chloride and nitrogen, as an exercise can hold them
+    const boards = { IF: star(['I', 'F'], [1]).s, HCl: star(['H', 'Cl'], [1]).s, N2: star(['N', 'N'], [3]).s }
+    for (const [id, s] of Object.entries(boards)) {
+      const info = shapeOf(s)!
+      const center = s.atoms[0]!.el
+      expect(info.diatomic, id).toBe(true)
+      expect(geometryFeedback(center, info, 'linear'), id).toEqual({ right: true, text: 'Linear: a molecule of 2 atoms always sits on a straight line.', coach: null })
+      expect(shapeFeedback(center, info, 'linear'), id).toEqual({ right: true, text: 'Linear: a molecule of 2 atoms always sits on a straight line.', coach: null })
+      const lines: string[] = []
+      for (const pick of geometryChoices()) {
+        if (pick === 'linear') continue
+        for (const tries of [1, 2, 3]) {
+          const r = geometryFeedback(center, info, pick, tries, groupFacts(s))
+          expect(r.right, `${id} ${pick}`).toBe(false)
+          lines.push(r.text)
+          // the answer waits for the third try
+          if (tries < 3) expect(r.text, `${id} ${pick} ${tries}`).not.toMatch(/linear/i)
+          else expect(r.coach!.lead, `${id} ${pick}`).toBe('Linear: a molecule of 2 atoms always sits on a straight line.')
+        }
+        expect(geometryFeedback(center, info, pick).coach, `${id} ${pick}`).toEqual({
+          lead: `${pick.charAt(0).toUpperCase()}${pick.slice(1)} does not fit a molecule of 2 atoms.`,
+          why: '2 atoms always sit on a straight line, whatever lone pairs they have, so the electron geometry and the molecular geometry have the same name.',
+          ask: 'Pick the name for 2 atoms on a straight line.',
+        })
+      }
+      for (const pick of ALL_SHAPES) {
+        if (pick === 'linear') continue
+        const r = shapeFeedback(center, info, pick)
+        expect(r.coach, `${id} ${pick}`).toEqual({ lead: `${pick.charAt(0).toUpperCase()}${pick.slice(1)} does not fit a molecule of 2 atoms.`, why: '2 atoms always sit on a straight line, whatever lone pairs they have.', ask: 'The molecular geometry is linear.' })
+        lines.push(r.text)
+      }
+      for (const line of lines) expect(line, `${id}: ${line}`).not.toMatch(/middle atom|electron groups?\b|\d+ groups?\b/i)
+    }
+  })
+  it('hints follow the question that is open', () => {
+    const nh3 = solveLikeAStudent('NH3')
+    expect(hintsFor('shape', P('NH3'), nh3, false, false, 'geometry')).toEqual([
+      'Each electron group around nitrogen is a bonded atom or a lone pair, and the groups spread as far apart as they can.',
+      'The electron geometry follows the number of electron groups: 2 is linear, 3 is trigonal planar, 4 is tetrahedral, 5 is trigonal bipyramidal and 6 is octahedral.',
+    ])
+    expect(hintsFor('shape', P('NH3'), nh3, false, false, 'molecular')).toEqual([
+      'The molecular geometry names where the atoms are. Start from the electron geometry, then leave out the corners that hold lone pairs.',
+      'Nitrogen has 3 bonded atoms and 1 lone pair.',
+    ])
   })
 })
 
@@ -973,15 +1208,15 @@ describe('step 6: polar bonds and the net dipole', () => {
   })
   it('a right answer says why, the way the slides reason', () => {
     expect(net('CO2', false)).toEqual({ right: true, text: 'Carbon dioxide is nonpolar. The 2 C–O dipoles are the same size and point in opposite directions, so they cancel.', coach: null })
-    expect(net('H2O', true).text).toBe('Water is polar. The shape is bent, so the 2 O–H dipoles do not cancel. They add up to a net dipole.')
-    expect(net('NH3', true).text).toBe('Ammonia is polar. The shape is trigonal pyramidal, so the 3 N–H dipoles do not cancel. They add up to a net dipole.')
+    expect(net('H2O', true).text).toBe('Water is polar. The molecular geometry is bent, so the 2 O–H dipoles do not cancel. They add up to a net dipole.')
+    expect(net('NH3', true).text).toBe('Ammonia is polar. The molecular geometry is trigonal pyramidal, so the 3 N–H dipoles do not cancel. They add up to a net dipole.')
     expect(net('CH4', false).text).toBe('Methane is nonpolar. ΔEN for C–H is 0.4, which is a nonpolar bond, so there are no bond dipoles to add up.')
     expect(net('CH2O', true).text).toBe('Formaldehyde is polar. The C–O bond is polar and the 2 C–H bonds are nonpolar, so nothing cancels the C–O dipole.')
     expect(net('HCN', true).text).toBe('Hydrogen cyanide is polar. The C–N bond is polar and the C–H bond is nonpolar, so nothing cancels the C–N dipole.')
     expect(net('SF6', false).text).toBe('Sulfur hexafluoride is nonpolar. The 6 S–F dipoles are the same size and point to the corners of an octahedron, so they cancel.')
     expect(net('XeF4', false).text).toBe('Xenon tetrafluoride is nonpolar. The 4 Xe–F dipoles are the same size and point to the corners of a square, so they cancel.')
     expect(net('CO3 2-', false).text).toBe('The bond dipoles in the carbonate ion cancel. The 3 C–O dipoles are the same size and point to the corners of a flat triangle, so they cancel.')
-    expect(net('NO2-', true).text).toBe('The bond dipoles in the nitrite ion do not cancel. The shape is bent, so the 2 N–O dipoles do not cancel. They add up to a net dipole.')
+    expect(net('NO2-', true).text).toBe('The bond dipoles in the nitrite ion do not cancel. The molecular geometry is bent, so the 2 N–O dipoles do not cancel. They add up to a net dipole.')
   })
   it('a wrong answer names the rule that was missed and gives the answer', () => {
     // polar bonds taken for a polar molecule
@@ -993,7 +1228,7 @@ describe('step 6: polar bonds and the net dipole', () => {
     // a drawing that looks even taken for dipoles that cancel
     expect(net('H2O', false).coach).toEqual({
       lead: 'Bond dipoles cancel only when the bonds are spread evenly around the middle atom.',
-      why: 'The shape is bent, so the 2 O–H dipoles do not cancel. They add up to a net dipole.',
+      why: 'The molecular geometry is bent, so the 2 O–H dipoles do not cancel. They add up to a net dipole.',
       ask: 'Water is polar.',
     })
     expect(net('CH4', true).coach).toMatchObject({ lead: 'Methane has no polar bonds.', ask: 'Methane is nonpolar.' })
@@ -1299,7 +1534,7 @@ describe('step 7: sigma and pi bonds, hybridization', () => {
     expect(profile(null, solveLikeAStudent('H2O'))[0]).toEqual({ label: 'Polarity', value: 'Polar' })
     // one bond between two atoms: no hybridization row
     expect(profile(null, star(['H', 'F'], [1]).s)).toEqual([{ label: 'Polarity', value: 'Polar' }, { label: 'Sigma and pi bonds', value: '1 sigma, 0 pi' }])
-    expect(finishedLine(P('H2O'))).toBe('That is everything for water: its Lewis structure, shape, polarity and bonding.')
+    expect(finishedLine(P('H2O'))).toBe('That is everything for water: its Lewis structure, electron geometry, molecular geometry, polarity and bonding.')
   })
 })
 
@@ -1326,6 +1561,11 @@ describe('refusals and hints', () => {
   })
 })
 
+/** Molecules of two atoms: hydrogen chloride, iodine monofluoride, nitrogen and oxygen. */
+function twoAtomBoards(): Structure[] {
+  return [star(['H', 'Cl'], [1]).s, star(['I', 'F'], [1]).s, star(['N', 'N'], [3]).s, star(['O', 'O'], [2]).s]
+}
+
 /** Boards that only free build can hold: aluminum fluoride (ΔEN 2.5), ozone, and ethane (two middle atoms). */
 function freeBoards(): Structure[] {
   const alf3 = star(['Al', 'F', 'F', 'F'], [1, 1, 1]).s
@@ -1345,6 +1585,39 @@ function freeBoards(): Structure[] {
 
 describe('free build: electronegativity and dipoles', () => {
   const [alf3, o3, ethane] = freeBoards()
+  it('the triiodide ion: no bond is polar by ΔEN, the dipoles from the formal charges cancel, and the net line is a sentence', () => {
+    // I3−: 22 electrons, 2 single bonds and 3 lone pairs on the middle iodine, which carries the −1. Linear, so the 2 dipoles cancel.
+    const i3 = drawn('I', ['I', 'I'], [1, 1], 6).s
+    const m = moleculePolarity(i3)!
+    expect(m.polar).toBe(false)
+    expect(freeNetLine(m, shapeOf(i3))).toBe('Nonpolar. The dipoles that the formal charges make are the same size and point in opposite directions, so they cancel.')
+  })
+  it('two carbon atoms with formal charges +1 and −1: the bond line and the net line both say polar by charge', () => {
+    let s: Structure = EMPTY
+    const a = addAtom(s, 'C')
+    s = a.s
+    const b = addAtom(s, 'C')
+    s = b.s
+    for (let k = 0; k < 3; k++) {
+      const op = share(s, a.id, b.id)
+      if (!op.ok) throw new Error('share')
+      s = op.s
+    }
+    const off = removeElectron(s, a.id)
+    if (!off.ok) throw new Error('remove')
+    const on = addElectron(off.s, b.id)
+    if (!on.ok) throw new Error('add')
+    s = on.s
+    const m = moleculePolarity(s)!
+    expect(m.polar).toBe(true)
+    const k = bondKindsOn(s)[0]!
+    expect(k.byCharge).toBe(true)
+    expect(freeBondLine(k.a, k.b, k.pol, k.byCharge)).toBe('ΔEN = 0, but where the two atoms have different formal charges, the shared electrons sit closer to the atom with the negative charge.')
+    expect(freeNetLine(m, shapeOf(s))).toBe('Polar. The atoms are the same, so ΔEN is 0, but the formal charges are not the same. The electrons sit closer to the atom with the negative formal charge, and that dipole is the net dipole.')
+    // two unlike atoms, and two like atoms with equal charges, are unchanged
+    const n2 = drawn('N', ['N'], [3], 2).s
+    expect(bondKindsOn(n2)[0]!.byCharge).toBe(false)
+  })
   it('works each kind of bond from the course table, middle atom first', () => {
     const water = solveLikeAStudent('H2O')
     expect(bondKindsOn(water).map((k) => [k.a, k.b, k.pol.delta])).toEqual([['O', 'H', '1.4']])
@@ -1365,6 +1638,28 @@ describe('free build: electronegativity and dipoles', () => {
   it('lists a chain’s bonds once per pair of elements, the less electronegative atom first', () => {
     expect(polarity(ethane!)).toBeNull()
     expect(bondKindsOn(ethane!).map((k) => `${k.a}–${k.b} ${k.pol.kind}`)).toEqual(['C–C nonpolar', 'H–C nonpolar'])
+  })
+  it('a molecule of two atoms: no middle atom, both geometries linear, no bond angle, and the one bond dipole is the net dipole', () => {
+    // hydrogen chloride (ΔEN 3.0 − 2.1 = 0.9), iodine monofluoride (4.0 − 2.5 = 1.5) and nitrogen (3.0 − 3.0 = 0), with chlorine placed first
+    const hcl = star(['Cl', 'H'], [1]).s
+    const iF = star(['I', 'F'], [1]).s
+    const n2 = star(['N', 'N'], [3]).s
+    for (const s of [hcl, iF, n2]) expect(shapeOf(s), 'two atoms').toMatchObject({ diatomic: true, geometry: 'linear', shape: 'linear' })
+    expect(twoAtomsLine('H', 'Cl')).toBe('There is no middle atom. The hydrogen atom and the chlorine atom sit on a straight line, so the molecular geometry is linear and there is no bond angle. The electron geometry is given as linear too.')
+    expect(twoAtomsLine('N', 'N')).toBe('There is no middle atom. The 2 nitrogen atoms sit on a straight line, so the molecular geometry is linear and there is no bond angle. The electron geometry is given as linear too.')
+    expect(shapeReadout(null, 'Cl', shapeOf(hcl)!, false, ['H', 'Cl'])).toEqual({ groups: '', arrangement: 'linear', shape: 'linear', angle: 'none (2 atoms)', why: twoAtomsLine('H', 'Cl') })
+    // the bond is named with the less electronegative atom first, whichever atom was placed first
+    expect(bondKindsOn(hcl).map((k) => `${k.a}–${k.b} ${k.pol.delta}`)).toEqual(['H–Cl 0.9'])
+    expect(bondKindsOn(iF).map((k) => `${k.a}–${k.b} ${k.pol.delta}`)).toEqual(['I–F 1.5'])
+    expect(freeNetLine(polarity(hcl)!, shapeOf(hcl))).toBe('Polar. The H–Cl bond is the only bond, so its dipole is the net dipole.')
+    expect(freeNetLine(polarity(iF)!, shapeOf(iF))).toBe('Polar. The I–F bond is the only bond, so its dipole is the net dipole.')
+    expect(freeNetLine(polarity(n2)!, shapeOf(n2))).toBe('Nonpolar. The N–N bond is nonpolar, and a molecule of 2 atoms has no other bond, so there is no net dipole.')
+    // no sentence on these boards talks about a middle atom they do not have
+    for (const s of [hcl, iF, n2]) {
+      const info = shapeOf(s)!
+      const lines = [...checkRows(null, s).map((r) => r.text), ...bondKindsOn(s).map((k) => freeBondLine(k.a, k.b, k.pol, k.byCharge)), freeNetLine(polarity(s)!, info), ...Object.values(shapeReadout(null, s.atoms[0]!.el, info, false, [s.atoms[0]!.el, s.atoms[1]!.el])), ...profile(null, s).map((r) => `${r.label} ${r.value}`)]
+      for (const line of lines) expect(line.replace('There is no middle atom.', ''), line).not.toMatch(/middle atom/i)
+    }
   })
   it('says polar or nonpolar for the whole molecule, with the reason', () => {
     const water = solveLikeAStudent('H2O')
@@ -1424,6 +1719,9 @@ describe('every sentence the guide can show', () => {
       for (let n = 2; n <= 6; n++) if (n !== f.groups) for (let tries = 1; tries <= 2; tries++) out.push(...parts(groupsCoach(p.center, f, n, tries)))
       out.push(groupsRight(p.center, f))
       for (const name of ALL_SHAPES) out.push(shapeFeedback(p.center, info, name).text, ...parts(shapeFeedback(p.center, info, name).coach))
+      out.push(groupsQuestion(p.center).ask, groupsQuestion(p.center).sub, geometryQuestion(p.center).ask, geometryQuestion(p.center).sub, shapeQuestion(p.center).ask, shapeQuestion(p.center).sub)
+      for (const g of geometryChoices()) for (let tries = 1; tries <= 3; tries++) out.push(geometryFeedback(p.center, info, g, tries, f).text, ...parts(geometryFeedback(p.center, info, g, tries, f).coach), ...parts(geometryFeedback(p.center, info, g, tries).coach))
+      for (const at of ['geometry', 'molecular'] as const) out.push(...hintsFor('shape', p, done, false, false, at))
       const r = shapeReadout(p, p.center, info)
       out.push(r.groups, r.arrangement, r.shape, r.angle, r.why ?? '')
       // steps 6 and 7: the questions, every right line, and every explanation of every wrong answer
@@ -1455,11 +1753,25 @@ describe('every sentence the guide can show', () => {
       }
     }
     out.push(DIPOLE_WORDS.table, DIPOLE_WORDS.bondKey, DIPOLE_WORDS.netKey, NET_SIDE, ...Object.values(FREE_POLAR_WORDS))
-    // free build: every finished problem, plus the boards free build adds (an ionic bond, ozone, a chain)
-    for (const s of [...PROBLEMS.map((p) => solveLikeAStudent(p.id)), ...freeBoards()]) {
+    // free build: every finished problem, plus the boards free build adds (an ionic bond, ozone, a chain, molecules of two atoms)
+    for (const s of [...PROBLEMS.map((p) => solveLikeAStudent(p.id)), ...freeBoards(), ...twoAtomBoards()]) {
       for (const k of bondKindsOn(s)) out.push(freeBondLine(k.a, k.b, k.pol, k.byCharge))
       const m = polarity(s)
-      if (m) out.push(freeNetLine(m, shapeInfoFor(s)))
+      if (m) out.push(freeNetLine(m, shapeOf(s)))
+      const info = shapeOf(s)
+      if (info?.diatomic) out.push(...Object.values(shapeReadout(null, s.atoms[0]!.el, info, false, [s.atoms[0]!.el, s.atoms[1]!.el])).filter((x): x is string => !!x))
+      if (info?.diatomic) {
+        for (const g of geometryChoices()) for (let tries = 1; tries <= 3; tries++) out.push(geometryFeedback(s.atoms[0]!.el, info, g, tries).text)
+        for (const name of ALL_SHAPES) out.push(shapeFeedback(s.atoms[0]!.el, info, name).text)
+      }
+    }
+    for (const c of ALL_CASES) {
+      for (const g of geometryChoices()) {
+        for (let tries = 1; tries <= 3; tries++) {
+          const co = geometryFeedback('C', c, g, tries).coach
+          if (co) out.push(co.lead, co.why, co.ask)
+        }
+      }
     }
     // the cards of the key terms, for free build and with each problem on screen
     for (const p of [null, ...PROBLEMS]) {
@@ -1514,8 +1826,10 @@ describe('every sentence the guide can show', () => {
       }
     }
     expect(lines.filter((line) => /pushes cancel/.test(line)).length).toBeGreaterThan(0)
-    // "Bond angle" is a label in the table of results, and "polar molecule" is reached from the card for "polar"
-    expect(BASE_TERMS.filter((id) => !found.has(id))).toEqual(['bond-angle', 'polar-molecule'])
+    // "polar molecule" is reached from the card for "polar". "Bond angle" is a label in the table of
+    // results, and a sentence says so too: a molecule of two atoms has no bond angle
+    expect(lines.filter((line) => !cards.has(line) && termPieces(line).some((x) => x.term === 'bond-angle'))).toEqual([twoAtomsLine(), twoAtomsLine('H', 'Cl'), twoAtomsLine('I', 'F'), twoAtomsLine('N', 'N'), twoAtomsLine('O', 'O')].filter((line) => lines.includes(line)))
+    expect(BASE_TERMS.filter((id) => !found.has(id))).toEqual(['polar-molecule'])
   })
   it('names the atom: no sentence starts with "It"', () => {
     for (const line of lines) expect(line, line).not.toMatch(/(^|\. )It /)

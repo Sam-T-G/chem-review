@@ -6,10 +6,10 @@ import { ELEMENTS, EL_ORDER, type El } from '../src/chem/elements'
 import { HYBRIDS, domainsOf, hybridFor, sigmaPi } from '../src/chem/orbitals'
 import { COURSE_EN, bondPolarity, courseEN, moleculePolarity, netAsSeen, type SeenBond } from '../src/chem/polarity'
 import { PROBLEMS, speciesOf } from '../src/chem/problems'
-import type { V3 } from '../src/chem/repulsion'
+import { idealDirs, type V3 } from '../src/chem/repulsion'
 import { addElectron, formalCharge, netCharge, share, type Structure } from '../src/chem/structure'
 import { shapeOf } from '../src/chem/vsepr'
-import { solveLikeAStudent, star } from './helpers'
+import { drawn, solveLikeAStudent, star } from './helpers'
 
 const must = (op: ReturnType<typeof share>): Structure => {
   if (!op.ok) throw new Error(op.why)
@@ -120,6 +120,47 @@ describe('molecular polarity: add the bond dipoles in the shape', () => {
     const p = moleculePolarity(ozone)!
     expect(p.kinds[0]!.polarity).toMatchObject({ delta: '0.0', kind: 'nonpolar' })
     expect(p).toMatchObject({ polar: true, why: 'charges' })
+  })
+  it('ozone: the outer two oxygens share the −1, so the net dipole runs along the bisector, from the middle oxygen out', () => {
+    // the slides: +1 on the middle oxygen, −1 shared by the outer two. Each outer oxygen counts −1/2, so both
+    // bonds carry the same gap (1.5) and the two arrows are the same length, whichever drawing is on the board.
+    for (const orders of [[2, 1], [1, 2]]) {
+      // the middle oxygen keeps one lone pair; each outer oxygen fills to 8
+      const ozone = drawn('O', ['O', 'O'], orders, 2).s
+      expect(ozone.atoms.map((a) => formalCharge(ozone, a.id)), `${orders}`).toEqual(orders[0] === 2 ? [1, 0, -1] : [1, -1, 0])
+      const p = moleculePolarity(ozone)!
+      expect(p, `${orders}`).toMatchObject({ polar: true, why: 'charges' })
+      expect(p.bonds.map((b) => b.out), `${orders}`).toEqual([1, 1])
+      expect(p.bonds[0]!.size, `${orders}`).toBeCloseTo(p.bonds[1]!.size)
+      // in the textbook seats: the net dipole lies along the sum of the two bond directions
+      const [a, b] = idealDirs(2, 1)!
+      const bisector = [a![0] + b![0], a![1] + b![1], a![2] + b![2]]
+      const len = Math.hypot(bisector[0]!, bisector[1]!, bisector[2]!)
+      for (let k = 0; k < 3; k++) expect(p.net![k], `${orders} axis ${k}`).toBeCloseTo(bisector[k]! / len)
+      // as a viewer sees it: the outer oxygens hang below the middle one, 117° apart, so the arrow points straight down
+      const seen: SeenBond[] = p.bonds.map((x, i) => ({ atomId: x.atomId, dir: [(i === 0 ? -1 : 1) * Math.sin((58.5 * Math.PI) / 180), -Math.cos((58.5 * Math.PI) / 180), 0] }))
+      const net = netAsSeen(p, seen)!
+      expect(net.x, `${orders}`).toBeCloseTo(0)
+      expect(net.y, `${orders}`).toBeCloseTo(-1)
+    }
+  })
+  it('gives no bond dipole to two different elements with the same table value (the ozone rule is for one element)', () => {
+    // PH2−: P–H is 2.1 − 2.1 = 0.0, nonpolar. Phosphorus carries −1 (5 − 4 − 2), but P and H are different
+    // elements, so there is no bond dipole and nothing to add.
+    const ph2 = drawn('P', ['H', 'H'], [1, 1], 4).s
+    expect(formalCharge(ph2, ph2.atoms[0]!.id)).toBe(-1)
+    const p = moleculePolarity(ph2)!
+    expect(p).toMatchObject({ polar: false, why: 'no-polar-bonds', net: null })
+    expect(p.bonds.map((b) => b.out)).toEqual([0, 0])
+    // CS3 2−: C–S is 2.5 − 2.5 = 0.0; one C=S and two C–S with −1 on each single-bonded sulfur, as carbonate
+    // is drawn. No bond is polar, so the ion is nonpolar.
+    const cs3 = drawn('C', ['S', 'S', 'S'], [2, 1, 1], 0).s
+    expect(netCharge(cs3)).toBe(-2)
+    expect(moleculePolarity(cs3)).toMatchObject({ polar: false, why: 'no-polar-bonds', net: null })
+    // NCl4+: N–Cl is 3.0 − 3.0 = 0.0, nitrogen carries +1, and still no bond is polar
+    const ncl4 = drawn('N', ['Cl', 'Cl', 'Cl', 'Cl'], [1, 1, 1, 1], 0).s
+    expect(netCharge(ncl4)).toBe(1)
+    expect(moleculePolarity(ncl4)).toMatchObject({ polar: false, why: 'no-polar-bonds' })
   })
   it('flags the cases where the answer depends on which seats unlike atoms take', () => {
     // PCl3F2: five groups, two kinds of outer atom

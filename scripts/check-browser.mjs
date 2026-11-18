@@ -409,18 +409,62 @@ async function solve(p, wrong = {}) {
   }
   await press(`[data-key="grp-${groups}"]`)
   ok(await page.locator('.mb-coach').count() === 0, `${p.id}: the right group count clears the explanation`)
+  // the electron geometry comes next: section 7.6 gives one for each number of groups
+  const geometry = { 2: 'linear', 3: 'trigonal planar', 4: 'tetrahedral', 5: 'trigonal bipyramidal', 6: 'octahedral' }[groups]
+  // the choices grow into place, then the panel scrolls all of them into view: wait for that before looking for the glow
+  const inView = (sel) => page.waitForFunction((sel) => { const el = document.querySelector(sel); const r = el?.getBoundingClientRect(); const v = el?.closest('.mb-scroll')?.getBoundingClientRect(); return !!r && !!v && r.height > 0 && r.top >= v.top - 1 && r.bottom <= v.bottom + 1 }, sel, { timeout: 6000 }).then(() => true, () => false)
+  ok(await inView('[data-cue="geometry"]'), `${p.id}: the electron geometry choices come fully into view`)
+  await cued(`${p.id} electron geometry`, 'ask', 'geometry', '[data-cue="geometry"]')
+  ok(/^What is the electron geometry around /.test((await text('.mb-q')).trim()) && await page.locator('[data-act="shape"]').count() === 0, `${p.id}: step 5 asks for the electron geometry before the molecular geometry`)
+  ok((await state()).view === 'flat', `${p.id}: the model stays flat while the electron geometry is asked`)
+  await shot(`${p.id.replace(/\W/g, '')}-electron-geometry`)
+  // the picks hold the five electron geometries and the molecular geometries that this many groups can make
+  const FIVE = ['linear', 'trigonal planar', 'tetrahedral', 'trigonal bipyramidal', 'octahedral']
+  const picks = await page.locator('[data-act="geometry"]').evaluateAll((els) => els.map((el) => el.dataset.name))
+  ok(FIVE.every((g) => picks.includes(g)) && picks.length === { 2: 6, 3: 6, 4: 7, 5: 7, 6: 6 }[groups] && picks.some((g) => !FIVE.includes(g)), `${p.id}: the electron geometry picks are the five electron geometries and the molecular geometries of ${groups} groups (${picks.join(', ')})`)
+  let missed = 0
+  for (const w of wrong.geometry ?? []) {
+    const before = (await points()).ringed
+    await press(`[data-key="geo-${w.pick}"]`)
+    const lead = (await text('.mb-coach-lead')).trim()
+    ok(w.says.test(lead), `${p.id}: picking ${w.pick} for the electron geometry is explained (${lead})`)
+    ok(await page.locator(`[data-key="geo-${w.pick}"][data-state="wrong"]`).count() === 1 && (await state()).view === 'flat', `${p.id}: the wrong pick is marked and the student picks again`)
+    const said = await text('.mb-coach')
+    // a molecular geometry picked for the electron geometry: the card lists all five electron geometries and picks none of them out
+    if (w.five) ok(FIVE.every((g) => new RegExp(`\\b${g}\\b`, 'i').test(said)) && !/the molecular geometry/i.test(said), `${p.id}: the card for ${w.pick} lists all five electron geometries and does not say which is the molecular geometry (${said.replace(/\s+/g, ' ')})`)
+    // the first miss holds the answer back; the second gives the rule for every count (D-0033)
+    else if (missed === 0) ok(!new RegExp(`\\b${geometry}\\b`, 'i').test(said), `${p.id}: the first miss does not give the electron geometry away`)
+    missed++
+    if (w.rings) {
+      let ringed = 0
+      for (let i = 0; i < 60 && ringed < w.rings; i++) { await wait(200); ringed = (await points()).ringed - before }
+      await wait(500)
+      ringed = (await points()).ringed - before
+      ok(ringed === w.rings, `${p.id}: the board draws ${w.rings} rings for that pick (got ${ringed})`)
+    }
+    if (w.shot) await shot(w.shot)
+  }
+  await press(`[data-key="geo-${geometry}"]`)
+  ok(await page.locator('.mb-coach').count() === 0 && new RegExp(`The electron geometry is ${geometry}: ${groups} electron groups around`, 'i').test(await text('.mb-step .mb-fb')), `${p.id}: the right electron geometry is confirmed (${(await text('.mb-step')).replace(/\s+/g, ' ').slice(0, 160)})`)
+  ok(await inView('[data-cue="shapes"]'), `${p.id}: the molecular geometry choices come fully into view`)
+  await cued(`${p.id} molecular geometry`, 'ask', 'shapes', '[data-cue="shapes"]')
+  ok(/^What is the molecular geometry around /.test((await text('.mb-q')).trim()), `${p.id}: then step 5 asks for the molecular geometry`)
   await press(`[data-key="shp-${wrong.shape ? wrong.shape.pick : p.shape}"]`)
   await wait(phone ? 2400 : 2100)
   st = await state()
   if (wrong.shape) {
     const said = await text('.mb-coach')
     ok(wrong.shape.says.test(said), `${p.id}: picking ${wrong.shape.pick} is explained (${said.replace(/\s+/g, ' ')})`)
-    ok(new RegExp(`The shape is ${p.shape}\\.`).test(said), `${p.id}: the explanation ends with the right shape`)
+    ok(new RegExp(`The molecular geometry is ${p.shape}\\.`).test(said), `${p.id}: the explanation ends with the right molecular geometry`)
     await shot(`${p.id.replace(/\W/g, '')}-wrong-shape`)
   }
   ok(st.view === 'shape', `${p.id}: the model lifts into the 3D view`)
   const shapeText = (await page.locator('.mb-readout dd.is-big').innerText()).toLowerCase()
   ok(shapeText === p.shape.toLowerCase(), `${p.id}: readout names the shape ${p.shape} (got ${shapeText})`)
+  const rows = (await page.locator('.mb-readout dt').allInnerTexts()).map((x) => x.trim())
+  ok(rows.slice(0, 4).join('|') === 'Molecular geometry|Electron geometry|Electron groups|Bond angle', `${p.id}: the readout's rows are the molecular geometry, the electron geometry, the electron groups and the bond angle (${rows.join('|')})`)
+  ok((await page.locator('.mb-readout dd').nth(1).innerText()).trim().toLowerCase() === geometry, `${p.id}: the readout gives the electron geometry ${geometry}`)
+  if (p.i === 0 || wrong.shape) await shot(`${p.id.replace(/\W/g, '')}-readout`)
   const lift = (await points()).lift
   ok(lift > 0.99, `${p.id}: lift finished (${lift.toFixed(2)})`)
   const ang = (await angles()).map((x) => Math.round(x))
@@ -953,6 +997,35 @@ async function extras() {
   st = await state()
   ok(st.atoms.length === 3 && st.view === 'shape', `free: Undo brings the cleared atoms back, on the 3D shape they were cleared from (${st.atoms.length} atoms, ${st.view})`)
 
+  // ---- a molecule of two atoms: hydrogen chloride has no middle atom (D-0033)
+  console.log('extras: two atoms in free build')
+  await press('[data-key="clear"]')
+  await wait(1600)
+  // a tap puts chlorine on the board (on a phone the row scrolls to it), then hydrogen is dragged onto it
+  await press('[data-tray="Cl"]')
+  await wait(400)
+  await drag(await centerOf('[data-tray="H"]'), await atomPoint((await state()).atoms[0].id))
+  st = await state()
+  ok(st.atoms.length === 2 && st.bonds.length === 1 && (await report()).complete, `two atoms: a hydrogen dropped on chlorine makes hydrogen chloride (${st.atoms.length} atoms, ${st.bonds.length} bonds)`)
+  await page.locator('[data-k="two-atoms"]').waitFor({ timeout: 3000 }).catch(() => {})
+  ok(/^There is no middle atom\. The hydrogen atom and the chlorine atom sit on a straight line, so the molecular geometry is linear and there is no bond angle\. The electron geometry is given as linear too\.$/.test((await text('[data-k="two-atoms"]')).trim()), `two atoms: the panel says there is no middle atom and both geometries are linear (${await text('[data-k="two-atoms"]')})`)
+  ok(/^Polar\. The H–Cl bond is the only bond, so its dipole is the net dipole\./.test((await text('[data-k="free-net"]')).replace(/\u2060/g, '').trim()), `two atoms: the H–Cl bond dipole is the net dipole (${await text('[data-k="free-net"]')})`)
+  ok(/^H–Cl Polar\. ΔEN = 3\.0 − 2\.1 = 0\.9\./.test((await text('.mb-pol li')).replace(/\u2060/g, '').replace(/\s+/g, ' ').trim()), `two atoms: the bond is worked out as H–Cl, ΔEN 0.9 (${await text('.mb-pol li')})`)
+  const middleTalk = () => mb(() => document.querySelector('.mb-panel .mb-step').textContent.replace('There is no middle atom.', '')).then((t) => /middle atom/i.test(t))
+  ok(!(await middleTalk()), 'two atoms: no other sentence in the panel talks about a middle atom')
+  await shot('free-two-atoms')
+  await press('[data-key="see-shape"]')
+  await wait(2200)
+  const twoRows = (await page.locator('.mb-readout dt').allInnerTexts()).map((x) => x.trim())
+  const twoVals = (await page.locator('.mb-readout dd').allInnerTexts()).map((x) => x.trim().toLowerCase())
+  ok(twoRows.slice(0, 3).join('|') === 'Molecular geometry|Electron geometry|Bond angle' && twoVals[0] === 'linear' && twoVals[1] === 'linear' && /^none/.test(twoVals[2]), `two atoms: the 3D table reads linear and linear, no electron groups, and no bond angle (${twoRows.join('|')} = ${twoVals.join('|')})`)
+  ok(/There is no middle atom/.test(await text('[data-k="readout-why"]')) && !(await middleTalk()), 'two atoms: the 3D table says there is no middle atom, and nothing else talks about one')
+  await shot('free-two-atoms-3d')
+  // back to the flat board, with hydrogen chloride left on it for the next check to clear
+  await press('[data-key="view-flat"]')
+  await wait(1600)
+  ok((await state()).view === 'flat' && (await state()).atoms.length === 2, 'two atoms: Flat drawing brings the flat board back with both atoms')
+
   // ---- two fingers: a second finger on the board must not take over a drag
   if (phone) {
     console.log('extras: two fingers')
@@ -1025,7 +1098,8 @@ async function extras() {
       { n: 4, says: /^4 counts every shared pair as its own group\.$/, rings: 4, shot: 'groups-coach' },
       { n: 6, says: /^6 counts the lone pairs on the outer atoms\.$/, rings: 4 },
     ],
-    shape: { pick: 'bent', says: /Bent is the shape for 2 atoms and 1 or 2 lone pairs/ },
+    geometry: [{ pick: 'tetrahedral', says: /^Tetrahedral is the electron geometry for 4 electron groups, which counts each shared pair of a double or triple bond as its own group\.$/, rings: 4, shot: 'geometry-coach' }],
+    shape: { pick: 'bent', says: /Bent is the molecular geometry for 2 atoms and 1 or 2 lone pairs/ },
     bond: /^That arrow points at carbon\.$/,
     net: /polar, and the dipoles still cancel[\s\S]*Carbon dioxide is nonpolar\./,
     sigma: /^4 counts every line as a sigma bond\.$/,
@@ -1033,7 +1107,12 @@ async function extras() {
   })
   await solve(byId('H2O'), {
     groups: [{ n: 2, says: /^2 is the number of atoms bonded to oxygen\.$/, rings: 4 }],
-    shape: { pick: 'linear', says: /Linear would be the shape if oxygen had no lone pairs/ },
+    geometry: [
+      { pick: 'bent', says: /^Bent is a molecular geometry: it describes where the atoms are and leaves the lone pairs out\.$/, rings: 8, five: true, shot: 'geometry-molecular-name' },
+      // the second miss repeats what the pick is and gives the rule, with no rings (the count question above has drawn the lone pairs' rings)
+      { pick: 'linear', says: /^Linear is the electron geometry for 2 electron groups: one for each atom bonded to oxygen\.$/ },
+    ],
+    shape: { pick: 'linear', says: /Linear would be the molecular geometry if oxygen had no lone pairs/ },
     net: /spread evenly around the middle atom[\s\S]*Water is polar\./,
     arrow: /^That arrow points against the bond arrows\.$/,
     endOn: true,
@@ -1249,7 +1328,7 @@ async function terms() {
   console.log('terms: every card, in free build')
   await press('[data-key="mode-free"]')
   await wait(900)
-  ok(all.length === 40, `cards: there are 40 key terms (${all.length})`)
+  ok(all.length === 41, `cards: there are 41 key terms (${all.length})`)
   let bad = []
   for (const id of all) {
     await mb((id) => window.__mb.showTerm(id), id)
@@ -1265,7 +1344,7 @@ async function terms() {
     })
     if (!(m.name && m.onScreen && m.art && m.sideways <= 0 && m.words && m.label)) bad.push(`${id}: ${JSON.stringify(m)}`)
   }
-  ok(bad.length === 0, `cards: each of the 40 opens with a name, a meaning, an example and a picture that fits (${bad.slice(0, 2).join(' | ')})`)
+  ok(bad.length === 0, `cards: each of the 41 opens with a name, a meaning, an example and a picture that fits (${bad.slice(0, 2).join(' | ')})`)
   await shot('term-last')
   await mb(() => window.__mb.showTerm('shape:trigonal bipyramidal'))
   await cardSettled()
@@ -1372,7 +1451,25 @@ async function terms() {
   words = await highlighted()
   ok((await state()).step === 'shape' && words.includes('electron-group') && words.includes('lone-pair') && !words.includes('bond'), `steps: the shape step highlights "electron groups" and "lone pair", and "bond" is plain by now (${words.join()})`)
   ok(!words.some((w) => w.startsWith('shape:')), 'steps: no shape is named in the text before the shape is picked')
-  await move(() => { const s = window.__mb.store; s.answerGroups(2); s.pickShape('linear') })
+  await move(() => window.__mb.store.answerGroups(2))
+  words = await highlighted()
+  ok(words.includes('electron-geometry') && !words.some((w) => w.startsWith('shape:')), `steps: the electron geometry question highlights "electron geometry", and no geometry's name (${words.join()})`)
+  card = await openTerm('electron-geometry')
+  textNow = await cardText()
+  ok(card?.name === 'Electron geometry' && /NF₃/.test(textNow) && !/\blinear\b/i.test(textNow), 'steps: the electron geometry card works on nitrogen trifluoride and never says linear, carbon dioxide\'s answer')
+  await cardFits('electron geometry')
+  await shot('term-electron-geometry')
+  await closeTerm()
+  await move(() => window.__mb.store.pickGeometry('linear'))
+  words = await highlighted()
+  ok(words.includes('shape') && !words.some((w) => w.startsWith('shape:')), `steps: the molecular geometry question highlights "molecular geometry", and the name just picked stays plain (${words.join()})`)
+  card = await openTerm('shape')
+  textNow = await cardText()
+  ok(card?.name === 'Molecular geometry' && /NF₃/.test(textNow) && !/\blinear\b/i.test(textNow), 'steps: the molecular geometry card works on nitrogen trifluoride and never says linear')
+  await cardFits('molecular geometry')
+  await shot('term-molecular-geometry')
+  await closeTerm()
+  await move(() => window.__mb.store.pickShape('linear'))
   words = await highlighted()
   ok(words.includes('shape:linear') && words.includes('bond-angle'), `steps: once the shape is picked, its name and "bond angle" are highlighted (${words.join()})`)
   card = await openTerm('shape:linear')

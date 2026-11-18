@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { El } from '../src/chem/elements'
 import { EMPTY, addAtom, share, type Structure } from '../src/chem/structure'
-import { centerDomains, classify, shapeOf } from '../src/chem/vsepr'
+import { ALL_CASES, alsoAngles, centerDomains, classify, shapeOf } from '../src/chem/vsepr'
 import { angleDeg, descend, energy, idealDirs, isTextbook, makeDomains, settle, textbookNear, tick, WEIGHT, type Dom } from '../src/chem/repulsion'
 
 /** OpenStax Chemistry 2e, Figures 7.16 and 7.19. */
@@ -285,6 +285,46 @@ describe('repulsion: groups pushed apart on a sphere settle into the textbook ar
       // ideal lists bonds first, then lone pairs, the same order makeDomains uses
       dirs!.forEach((dir, i) => (doms[i]!.dir = dir))
       expect(isTextbook(doms), `${x}+${e}`).toBe(true)
+    }
+  })
+})
+
+describe('angles a row holds besides its label', () => {
+  // Written by hand from the positions in OpenStax Chemistry 2e, section 7.6: the 2 axial positions of
+  // a trigonal bipyramid are opposite each other, 90° from the 3 equatorial ones, which are 120° apart;
+  // the 6 corners of an octahedron are 90° from their neighbors and opposite one other corner. Lone
+  // pairs take equatorial positions of a trigonal bipyramid, and 2 lone pairs take opposite corners of an octahedron.
+  const ALSO: Record<string, string[]> = {
+    '2,0': [],
+    '3,0': [],
+    '2,1': [],
+    '4,0': [],
+    '3,1': [],
+    '2,2': [],
+    '5,0': ['90°', '120°', '180°'], // each angle of "90° and 120°" alone, and axial to axial
+    '4,1': ['less than 90°', 'less than 120°', '180°'], // seesaw: the 2 axial atoms are opposite
+    '3,2': ['180°'], // T-shaped: the 2 axial atoms
+    '2,3': [], // linear: 180° is the row's own label
+    '6,0': ['180°'], // opposite corners
+    '5,1': ['180°'], // square pyramidal: opposite atoms of the square
+    '4,2': ['180°'], // square planar: opposite atoms of the square
+  }
+
+  it('matches the hand-written table for all 13 rows', () => {
+    expect(ALL_CASES.length).toBe(13)
+    for (const row of ALL_CASES) expect(alsoAngles(row.bonded, row.lonePairs), `${row.bonded},${row.lonePairs}`).toEqual(ALSO[`${row.bonded},${row.lonePairs}`])
+  })
+
+  it('never lists the row\'s own label', () => {
+    for (const row of ALL_CASES) expect(alsoAngles(row.bonded, row.lonePairs)).not.toContain(row.angle)
+  })
+
+  it('lists 180° for every row whose ideal positions put 2 atoms opposite each other, unless 180° is its label', () => {
+    for (const row of ALL_CASES) {
+      const dirs = idealDirs(row.bonded, row.lonePairs)!.slice(0, row.bonded)
+      let opposite = false
+      for (let i = 0; i < dirs.length; i++) for (let j = i + 1; j < dirs.length; j++) if (angleDeg(dirs[i]!, dirs[j]!) > 179) opposite = true
+      expect(alsoAngles(row.bonded, row.lonePairs).includes('180°'), `${row.bonded},${row.lonePairs}`).toBe(opposite && row.angle !== '180°')
     }
   })
 })

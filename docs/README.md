@@ -31,6 +31,8 @@ Every kind of knowledge about this repo has one home. Put a thing in its home an
 | [chemistry/sources.md](chemistry/sources.md) | Where every chemistry rule and number comes from, the conventions, the known gaps | chem |
 | [learning/guided-steps.md](learning/guided-steps.md) | The seven steps, the problem list, hints, the rules for words | learning |
 | [learning/wrong-answers.md](learning/wrong-answers.md) | What each wrong answer is taken for, and what the student is told | learning |
+| [learning/exercises.md](learning/exercises.md) | The exercises: the parts of the sheet, what is held back, the next-molecule rule, what is saved | learning |
+| [learning/shapes-quiz.md](learning/shapes-quiz.md) | The shapes quiz: the series, the question kinds, the rule for "known", what is saved | learning |
 | [design/look-and-motion.md](design/look-and-motion.md) | The palette, the type, the atoms' faces, what moves and when | design |
 | [platform/verify.md](platform/verify.md) | Every check, what it proves, and what each failure code means | platform |
 | [platform/expo.md](platform/expo.md) | Rules for Expo, pnpm and builds | platform |

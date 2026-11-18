@@ -6,7 +6,10 @@ What is being worked on, what comes next, and what is waiting. The lead orders i
 
 | ID | Team | Item | Notes |
 |---|---|---|---|
-| W-022 | lewis, learning, design, chem | Key terms are highlighted, and each opens a card with its meaning, an example and a picture (D-0027, D-0028) | Built and checked on the branch `lewis/key-terms` on 2026-11-16. Not committed. A commit, a push and a deploy each need Sam's go-ahead (R9) |
+| W-023 | lead, shell | Parts of the Lewis module: the contract in `parts.ts`, three routes, three home-screen cards, three saved lists (D-0030, D-0031) | Built on 2026-11-17. The contract, the routes and the saved lists are on main. The two parts are closed: `OPEN_PARTS` in `src/modules/lewis/parts.ts` and `OPEN` in `src/modules/registry.ts` are the switch, so the home screen shows one card and the module two tabs |
+| W-026 | lewis, design | The 3D model shows either geometry, a two-atom molecule gets a symmetric model, four tabs fit on a phone (`D-0036`, written when the package lands) | Being built on the branch `lewis/board-3d` (2026-11-17). Not on main |
+| W-027 | lewis, learning, design | The shapes quiz (D-0034) | Built on 2026-11-17 and closed (W-023). Three reviews found 2 answers given away and 16 smaller things (`reports/REVIEW-COPY.md`, `REVIEW-CODE.md`, `REVIEW-CHEMWORDS.md` in the run folder named in `HANDOFF.md`). The fixes are on the branch `lewis/shapes-quiz`. It opens when they are merged and checked |
+| W-028 | lewis, learning, design | The exercises (D-0035) | Built on 2026-11-17 and closed (W-023). The same reviews found a second Enter that skips a molecule, true bond angles offered as wrong answers, and about 20 smaller things. The fixes are on the branch `lewis/exercises`. They open when the fixes are merged and checked |
 
 ## Next
 
@@ -35,6 +38,10 @@ What is being worked on, what comes next, and what is waiting. The lead orders i
 
 ## Waiting on Sam
 
+- **D-0031 to D-0035 are provisional** (2026-11-17). Sam asked for the shapes quiz, the exercises, the two geometry names and 3D models for two-atom molecules (D-0030). How each is built is the build sessions' design: the parts and routes (D-0031), the pool of 43 molecules (D-0032), step 5 and the words (D-0033), the quiz (D-0034), the exercises (D-0035).
+- **The electron geometry of a molecule of two atoms.** The app answers linear for HCl and IF, because there is no middle atom. A course that treats one atom as the middle atom would answer tetrahedral (1 bond and 3 lone pairs). Sam's instructor's key settles it (D-0032, D-0033).
+- **"Molecules that do not have a center element"** was read as molecules of two atoms. Molecules with more than one middle atom (ethane) are W-007.
+- **Answers that differ from the handwritten worksheet.** The pool's answers come from the textbook rules and the course's rounded electronegativity table. Several handwritten cells on Sam's worksheet differ (CH3+, CO3 2−, IF's net dipole, ΔEN from another table). `docs/chemistry/sources.md` lists the conventions where courses differ.
 - **D-0007 is provisional.** The five-step split, the list of twenty molecules and its order, the free build mode, and bonding by dragging are the build session's reading of D-0006.
 - **D-0017 is provisional.** The three-part card for a wrong answer, with the right answer given last.
 - **D-0021 is provisional.** Polarity and bonding as steps 6 and 7 of each guided molecule, and a molecule counting as finished after step 7. Sam asked for the features and named his chapter 7 and 8 slides. Where they go is the build session's choice.
@@ -49,6 +56,9 @@ What is being worked on, what comes next, and what is waiting. The lead orders i
 
 | ID | Team | Item | Notes |
 |---|---|---|---|
+| W-022 | lewis, learning, design, chem | Key terms are highlighted, and each opens a card with its meaning, an example and a picture (D-0027, D-0028) | On main as 63c3a57 and c8f14ad, pushed and deployed on 2026-11-17 (`HANDOFF.md`, the free build entry) |
+| W-024 | chem | The exercise pool, the electron geometry on every problem, two-atom molecules in the engine (D-0032) | On main on 2026-11-17, with four fixes from a row-by-row chemistry review (`HANDOFF.md`) |
+| W-025 | lewis, learning | Step 5 asks for the electron geometry and the molecular geometry, and the two names are used in every sentence (D-0033) | On main on 2026-11-17. Three reviews, then the lead's fixes: the picks for the electron geometry hold molecular geometries too, and no card names the molecular geometry early. Provisional (D-0033) |
 | W-001 | lewis, learning | When a student gets something wrong, the app explains the wrong assumption (D-0012, D-0017, D-0018) | Committed on 2026-11-13 as a8f4cd9 |
 | W-002 | lead | Land the team structure (D-0016) | Landed on main on 2026-11-13, in the commit after a8f4cd9. Not pushed when this was written |
 | W-004 | platform | Host the web build | Live on GitHub Pages since 2026-11-13: https://sam-t-g.github.io/chem-review/ (D-0020). Published by hand with `pnpm pages:deploy` |

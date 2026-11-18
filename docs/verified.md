@@ -2,6 +2,27 @@
 
 Dated entries, newest first. Each says what was run, on which build, by whom, and what it did not cover. Add an entry when you verify something a reader would otherwise have to take on trust. A claim with no entry here has not been checked.
 
+## 2026-11-17: the two geometry names, with the shapes quiz and the exercises closed (lead session)
+
+Run in the worktree `chem-review-review` on the branch `lewis/review-modes`, on the tree that was pushed to main: the source at 8da9270, which holds main's af57d17 (the net dipole label). The web build under test was made from that source and served on port 5220.
+
+- `pnpm verify` exits 0: typecheck, lint, 882 unit tests in 17 files, `check-repo: ok`, and the production web build.
+- Browser, real input (headless Chromium with a software renderer), each run under the run's browser lock:
+  - All 20 molecules start to finish. With touch at 390 x 844: 751 checks for molecules 1 to 10 and 731 for 11 to 20, 0 failed. With a mouse at 1360 x 840: 769 checks for molecules 1 to 10 and 751 for 11 to 20, 0 failed.
+  - New in each run: the picks for the electron geometry hold the five electron geometries and the molecular geometries of that many groups (6 or 7 picks), the right pick is confirmed as "The electron geometry is ...", and every polar molecule's net dipole label is clear of the panels over the board (main's check).
+  - The extras: 409 checks with a mouse and 311 with touch, 0 failed. New in them: water's electron geometry answered "bent" gets the card that says bent is a molecular geometry, lists all five electron geometries and never says "the molecular geometry"; the board rings oxygen's 4 groups; the second miss gives the rule; a two-atom molecule in free build reads "the molecular geometry is linear ... The electron geometry is given as linear too."
+  - The key terms: 89 checks with a mouse and 81 with touch, 0 failed.
+  - Home screen, opening the module, the way back and saved progress: 92 checks with a mouse and 90 with touch, 0 failed. The home screen shows one card and the module two tabs, because both parts are closed.
+- Runs that failed on the way, and why:
+  - Phone, molecules 11 to 20, on an earlier build: SF6, BrF5 and XeF4 failed "the electron geometry choices come fully into view". Seven picks took four rows, 220 px in a 221 px panel (measured in the page). With 6 groups the picks now add square planar alone.
+  - Phone, molecules 11 to 20, on the next build: PCl5 and SF6 timed out on a tap in step 6. The lead's change to the panel's one-time scroll caused it (M-0013). The change was taken out and the run passed.
+  - Both extras runs once failed 2 checks that still expected the old sentences. The check script was corrected.
+  - "PCl5: lift finished" failed twice with a mouse (0.96 and 0.99) while two of the lead's own batches ran side by side by mistake: an earlier batch was not stopped, because an unquoted list of process ids is one word in zsh and `kill` refused it without a message. Run alone, the same run passed all 751.
+- Looked at by the lead, in screenshots: water at step 5 on desktop with "Bent" marked wrong and its card; xenon difluoride at step 5 on a phone with its 7 picks in 3 rows inside the glow; hydrogen chloride in free build on the 3D model with both geometries "Linear" and "Bond angle: none (2 atoms)".
+- Six independent reviews ran before this (chemistry, wording and code, for the quiz and exercises and then for the geometry names). `HANDOFF.md` lists what they found and what is not fixed.
+- Not checked: a real phone or tablet (W-003), Safari's engine (W-012). `scripts/check-shapes.mjs` and `scripts/check-exercise.mjs` were not run on this tree, because both parts are closed; their unit tests are in the 882. On a phone the question line of step 5 scrolls out of the panel when the picks take three rows: seen in the screenshot, not fixed.
+- The machine was shared the whole time: two fixers, one builder and another session of Sam's ran browser checks too (load average 13 to 25 on 14 cores).
+
 ## 2026-11-17: the net dipole label stays clear of the strip of checks on a phone (build session, team lewis)
 
 Run in the main checkout on `main` at c8f14ad with the change uncommitted. Load average 23 to 29 on 14 cores the whole time (`uptime`), from other sessions' browser checks.

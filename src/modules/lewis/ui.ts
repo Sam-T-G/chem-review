@@ -14,6 +14,11 @@ import {
   bondKindsOn,
   freeBondLine,
   freeNetLine,
+  geometryPicks,
+  geometryQuestion,
+  groupsQuestion,
+  shapeQuestion,
+  twoAtomsLine,
   DIPOLE_WORDS,
   HYBRIDS,
   STEPS,
@@ -81,14 +86,15 @@ import {
 } from './guide'
 import { cssVars } from '../../theme/tokens'
 import { BALL, ballStyle } from './palette'
+import { OPEN_PARTS, PARTS } from './parts'
 import { Scene, type SceneInput } from './scene'
 import * as store from './store'
 import type { State } from './store'
 
 // A bond's name ("S–F") must not break across two lines at its dash, so a word joiner follows the dash.
-const esc = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/–(?=[A-Z])/g, '–\u2060')
+export const esc = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/–(?=[A-Z])/g, '–\u2060')
 
-const ICON = {
+export const ICON = {
   check: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 10.5l3.6 3.6 7.4-8"/></svg>',
   cross: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9"/></svg>',
   undo: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 4.5L3.5 8.5l4 4"/><path d="M4 8.5h7.5a5 5 0 010 10H9"/></svg>',
@@ -107,6 +113,8 @@ export interface MountOptions {
   onSolved?: (ids: string[]) => void
   /** Called when something happens that a phone can answer with a tap of its motor. */
   onFeel?: (kind: Feel) => void
+  /** The mode the module opens in. Left out: the mode it was last in (the guided steps the first time). */
+  start?: store.Mode
 }
 export type Feel = 'land' | 'bond' | 'refuse' | 'done'
 
@@ -122,17 +130,17 @@ const GESTURE: Record<HowTo['gesture'], string> = {
   swipe: `<svg class="mb-how-icon" viewBox="-2 0 72 60" aria-hidden="true"><path class="mb-how-mark is-bond" d="M58 6v44"/><path class="mb-how-mark" d="M48 38l20-18"/>${HAND}</svg>`,
 }
 /** How the board is worked in this step: one line for each gesture, with a small picture of it. */
-function howBox(lines: HowTo[]): string {
+export function howBox(lines: HowTo[]): string {
   if (!lines.length) return ''
   return `<ul class="mb-how" data-k="how" data-kv="">${lines.map((h) => `<li>${GESTURE[h.gesture]}<span>${esc(h.text)}</span></li>`).join('')}</ul>`
 }
 
 // An atom as drawn in the panel and the tray: its symbol under a pale patch with two eyes, like the balls on the board.
 // Each element blinks on its own beat.
-const ball = (el: El, extra = '') =>
+export const ball = (el: El, extra = '') =>
   `<span class="mb-ball ${extra}" style="${ballStyle(el)};--blink:${((el.charCodeAt(0) * 37 + el.length * 11) % 50) / 10}s" aria-hidden="true"><i class="mb-eyes"></i><b>${el}</b></span>`
-const BUBBLES = '<span class="mb-bubbles" aria-hidden="true"><i></i><i></i><i></i><i></i></span>'
-const fb = (text: string | null | undefined, tone: 'info' | 'warn' | 'good') =>
+export const BUBBLES = '<span class="mb-bubbles" aria-hidden="true"><i></i><i></i><i></i><i></i></span>'
+export const fb = (text: string | null | undefined, tone: 'info' | 'warn' | 'good') =>
   text ? `<p class="mb-fb" role="status" data-tone="${tone}">${tone === 'good' ? ICON.check : tone === 'warn' ? ICON.cross : ''}<span>${rich(text)}</span></p>` : ''
 
 /** An atom's electron shells as rings around its symbol. The inner shells and their electrons
@@ -182,7 +190,7 @@ function tallyFigure(p: Problem, reveal: TallyReveal): string {
 }
 
 /** A wrong answer explained: what the answer is, why it does not fit, what to do next, and a picture when there is one. */
-const coach = (c: Coach | null | undefined, p?: Problem): string => {
+export const coach = (c: Coach | null | undefined, p?: Problem): string => {
   if (!c) return ''
   const picture = c.show?.kind === 'shells' ? shellsFigure(c.show.el) : c.show?.kind === 'tally' && p ? tallyFigure(p, c.show.reveal) : ''
   // a card keeps its own list of highlighted terms: a student who is stuck on it finds each word in it
@@ -204,7 +212,7 @@ let termsPlain: TermId[] = []
 let termsMade = 0
 /** A sentence as HTML. The first use of each key term on a screen is a button that opens the
  *  term's card. `seen` is the set a card or a list of hints keeps for itself. */
-function rich(text: string, seen: Set<string> = termsSeen): string {
+export function rich(text: string, seen: Set<string> = termsSeen): string {
   return termPieces(text, termsPlain)
     .map((piece) => {
       if (!piece.term || seen.has(piece.term)) return esc(piece.text)
@@ -615,7 +623,7 @@ function rail(s: State): string {
 }
 
 /** Main-group columns of the periodic table, periods 1 to 5, with the atoms in `mine` marked. */
-function periodicTable(mine: Set<string>, withValence: boolean): string {
+export function periodicTable(mine: Set<string>, withValence: boolean): string {
   const groups = [1, 2, 13, 14, 15, 16, 17, 18]
   const rows = [
     ['H', '', '', '', '', '', '', 'He'],
@@ -713,7 +721,7 @@ function stepBond(s: State, p: Problem): string {
   return `<p class="mb-body">${rich(bondInstruction(p))}</p>${st.done ? '' : howBox(howTo('bond', p))}${fb(st.text, st.tone)}`
 }
 
-function checklist(rows: CheckRow[]): string {
+export function checklist(rows: CheckRow[]): string {
   return `<ul class="mb-checks" data-k="checks" data-kv="" data-cue="checks">${rows
     .map(
       (r) =>
@@ -733,20 +741,23 @@ function stepCheck(s: State, p: Problem): string {
 }
 
 /** The table of what is known about the molecule. `more` adds rows under the shape's three (polarity, bonds, hybridization). */
-function readout(p: Problem | null, center: El, info: ShapeInfo, mixed: boolean, more: { label: string; value: string }[] = [], tryIt = true): string {
-  const r = shapeReadout(p, center, info, mixed)
+/** The table of results for a finished molecule. `pair` names the two atoms of a molecule of two
+ *  atoms, which has no middle atom: its table leaves out the electron groups. */
+export function readout(p: Problem | null, center: El, info: ShapeInfo, mixed: boolean, more: { label: string; value: string }[] = [], tryIt = true, pair: [El, El] | null = null): string {
+  const r = shapeReadout(p, center, info, mixed, pair)
   return `<dl class="mb-readout">
-      <div><dt>${rich('Shape')}</dt><dd class="is-big">${rich(cap(r.shape))}</dd></div>
-      <div><dt>${rich('Electron groups')}</dt><dd>${esc(r.groups)}</dd></div>
+      <div><dt>${rich('Molecular geometry')}</dt><dd class="is-big">${rich(cap(r.shape))}</dd></div>
+      <div><dt>${rich('Electron geometry')}</dt><dd>${rich(cap(r.arrangement))}</dd></div>
+      ${r.groups ? `<div><dt>${rich('Electron groups')}</dt><dd>${esc(r.groups)}</dd></div>` : ''}
       <div><dt>${rich('Bond angle')}</dt><dd>${esc(r.angle)}</dd></div>
       ${more.map((row) => `<div><dt>${rich(row.label)}</dt><dd>${esc(row.value)}</dd></div>`).join('')}
     </dl>
-    ${r.why ? `<p class="mb-note">${rich(r.why)}</p>` : ''}
-    ${tryIt ? '<p class="mb-body mb-try">Drag an atom or a lone pair, then let go. The other groups move out of the way.</p>' : ''}`
+    ${r.why ? `<p class="mb-note" data-k="readout-why" data-kv="">${rich(r.why)}</p>` : ''}
+    ${tryIt && !info.diatomic ? '<p class="mb-body mb-try">Drag an atom or a lone pair, then let go. The other groups move out of the way.</p>' : ''}`
 }
 
 /** The atoms of the bonds in question with the course table's electronegativity under each. */
-function enStrip(els: El[]): string {
+export function enStrip(els: El[]): string {
   return `<figure class="mb-en" data-k="en" data-kv=""><figcaption>${rich(DIPOLE_WORDS.table)}</figcaption><ul>${els
     .map((el) => `<li>${ball(el, 'is-small')}<span>${esc(cap(lower(el)))}</span><b>${courseEN(el)}</b></li>`)
     .join('')}</ul></figure>`
@@ -822,24 +833,38 @@ function stepOrbitals(s: State, p: Problem): string {
 function stepShape(s: State, p: Problem): string {
   const info = shapeInfoFor(s.s)
   if (!info) return `<p class="mb-body">Finish the Lewis structure first.</p>`
-  const c = lower(p.center)
   const sh = s.shape
   // each question folds down to its answer once it is settled, so the result stays in view
   if (!sh.groupsRight) {
+    const q = groupsQuestion(p.center)
     const groupChips = [2, 3, 4, 5, 6]
       .map((n) => `<button class="mb-choice is-num" data-act="groups" data-n="${n}" data-key="grp-${n}" data-state="${sh.groups === n ? 'wrong' : 'idle'}">${n}</button>`)
       .join('')
-    return `<p class="mb-q">${rich(`How many electron groups are around ${c}?`)}</p>
-      <p class="mb-body mb-sub">${rich('A lone pair (2 unshared electrons on one atom) is 1 group. A bond is 1 group, even a double or triple bond.')}</p>
+    return `<p class="mb-q">${rich(q.ask)}</p>
+      <p class="mb-body mb-sub">${rich(q.sub)}</p>
       <div class="mb-choices" data-cue="groups">${groupChips}</div>
       ${coach(sh.groupsCoach)}`
   }
+  if (!sh.geometryRight) {
+    // the electron geometry: the student picks until it is right, and a wrong pick stays marked
+    const q = geometryQuestion(p.center)
+    const chips = geometryPicks(info)
+      .map((name) => `<button class="mb-choice" data-act="geometry" data-name="${name}" data-key="geo-${name}" data-state="${sh.geometry === name ? 'wrong' : 'idle'}">${cap(name)}</button>`)
+      .join('')
+    return `${fb(sh.groupsFeedback, 'good')}
+      <p class="mb-q">${rich(q.ask)}</p>
+      <p class="mb-body mb-sub">${rich(q.sub)}</p>
+      <div class="mb-choices" data-cue="geometry">${chips}</div>
+      ${coach(sh.geometryCoach)}`
+  }
   if (!sh.pick) {
+    const q = shapeQuestion(p.center)
     const chips = shapeChoices(info)
       .map((name) => `<button class="mb-choice" data-act="shape" data-name="${name}" data-key="shp-${name}" data-state="idle">${cap(name)}</button>`)
       .join('')
-    return `${fb(sh.groupsFeedback, 'good')}
-      <p class="mb-q">${rich('The groups push each other as far apart as they can get. What shape do the atoms make?')}</p>
+    return `${fb(sh.groupsFeedback, 'good')}${fb(sh.geometryFeedback, 'good')}
+      <p class="mb-q">${rich(q.ask)}</p>
+      <p class="mb-body mb-sub">${rich(q.sub)}</p>
       <div class="mb-choices" data-cue="shapes">${chips}</div>`
   }
   return `${sh.pickRight ? fb(sh.pickFeedback, 'good') : coach(sh.pickCoach)}${readout(p, p.center, info, mixedOuter(s.s))}`
@@ -853,10 +878,15 @@ function freePanel(s: State): string {
   // a middle atom from period 3 onward that holds more than 8
   const held = center ? shellCount(s.s, center.id) : 0
   const note = a.complete && center && held > 8 ? `<p class="mb-note">${rich(`${cap(lower(center.el))} has ${held} electrons around it. Atoms from period 3 onward can hold more than 8.`)}</p>` : ''
+  // a molecule of two atoms has no middle atom: the panel says so on the flat board, and the 3D table says it in place of the groups
+  const pair: [El, El] | null = info?.diatomic && s.s.atoms.length === 2 ? [s.s.atoms[0]!.el, s.s.atoms[1]!.el] : null
+  // the less electronegative atom first, as the bond is named
+  const ordered: [El, El] | null = pair && bondPolarity(pair[0], pair[1]).positive === pair[1] ? [pair[1], pair[0]] : pair
   const shapeBlock =
     s.view === 'shape' && info && center
-      ? `${readout(null, center.el, info, mixedOuter(s.s), profile(null, s.s))}`
-      : `<button class="mb-btn mb-btn-soft" data-act="view" data-view="shape" data-key="see-shape" ${info ? '' : 'disabled'}>See the 3D shape</button>
+      ? `${readout(null, center.el, info, mixedOuter(s.s), profile(null, s.s), true, ordered)}`
+      : `${ordered ? `<p class="mb-note" data-k="two-atoms" data-kv="">${rich(twoAtomsLine(ordered[0], ordered[1]))}</p>` : ''}
+         <button class="mb-btn mb-btn-soft" data-act="view" data-view="shape" data-key="see-shape" ${info ? '' : 'disabled'}>See the 3D shape</button>
          ${
            a.complete && !info && s.s.atoms.length > 1
              ? `<p class="mb-note">${a.topology.kind === 'star' ? `This demo has no 3D shape for ${a.topology.terminals.length + Math.floor((center?.lone ?? 0) / 2)} electron groups.` : 'This demo shows 3D shapes only for molecules with one middle atom.'}</p>`
@@ -893,8 +923,10 @@ function freePolar(s: State, complete: boolean, info: ShapeInfo | null): string 
 function panel(s: State): string {
   // each screen highlights a term where it first appears
   termsSeen = new Set()
-  termsPlain = plainTerms(s.mode === 'guided' ? s.step : null)
+  termsPlain = plainTerms(s.mode === 'guided' ? s.step : null, s.mode === 'guided' && !s.shape.pick)
   termsMade = 0
+  const part = PARTS[s.mode]
+  if (part) return part.panel(s)
   if (s.mode === 'guided' && s.pickerOpen) return `${header(s)}${picker(s)}`
   if (s.mode === 'free') {
     return `${header(s)}<div class="mb-scroll"><div class="mb-step" tabindex="-1">${freePanel(s)}</div></div>`
@@ -967,7 +999,8 @@ function drawFor(s: State, st: Structure): SceneInput['draw'] {
 
 /** The groups the board should ring after a wrong group count, while that question is still open. */
 function ringGroups(s: State): SceneInput['point'] {
-  const c = s.mode === 'guided' && s.step === 'shape' && !s.shape.groupsRight ? s.shape.groupsCoach : null
+  const at = s.mode === 'guided' && s.step === 'shape' ? s.shape : null
+  const c = !at ? null : !at.groupsRight ? at.groupsCoach : !at.geometryRight ? at.geometryCoach : null
   return c?.show?.kind === 'groups' ? { n: c.n, which: c.show.which } : null
 }
 
@@ -977,10 +1010,12 @@ function topbar(s: State, canExit: boolean): string {
   const tab = (mode: store.Mode, label: string) => `<button role="tab" aria-selected="${s.mode === mode}" data-act="mode" data-mode="${mode}" data-key="mode-${mode}">${label}</button>`
   const back = canExit ? `<button class="mb-back" data-act="exit" data-key="exit" aria-label="Back to all modules">${ICON.back}<span>Modules</span></button>` : ''
   return `<div class="mb-lead">${back}<div class="mb-brand"><b>Lewis structures and shapes</b></div></div>
-    <div class="mb-modes" role="tablist" aria-label="Mode">${tab('guided', 'Guided')}${tab('free', 'Free build')}</div>`
+    <div class="mb-modes" role="tablist" aria-label="Mode">${tab('guided', 'Guided')}${tab('free', 'Free build')}${OPEN_PARTS.map((mode) => tab(mode, PARTS[mode]!.tab)).join('')}</div>`
 }
 
 function ledger(s: State): string {
+  const part = PARTS[s.mode]
+  if (part?.ledger) return part.ledger(s)
   if (store.isSpecimen(s)) return ''
   const have = electronsOnBoard(s.s)
   const shared = sharedElectrons(s.s)
@@ -1005,6 +1040,8 @@ function ledger(s: State): string {
  *  a mark, a name, and a count where the check has one. The full sentence is there for a screen
  *  reader and as a tooltip. */
 function checkbar(s: State): string {
+  const part = PARTS[s.mode]
+  if (part?.checks) return part.checks(s)
   if (store.isSpecimen(s)) return ''
   // before the check step an ion's charge has not been dealt with yet, so its electron total waits
   return checkChips(s.mode === 'guided' ? store.problemOf(s) : null, s.s, s.mode === 'guided' && (s.step === 'place' || s.step === 'bond'))
@@ -1053,6 +1090,8 @@ function selectionCard(s: State, st: Structure): string {
 }
 
 function dock(s: State): string {
+  const part = PARTS[s.mode]
+  if (part?.dock) return part.dock(s)
   if (store.isSpecimen(s)) return ''
   const canEdit = store.editable(s)
   const tools = `<div class="mb-tools">
@@ -1118,6 +1157,8 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
   const off = new AbortController()
   const on = { signal: off.signal }
   if (opts.solved?.length) store.mergeSolved(opts.solved)
+  // a part that is not open yet starts in the guided steps
+  if (opts.start && (!PARTS[opts.start] || OPEN_PARTS.includes(opts.start))) store.setMode(opts.start)
   let solvedTold = store.getState().solved.length
   root.innerHTML = `
     <section class="mb-stage" aria-label="Board">
@@ -1290,12 +1331,16 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
   let cueShown: { halos: { x: number; y: number; w: number; h: number }[]; hand: 'off' | 'point' | 'demo' } = { halos: [], hand: 'off' }
   const radii = new WeakMap<Element, number>()
   const arrived = new WeakSet<Element>()
+  /** The cue whose question was last scrolled fully into view, so the panel scrolls once for it and leaves the student's own scrolling alone. */
+  let cueBrought = ''
 
   const setCue = (c: store.Cue | null) => {
     const key = JSON.stringify(c)
     if (key !== cueKey) {
       cueKey = key
       cueAt = performance.now()
+      // a new cue may scroll its question into view again, even when it repeats an earlier one (the next molecule's)
+      cueBrought = ''
     }
     cueNow = c
   }
@@ -1379,6 +1424,15 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
         if (!arriving) arrived.add(piece)
       }
       if (!el || !r || r.width === 0 || arriving || (view && (r.bottom < view.top + 12 || r.top > view.bottom - 12))) return false
+      // the panel scrolled to the question while it was still growing into place, so a tall block of
+      // choices can end up cut off at the bottom (5 long names on a phone): once it has arrived, bring all of it into view
+      // with a margin, so its glow is not cut by the edge
+      const margin = 12
+      if (view && withHand && cueBrought !== cueKey && r.height < view.height - margin * 2 && (r.top < view.top + 2 || r.bottom > view.bottom - margin)) {
+        cueBrought = cueKey
+        const by = r.top < view.top + 2 ? r.top - view.top - margin : r.bottom - view.bottom + margin
+        el.closest('.mb-scroll')?.scrollBy({ top: by, behavior: 'smooth' })
+      }
       let radius = radii.get(el)
       if (radius === undefined) {
         radius = Math.min(parseFloat(getComputedStyle(el).borderTopLeftRadius) || 14, r.height / 2)
@@ -1732,7 +1786,11 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
   const showTerm = (id: TermId, from: HTMLElement | null) => {
     const s = store.getState()
     const guided = s.mode === 'guided'
-    termEl.innerHTML = termCardHtml(termCard(id, guided ? store.problemOf(s) : null, guided ? s.step : null))
+    // a part names the terms whose card would give an open answer away: those never open, and no card links to them
+    const blocked = PARTS[s.mode]?.blockedTerms?.(s)
+    if (blocked?.has(id)) return
+    const card = termCard(id, guided ? store.problemOf(s) : null, guided ? s.step : null)
+    termEl.innerHTML = termCardHtml(blocked ? { ...card, related: card.related.filter((r) => !blocked.has(r.id)) } : card)
     termEl.hidden = false
     termEl.dataset.term = id
     termOpen = { id, from }
@@ -1785,7 +1843,8 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
   }
 
   const render = (s: State) => {
-    const stepKey = `${s.mode}:${s.problem}:${s.step}`
+    const part = PARTS[s.mode]
+    const stepKey = part ? `${s.mode}:${part.screen(s)}` : `${s.mode}:${s.problem}:${s.step}`
     // a card belongs to the step it was opened in
     if (termOpen && lastStep !== null && stepKey !== lastStep) hideTerm(false)
     paint('top', topbar(s, !!opts.onExit))
@@ -1796,12 +1855,12 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
     paint('panel', panel(s), lastStep !== null && stepKey !== lastStep)
     root.dataset.mode = s.mode
     root.dataset.view = s.view
-    root.dataset.step = s.mode === 'guided' ? s.step : 'free'
+    root.dataset.step = s.mode === 'guided' ? s.step : s.mode
     if (termOpen) markTerms()
 
     const panelChanged = lastHtml.panel !== lastPanel
     lastPanel = lastHtml.panel ?? ''
-    const stepDone = s.mode === 'guided' && store.stepDone(s.step, s)
+    const stepDone = part ? !!part.done?.(s) : s.mode === 'guided' && store.stepDone(s.step, s)
     if (stepKey !== lastStep) {
       lastStep = stepKey
       regions.panel.querySelector('.mb-scroll')?.scrollTo({ top: 0 })
@@ -1846,7 +1905,7 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
       angles: shown && !showsDipoles(s) && !freeNetShown(s, st) ? angleMarks(s.mode === 'guided' ? store.problemOf(s) : null, shown, mixedOuter(st)) : [],
     }
     const onAtom = document.activeElement instanceof HTMLButtonElement && document.activeElement.classList.contains('mb-hit') ? document.activeElement : null
-    scene.sync(input)
+    scene.sync(part?.scene ? part.scene(s, input) : input)
     if (onAtom?.disabled) {
       // The atom that had the keyboard's focus is switched off (the last arrow was just drawn). Move
       // to the step's main button when it is ready, otherwise to the step itself, as the panel does.
@@ -1854,7 +1913,7 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
       ;(main ?? regions.panel.querySelector<HTMLElement>('.mb-step'))?.focus({ preventScroll: true })
     }
 
-    setCue(store.cue(s))
+    setCue(part ? (part.cue?.(s) ?? null) : store.cue(s))
 
     if (s.toast && s.toast.n !== toastSeen) {
       toastSeen = s.toast.n
@@ -1968,6 +2027,9 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
       case 'hybrid':
         store.pickHybrid(t.dataset.h as Hybrid)
         break
+      case 'geometry':
+        store.pickGeometry(t.dataset.name as ShapeName)
+        break
       case 'shape':
         store.pickShape(t.dataset.name as ShapeName)
         break
@@ -1995,6 +2057,9 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
       case 'bond-minus':
         if (sel?.kind === 'bond') store.unbond(sel.id)
         break
+      default:
+        // a part's own control (parts.ts)
+        PARTS[s.mode]?.act?.(t, s)
     }
   }, on)
 
@@ -2025,6 +2090,7 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
       hideTerm(true)
       return
     }
+    if (PARTS[s.mode]?.key?.(e, s)) return
     if (e.key === 'Escape') {
       if (s.pickerOpen) store.togglePicker(false)
       else store.clearSelection()
@@ -2033,6 +2099,7 @@ export function mount(root: HTMLElement, opts: MountOptions = {}): () => void {
   }, on)
   root.addEventListener('input', (e) => {
     const input = e.target as HTMLInputElement
+    if (PARTS[store.getState().mode]?.input?.(input, store.getState())) return
     if (input.id !== 'mb-total') return
     const digits = input.value.replace(/\D/g, '').slice(0, 2)
     if (digits !== input.value) input.value = digits

@@ -5,10 +5,17 @@ checks. None of it touches React, React Native or Three.js.
 
 ## Files
 - `assess.test.ts`, `layout.test.ts`, `problems.test.ts`, `solve.test.ts`, `structure.test.ts`, `vsepr.test.ts`: the engine. Team chem.
+- `exercises.test.ts`: the exercise pool and its sets, every exercise's answers worked by hand, the electron geometry on every problem, molecules of two atoms, and a middle atom the electron count leaves short. Team chem.
 - `polarity.test.ts`: bond and molecular polarity, sigma and pi bonds, hybridization, with the course slides' worked examples as the expected answers. Team chem.
 - `guide.test.ts`: the guide's step rules and wording, including the scan of every sentence. Team lewis, reviewed by learning.
 - `store.test.ts`: the step flow in the Lewis module's store. Team lewis.
 - `terms.test.ts`: the key terms: which words are highlighted, what each card says, and that a card's example is never the molecule on screen. Team lewis, reviewed by learning and chem.
+- `exercise.test.ts`: the exercises: each part's answer worked by hand, the checks, the locks, the reset on a board change, the next-molecule rule and what is saved. Team lewis.
+- `exercise-words.test.ts`: every sentence the exercises can show, scanned, and that no card gives an answer away early. Team lewis, reviewed by learning.
+- `exercise-terms.test.ts`: which key terms open a card on an exercise. Team lewis, reviewed by learning.
+- `exercise-pool.ts`: shared by the exercise tests: the 20 worksheet molecules and 8 of two atoms, with their answers worked by hand.
+- `shapes.test.ts`: the shapes quiz's 13 rows, example molecules, choices and deck, with the shape table written by hand from OpenStax 2e, 7.6. Team lewis, reviewed by chem.
+- `shapes-words.test.ts`: the shapes quiz's wording scan, every wrong-answer card against the table, and the key-term cards that can open during a question. Team lewis, reviewed by learning.
 - `repo.test.ts`: the repo checks, against made-up repos in a temp folder. Team platform.
 - `helpers.ts`: shared by the test files. It builds structures with the same moves the app offers.
 

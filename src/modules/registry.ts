@@ -1,8 +1,11 @@
-// Every module the app offers. The home screen lists these; each one has a route in src/app/.
+// Every card on the home screen; each one has a route in src/app/. The Lewis module has three:
+// its guided molecules, its shapes quiz and its exercises. Each card has its own saved list.
 // To add a module: build it under src/modules/<id>/, add a route file, and add an entry here.
 import type { Href } from 'expo-router'
 
+import { EXERCISES } from '@/chem/exercises'
 import { PROBLEMS } from '@/chem/problems'
+import { ALL_CASES } from '@/chem/vsepr'
 
 export interface ModuleInfo {
   id: string
@@ -15,7 +18,7 @@ export interface ModuleInfo {
   problemWord: string
 }
 
-export const MODULES: ModuleInfo[] = [
+const ALL: ModuleInfo[] = [
   {
     id: 'lewis',
     route: '/lewis',
@@ -24,4 +27,27 @@ export const MODULES: ModuleInfo[] = [
     problems: PROBLEMS.length,
     problemWord: 'molecules',
   },
+  {
+    id: 'shapes',
+    route: '/shapes',
+    title: 'Shapes quiz',
+    summary: 'See each electron geometry and molecular geometry as a 3D model, then name them from memory.',
+    problems: ALL_CASES.length,
+    problemWord: 'shapes',
+  },
+  {
+    id: 'exercises',
+    route: '/exercises',
+    title: 'Exercises',
+    summary: 'Work a molecule from start to finish without the guided steps: the electron count, the Lewis structure, both geometries, the bond angles and the dipoles.',
+    problems: EXERCISES.length,
+    problemWord: 'molecules',
+  },
 ]
+
+/** The cards a student can open. The shapes quiz and the exercises are built and stay closed until
+ *  their review findings are fixed. The Lewis module has the same switch for its tabs
+ *  (`OPEN_PARTS` in `src/modules/lewis/parts.ts`): change both together. */
+const OPEN: readonly string[] = ['lewis']
+
+export const MODULES: ModuleInfo[] = ALL.filter((m) => OPEN.includes(m.id))

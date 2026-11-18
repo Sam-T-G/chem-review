@@ -6,10 +6,15 @@ import { useEffect, useRef } from 'react'
 
 import { registerFonts } from './font'
 import './styles.css'
+import './shapes/shapes.css'
+import './exercise/exercise.css'
+import type { Mode } from './store'
 import { mount, type Feel } from './ui'
 
 interface Props {
-  /** Problems the app already has down as finished. */
+  /** The mode the module opens in: the guided steps, the shapes quiz or the exercises. */
+  start: Mode
+  /** What the app already has down as finished: guided problems by id, shapes as `shape:<id>`, exercises as `ex:<id>`. */
   solved: string[]
   /** Called with every finished problem id each time one more is finished. */
   onSolved: (ids: string[]) => Promise<void>
@@ -20,7 +25,7 @@ interface Props {
   dom?: import('expo/dom').DOMProps
 }
 
-export default function LewisModule({ solved, onSolved, onExit, onFeel }: Props) {
+export default function LewisModule({ start, solved, onSolved, onExit, onFeel }: Props) {
   const root = useRef<HTMLDivElement>(null)
   // the latest callbacks, without remounting the board when the parent re-renders
   const calls = useRef({ onSolved, onExit, onFeel })
@@ -28,12 +33,14 @@ export default function LewisModule({ solved, onSolved, onExit, onFeel }: Props)
     calls.current = { onSolved, onExit, onFeel }
   })
   const firstSolved = useRef(solved)
+  const firstStart = useRef(start)
 
   useEffect(() => {
     if (!root.current) return
     registerFonts()
     return mount(root.current, {
       solved: firstSolved.current,
+      start: firstStart.current,
       onSolved: (ids) => void calls.current.onSolved(ids),
       onExit: () => void calls.current.onExit(),
       onFeel: (kind) => void calls.current.onFeel(kind),

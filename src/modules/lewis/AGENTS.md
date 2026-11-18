@@ -14,6 +14,7 @@ one DOM component.
 - `face.ts`: the atoms' faces on the 3D board.
 - `fx.ts`: sparks, rings on the board, and the glow around electrons.
 - `font.ts`: registers the module's fonts.
+- `parts.ts`: the contract a part of the module follows, and the list of parts. The shapes quiz is in `shapes/` and the exercises are in `exercise/`, each with its own `AGENTS.md`.
 
 ## Read first
 - `docs/learning/guided-steps.md`: the steps, the problems, the rules for words. Read it for any change.

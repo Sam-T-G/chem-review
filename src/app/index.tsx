@@ -11,9 +11,11 @@ import { useProgress } from '@/shell/progress'
 import { color, font, space } from '@/theme/tokens'
 
 export default function HomeScreen() {
-  // one hook per module; there is one module so far
+  // one hook per card
   const lewis = useProgress('lewis')
-  const done: Record<string, number> = { lewis: lewis.ids.length }
+  const shapes = useProgress('shapes')
+  const exercises = useProgress('exercises')
+  const done: Record<string, number> = { lewis: lewis.ids.length, shapes: shapes.ids.length, exercises: exercises.ids.length }
   // wide screens: the title on the left, the atoms on the right. Phones: the atoms above the title.
   const { width } = useWindowDimensions()
   const wide = width >= 720

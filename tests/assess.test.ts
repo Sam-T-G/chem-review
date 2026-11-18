@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { El } from '../src/chem/elements'
 import { assess, topologyOf, type Species } from '../src/chem/assess'
 import { EMPTY, addAtom, addElectron, removeElectron, share, type Structure } from '../src/chem/structure'
-import { nitrousOxide, nitrousOxideTwoDoubles } from './helpers'
+import { drawn, nitrousOxide, nitrousOxideTwoDoubles } from './helpers'
 
 function board(...els: El[]): { s: Structure; ids: string[] } {
   let s = EMPTY
@@ -296,5 +296,47 @@ describe('review findings: structures that must not pass', () => {
     expect(assess(star(['O', 'H', 'H'], [1, 1]).s).issues).toEqual([])
     expect(assess(star(['C', 'O', 'O'], [2, 2]).s).issues).toEqual([])
     expect(assess(star(['N', 'H', 'H', 'H'], [1, 1, 1]).s).issues).toEqual([])
+  })
+})
+
+describe('a middle atom the electron count leaves short, in free build (D-0032)', () => {
+  // OpenStax 7.3: a middle atom bonded only to hydrogen, with too few electrons to share, can stop short of
+  // 8 (CH3+: carbon at 6, formal charge +1). In free build the charge comes from the board, so a middle atom
+  // with its unshared electrons taken off must not count as finished. Each board below was "short" before
+  // D-0032, and still is: the middle atom holds the electrons of its bonds only.
+  const STRIPPED: [string, El, El[], number][] = [
+    // O–H twice, oxygen's 4 unshared electrons removed: oxygen at 4, formal charge 6 − 0 − 2 = +4
+    ['OH2 4+', 'O', ['H', 'H'], 4],
+    // carbon at 4, formal charge 4 − 0 − 2 = +2
+    ['CH2 2+', 'C', ['H', 'H'], 2],
+    // carbon at 2, formal charge 4 − 0 − 1 = +3
+    ['CH 3+', 'C', ['H'], 3],
+    // nitrogen at 4, formal charge 5 − 0 − 2 = +3
+    ['NH2 3+', 'N', ['H', 'H'], 3],
+    // boron at 4, two short of the 6 it keeps in BF3; formal charge 3 − 0 − 2 = +1
+    ['BH2+', 'B', ['H', 'H'], 1],
+    // beryllium at 2, two short of the 4 it keeps in BeCl2; formal charge 2 − 0 − 1 = +1
+    ['BeH+', 'Be', ['H'], 1],
+  ]
+  for (const [name, center, terms, charge] of STRIPPED) {
+    it(`calls the middle atom short in ${name}`, () => {
+      const { s, ids } = drawn(center, terms, terms.map(() => 1), 0)
+      const a = assess(s)
+      expect(a.charge).toBe(charge)
+      expect(a.complete).toBe(false)
+      expect(a.issues).toEqual([{ kind: 'short', ids: [ids[0]] }])
+    })
+  }
+  it('still passes CH3+ with carbon at 6, with and without a target', () => {
+    const { s } = drawn('C', ['H', 'H', 'H'], [1, 1, 1], 0)
+    for (const a of [assess(s), assess(s, { center: 'C', terminals: ['H', 'H', 'H'], charge: 1 })]) {
+      expect(a.complete).toBe(true)
+      expect(a.atoms[0]).toMatchObject({ el: 'C', count: 6, status: 'full', fc: 1 })
+    }
+  })
+  it('leaves BF3, BCl3 and BeCl2 as they were: finished at 6, 6 and 4', () => {
+    expect(assess(drawn('B', ['F', 'F', 'F'], [1, 1, 1], 0).s).issues).toEqual([])
+    expect(assess(drawn('B', ['Cl', 'Cl', 'Cl'], [1, 1, 1], 0).s).issues).toEqual([])
+    expect(assess(drawn('Be', ['Cl', 'Cl'], [1, 1], 0).s).issues).toEqual([])
   })
 })

@@ -56,14 +56,19 @@ A contract is what one team promises another. Changing one needs the lead and a 
 
 - It lives in `src/modules/<id>/`, and its top component is `<Name>Module.tsx` with a default export.
 - If it needs canvas, WebGL or CSS, the top component is a DOM component: `'use dom'` on the first line.
-- Its props are plain data or async functions, and they do not change after the module opens. The `Props` interface at the top of `src/modules/lewis/LewisModule.tsx` is the pattern: the problems already finished, a call for each newly finished problem, a call to leave, and a call each time the phone should vibrate (a drop, a bond, a refused move, a finished step).
+- Its props are plain data or async functions, and they do not change after the module opens. The `Props` interface at the top of `src/modules/lewis/LewisModule.tsx` is the pattern: the mode it opens in, what is already finished, a call for each newly finished item, a call to leave, and a call each time the phone should vibrate (a drop, a bond, a refused move, a finished step).
 - A route file `src/app/<id>.tsx` renders it and passes it `useProgress('<id>')`.
 - An entry in `src/modules/registry.ts` puts it on the home screen.
+- A module can have more than one card and route. The Lewis module has three: `/lewis` (the guided molecules), `/shapes` (the shapes quiz) and `/exercises`. All three render `LewisScreen` in `src/app/lewis.tsx` with a start mode (D-0031).
 - Anything only a phone can do (its motor, its storage) stays in the shell or the route and reaches the module through a prop.
+
+### A part of the Lewis module (D-0031)
+
+A part is a mode of the Lewis module with its own panel and its own rules for the board: the shapes quiz (`src/modules/lewis/shapes/`) and the exercises (`src/modules/lewis/exercise/`). `src/modules/lewis/parts.ts` is the contract. `ui.ts` asks the part for each region of the screen, for what the board draws, for where the next action is and for the key terms whose card may not open while an answer is open, and hands it the presses and key strokes it does not know. `store.ts` asks the part's `state.ts` what is on the board. A part keeps to its own folder and changes the state with `update()`. Changing `Part` needs the lead. A student can open a part only when it is listed in `OPEN_PARTS` (`parts.ts`) and its card is listed in `OPEN` (`src/modules/registry.ts`): a part that is built but still has review findings to fix stays out of both, its tab is not drawn, and its route opens the guided steps.
 
 ### Saved progress
 
-`useProgress(moduleId)` in `src/shell/progress.ts` returns the finished problem ids, whether they have loaded, and a function that records more. The ids are saved on the device under the key `chem-review:progress:<moduleId>`. A change to the key or to the shape of what is saved loses students' progress, so it needs a decision record first.
+`useProgress(moduleId)` in `src/shell/progress.ts` returns the finished problem ids, whether they have loaded, and a function that records more. The ids are saved on the device under the key `chem-review:progress:<moduleId>`. The Lewis module's three cards each have a list (`lewis`, `shapes`, `exercises`). Inside the module they are one list, and an id's prefix says which card it belongs to: none for a guided problem, `shape:` for a row of the shape table, `ex:` for an exercise. A change to the key or to the shape of what is saved loses students' progress, so it needs a decision record first.
 
 ### The engine (D-0004)
 

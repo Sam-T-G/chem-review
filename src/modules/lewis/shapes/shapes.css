@@ -1,0 +1,99 @@
+/* The shapes quiz. Colors, radii and font names come from the tokens (L5). Reduced motion is
+   handled by the rule at the end of ../styles.css, which stops every animation in .mb. */
+
+/* the switch between the series and the quiz, under the panel's heading */
+.mb .sq-phases { flex: none; display: flex; margin: 12px 20px 0; padding: 4px; justify-content: stretch; }
+.mb .sq-phases button { flex: 1; height: 40px; font-family: var(--display); font-size: 16px; font-weight: 600; }
+
+.mb .sq-kicker { margin: 2px 0 0; font-family: var(--display); font-size: 14px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--grape); }
+.mb .sq-name { font-size: 32px; }
+.mb .sq-h { margin: 18px 0 8px; font-family: var(--display); font-size: 17px; font-weight: 600; }
+.mb .sq-readout dd.is-big { font-size: 21px; }
+.mb .sq-formula { font-family: var(--display); font-weight: 600; font-size: 18px; }
+.mb .sq-formula sub, .mb .sq-formula sup { font-size: 0.65em; }
+
+/* the 13 rows of the series, grouped by electron geometry */
+.mb .sq-list { margin-top: 6px; }
+.mb .sq-group + .sq-group { margin-top: 10px; }
+.mb .sq-group h4 { margin: 0 0 6px; font-size: 13.5px; font-weight: 800; color: var(--ink-2); }
+.mb .sq-rows { display: flex; flex-wrap: wrap; gap: 8px; }
+.mb .sq-row {
+  position: relative; display: grid; gap: 1px; justify-items: start;
+  min-height: 52px; padding: 7px 14px 8px; margin-bottom: 3px;
+  border: 0; border-radius: var(--r-m); cursor: pointer; text-align: left;
+  background: var(--paper); color: var(--ink);
+  box-shadow: 0 3px 0 var(--paper-lip), inset 0 0 0 1.5px var(--tint-2);
+  transition: translate 0.12s var(--ease), background-color 0.12s;
+}
+.mb .sq-row b { font-family: var(--display); font-size: 16px; font-weight: 600; }
+.mb .sq-row small { font-size: 12.5px; font-weight: 700; color: var(--ink-2); }
+.mb .sq-row:hover { background: var(--tint); translate: 0 -2px; }
+.mb .sq-row:active { translate: 0 3px; box-shadow: 0 0 0 var(--paper-lip), inset 0 0 0 1.5px var(--tint-2); }
+.mb .sq-row[aria-current='true'] { background: var(--grape-deep); color: var(--paper); box-shadow: 0 3px 0 var(--grape-lip); }
+.mb .sq-row[aria-current='true'] small { color: var(--paper); }
+.mb .sq-tick { position: absolute; top: -7px; right: -7px; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--mint-deep); color: var(--paper); }
+.mb .sq-tick svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 3; }
+
+/* the switch between the two geometries, under the model */
+.mb .mb-dock .sq-views { grid-column: 1 / -1; justify-self: center; }
+.mb .sq-views button { height: 44px; padding: 0 16px; font-family: var(--display); font-size: 15.5px; font-weight: 600; }
+
+/* how many of the 13 are known: one dot per row, without names */
+.mb .sq-progress { display: flex; align-items: center; gap: 12px; margin: 2px 0 10px; }
+.mb .sq-pips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.mb .sq-pips .mb-chk.sq-pip {
+  width: 16px; height: 16px; min-height: 0; padding: 0; border-radius: 50%;
+  background: var(--tint); box-shadow: inset 0 0 0 2px var(--tint-2);
+}
+.mb .sq-pips .mb-chk.sq-pip[data-state='half'] { background: linear-gradient(90deg, var(--mint-line) 50%, var(--tint) 50%); box-shadow: inset 0 0 0 2px var(--mint-line); }
+.mb .sq-pips .mb-chk.sq-pip[data-state='missed'] { background: var(--straw-soft); box-shadow: inset 0 0 0 2px var(--straw-line); }
+.mb .sq-pips .mb-chk.sq-pip[data-state='known'] { background: var(--mint-deep); box-shadow: 0 2px 0 var(--mint-lip); animation: sq-pop 0.6s var(--spring); }
+.mb .sq-count { flex: none; margin-left: auto; font-family: var(--display); font-size: 26px; font-weight: 600; line-height: 1; color: var(--mint-deep); animation: mb-bob 3.2s ease-in-out infinite; animation-delay: calc(var(--now, 0) * -1s); }
+.mb .sq-count small { font-size: 0.6em; color: var(--ink-2); }
+@keyframes sq-pop { 0% { scale: 0.3; } 45% { scale: 1.7; } 70% { scale: 0.85; } 100% { scale: 1; } }
+
+/* the choices of an open question: chunky, and they lean up under the pointer */
+.mb .sq-choices .mb-choice { min-height: 48px; font-size: 16.5px; }
+.mb .sq-choices .mb-choice:hover:not(:disabled) { translate: 0 -2px; }
+.mb .sq-result { font-weight: 800; }
+.mb .sq-sub { margin-top: 4px; }
+
+/* a shape that just became known, and all 13 known: the card bursts open with sparks */
+.mb .sq-burst { position: relative; overflow: visible; font-weight: 800; animation: mb-inflate 0.42s var(--spring) both, sq-shout 0.9s var(--spring) 0.3s; }
+.mb .sq-burst::before, .mb .sq-burst::after {
+  content: ''; position: absolute; top: 50%; left: 22px; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--butter); pointer-events: none; opacity: 0;
+  box-shadow: 24px -18px 0 var(--mint-deep), -10px -26px 0 var(--grape), 40px 8px 0 var(--straw), 10px 26px 0 var(--butter-deep), -22px 10px 0 var(--sky-blue);
+  animation: sq-sparks 0.9s var(--ease) 0.25s;
+}
+.mb .sq-burst::after { left: auto; right: 30px; rotate: 140deg; }
+.mb .sq-burst.is-all { font-size: 18px; background: var(--butter-soft); color: var(--ink); box-shadow: inset 0 0 0 2px var(--butter-line); }
+.mb .sq-burst.is-all svg { background: var(--butter-deep); }
+.mb .sq-burst.is-same::before, .mb .sq-burst.is-same::after { animation: none; }
+@keyframes sq-shout { 0%, 100% { scale: 1; } 30% { scale: 1.06 0.92; } 60% { scale: 0.97 1.05; } }
+@keyframes sq-sparks { 0% { opacity: 1; scale: 0.2; } 60% { opacity: 1; } 100% { opacity: 0; scale: 2.4; } }
+
+/* the known rows, by name */
+.mb .sq-known { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.mb .sq-known li { display: flex; align-items: center; gap: 6px; padding: 5px 11px 5px 7px; border-radius: 999px; background: var(--mint-soft); color: var(--mint-deep); box-shadow: inset 0 0 0 1.5px var(--mint-line); }
+.mb .sq-known li b { font-size: 14.5px; }
+.mb .sq-known li small { font-size: 12px; font-weight: 700; color: var(--ink-2); }
+.mb .sq-known svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 3; }
+
+@media (max-width: 880px) {
+  .mb .sq-phases { margin: 8px 14px 0; }
+  .mb .sq-phases { margin: 6px 14px 0; padding: 3px; }
+  .mb .sq-phases button { height: 34px; font-size: 15px; }
+  /* a phone has room for the question and its choices under the board: the question's number goes */
+  .mb .sq-qno { display: none; }
+  /* while a question is open the heading above already says how many are known, so the dots wait for the answer */
+  .mb .sq-progress.is-open { display: none; }
+  .mb .sq-choices { gap: 6px; }
+  .mb .sq-progress { margin-bottom: 4px; }
+  .mb .sq-pips { gap: 4px; }
+  .mb .sq-pips .mb-chk.sq-pip { width: 13px; height: 13px; }
+  .mb .sq-count { font-size: 22px; }
+  .mb .sq-choices .mb-choice { min-height: 42px; padding: 0 13px; font-size: 15px; }
+  .mb .sq-name { font-size: 26px; }
+  .mb .sq-views button { height: 40px; font-size: 14.5px; padding: 0 12px; }
+}

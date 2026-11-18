@@ -2,6 +2,157 @@
 
 Add your entry on top, under a heading in exactly this form: `## 2026-11-13 (team) What changed`. Say what changed, what you checked and how, what you ask of other teams or of Sam, and the next step.
 
+## 2026-11-17 (lead) The two geometry names go to main first; the shapes quiz and the exercises are merged and closed
+
+**State.** Sam wrote on 2026-11-17: "lets expedite the feature to differentiate between the different geometries. I want that finalized and pushed to live ASAP". Earlier the same day he wrote "once all the agents are done, commit and push to main". So this push holds everything that is merged on `lewis/review-modes`, with the two parts that still have review findings closed to students:
+- **Open:** step 5 asks for the electron geometry and then the molecular geometry, every sentence uses the two names, the key terms have a card for each (D-0033), and free build has plain lines for a molecule of two atoms. Under it: the pool of 43 molecules with the electron geometry on every problem (D-0032).
+- **Closed:** the shapes quiz (D-0034) and the exercises (D-0035). Their code and tests are in the tree. `OPEN_PARTS` in `src/modules/lewis/parts.ts` and `OPEN` in `src/modules/registry.ts` keep their tabs and cards off the screen (D-0031).
+- **Not in the tree:** the 3D board package (the switch between all groups and atoms only, the two-atom model, four tabs on a phone). It is still being built on `lewis/board-3d`.
+
+**Changed by the lead, on top of the packages' own entries below**
+- Merged `chem/exercise-pool`, `lewis/exercises`, `lewis/shapes-quiz`, `lewis/geometry-names` and main (c8f14ad) into `lewis/review-modes`. Fixed what the merges broke in the tests: the exercise tests' own table of worked molecules now covers PH2− and the 23 molecules the chem package added, and one test problem gained the `geometry` field.
+- `src/chem/vsepr.ts`: `alsoAngles`, the angles a row of the shape table holds besides its label (180° across a trigonal bipyramid or an octahedron). The quiz and the exercises must never offer one as a wrong answer. Source and test: `docs/chemistry/sources.md`, `tests/vsepr.test.ts`.
+- `src/modules/lewis/parts.ts`, `ui.ts`: `Part.blockedTerms`, the key terms a part will not open a card for; the module also leaves links to them out of every card. `OPEN_PARTS`, above.
+- Step 5, after three reviews of the geometry names package (`guide.ts`, `store.ts`, `ui.ts`):
+  - The picks for the electron geometry hold the molecular geometries that the same number of groups can make (`geometryPicks`), and a pick of one gets its own card. Before, "bent" could not be picked for water's electron geometry (M-0011).
+  - No card for the electron geometry names the molecular geometry, the next question (M-0010).
+  - The right-answer lines say which geometry they name. The step's title and the finished line use both names in full.
+  - The same wrong pick pressed again is not a new try.
+- Free build: the net line for the triiodide ion no longer throws (M-0012), two atoms of one element with unlike formal charges read polar in both lines, and the two-atom line gives the straight line as the reason for the molecular geometry only.
+- Docs: D-0030 (Sam's ask), D-0031 (parts, routes, saved lists, the switch), `docs/architecture.md`, `docs/roadmap.md`, `docs/mistakes.md` (M-0008 to M-0013), `docs/chemistry/sources.md`, D-0033 and the two learning docs for the step 5 changes.
+
+**Checked.** The entry dated 2026-11-17 (the two geometry names) in `docs/verified.md`.
+
+**Reviews.** Six independent review reports are in `~/Documents/Claude/chem-review-review-modes-2026-11-17/reports/` on Sam's machine: `REVIEW-CHEMWORDS`, `REVIEW-COPY`, `REVIEW-CODE` (the quiz and the exercises) and `REVIEW-CHEM2`, `REVIEW-COPY2`, `REVIEW-CODE2` (the geometry names). The chemistry reviewers worked all 43 pool molecules, the 13 rows of the shape table and the 34 sample molecules of the cards by hand.
+
+**Not fixed in this push, from those reports**
+- The panel's one-time scroll to a question can undo the panel's own scroll to a new explanation on a phone (CODE2-1, a traced path that nobody has run). The lead's first fix for it broke taps in step 6 on a phone and was taken out (M-0013).
+- Step 5: the second miss and the second hint give the rule "4 is tetrahedral" while the count is on screen (COPY2-2). The generic card names no wrong idea for a full shell read as 4 groups or the middle atom counted as a group (COPY2-5). The third-miss card gives the answer with no reason (COPY2-13). Step 5's table lists the molecular geometry before the electron geometry (COPY2-15).
+- Key-term cards: the "More than 8 electrons" note leaves out leftover electrons going on the middle atom (CHEM2-1), the hybridization note is wrong for sulfate and phosphate (CHEM2-2), the "Bond dipoles cancel" note says the outer atoms must be one element (CHEM2-3), and the bond angle note says lone pairs always squeeze the bonds (COPY-8).
+- Steps 6 and 7 wording that was already live: ozone's card says its dipoles differ in size (CHEMWORDS-3), ions with no polar bonds are told their dipoles cancel (CHEMWORDS-6), "nothing cancels the 2 C–Cl dipoles" (CHEMWORDS-8).
+- The quiz and the exercises: every finding assigned in `briefs/FIX-QUIZ.md` and `briefs/FIX-EXERCISE.md` of the same folder. The fixes are on `lewis/shapes-quiz` and `lewis/exercises`.
+
+**Asks**
+- Sam: the four items dated 2026-11-17 under "Waiting on Sam" in `docs/roadmap.md`. The first to settle is whether the course calls HCl's electron geometry linear or tetrahedral.
+- shell: `src/shell/progress.ts` saves over a whole list when reading it failed or its JSON was bad (a reviewer's note, not in this change). `src/app/lewis.tsx` imports the value `PART_IDS` from the module's store, which `docs/architecture.md` does not allow for a route (CODE-7).
+- lewis: `store.mergeSolved` keeps any saved id that starts with `shape:` or `ex:`, so a stale id would be counted on a card (CODE-5). Clear on the lifted model and then Undo leaves an exercise's structure part open (CODE-4).
+
+**Next step.** Merge the two fixers' branches and the board package, review the fixes' diffs, put both parts in `OPEN_PARTS` and `OPEN`, run `scripts/check-shapes.mjs` and `scripts/check-exercise.mjs` at both sizes, and push again.
+
+## 2026-11-17 (lead) Hooks for the shapes quiz and the exercises, and a parallel build that is paused
+
+**State.** On the branch `lewis/review-modes`, in the worktree `chem-review-review`, local only. Sam asked for the work on 2026-11-17 (D-0030 quotes him) and wrote "pause all for now i need to go home" a few minutes after five builders started. They were stopped while still reading, so their five worktrees are clean and nothing of theirs is built. The main checkout was not touched: another session was working there the same day (free build dipoles, D-0029).
+
+**Changed** (commit `be3fa65`, on top of `63c3a57`, a snapshot of the main checkout's uncommitted work)
+- `src/modules/lewis/parts.ts`: the contract for a part of the module, a mode with its own panel. Stub parts in `src/modules/lewis/shapes/` and `src/modules/lewis/exercise/`.
+- `src/modules/lewis/store.ts` and `ui.ts`: four modes, the part hooks, `update()`, `markSolved()`, saved ids with a prefix (`shape:`, `ex:`).
+- `src/modules/lewis/LewisModule.tsx`: a `start` prop. `src/app/lewis.tsx`, `shapes.tsx`, `exercises.tsx`: three routes on one screen, three saved lists. `src/modules/registry.ts`: three cards.
+- `src/chem/exercises.ts` (a stub pool with its final exports), `ALL_CASES` in `src/chem/vsepr.ts`, `geometryChoices()` and `geometryFeedback()` in `guide.ts` as stubs, `SceneInput.groupsView` declared in `scene.ts`.
+- Not committed: D-0030, D-0031, `docs/architecture.md`, `docs/roadmap.md` (W-023 to W-028).
+
+**Checked.** `pnpm verify` on `be3fa65`: exit 0, 455 unit tests. Browser, desktop, port 5220: the `shell` run 78 passed and 1 failed, the first two guided molecules 130 passed and 2 failed. All three failures were "lift finished" at 0.96 to 0.99 while the other session's browser checks were using the machine. `phone shell` failed with a tap that timed out after "finish methane, then go back": four tabs at 390 px are the likely cause, and nobody has looked.
+
+**Asks**
+- Sam: the three readings under "Waiting on Sam" in `~/Documents/Claude/chem-review-review-modes-2026-11-17/RESUME.md`.
+- `pnpm check:repo` prints 10 REF problems here until D-0032 to `D-0036` are written by the builders.
+
+**Next step.** `~/Documents/Claude/chem-review-review-modes-2026-11-17/RESUME.md` has the steps: bring the baseline up to date with the main checkout, relaunch the five builders from `LAUNCH.md`, merge, review, verify.
+## 2026-11-17 (chem) What changed: four fixes from the chemistry review of the exercise pool
+
+**State.** Committed on the branch `chem/exercise-pool` (fix round 1 of package CHEM). D-0032 stays provisional.
+
+**Changed**
+- `src/chem/polarity.ts`: the formal-charge rule for a ΔEN of 0 now needs two atoms of the same element (it fired for P–H, C–S, C–I, N–Cl). Like outer atoms share their formal charges equally before the arrows are sized, so ozone's two arrows are equal and its net dipole runs along the bisector for either drawing.
+- `src/chem/assess.ts`: in free build `shortCenter` also needs the middle atom at exactly 6 (two short of 8) with a formal charge of at most +1, so OH2 4+, CH2 2+, CH 3+, NH2 3+, BH2+ and BeH+ with their unshared electrons taken off are short again. With a target species nothing changed.
+- Tests first: `tests/assess.test.ts` (8 new), `tests/polarity.test.ts` (2 new), and the PH2− row in `tests/exercises.test.ts` flipped from polar to nonpolar (the old value applied the ozone rule to P–H).
+- Docs: `docs/chemistry/sources.md` (CH3+ citation and two-atom electron geometry marked [TBD], the ozone rule, five course-dependent conventions in the known gaps), D-0032 (decision and consequences).
+
+**Checked.** Each new test failed on the old code (assess: `complete` was true; polarity: arrows 10 and 20 for ozone, PH2− polar) and passes now. `pnpm verify` exits 0.
+
+**Asks.**
+- Lewis: the `'charges'` reason now only comes from bonds between atoms of one element; the guide's sentence for it still reads right. PH2− shows nonpolar in exercises.
+- Sam: IF's electron geometry (linear in the app; tetrahedral if the course treats iodine as a middle atom) and the conventions listed in the known gaps.
+
+**Next.** Read OpenStax 7.3 to settle the CH3+ citation. Sam checks IF against the instructor's key.
+
+## 2026-11-17 (chem) What changed: the exercise pool, the electron geometry on every problem, and two-atom molecules in the engine
+
+**State.** Committed on the branch `chem/exercise-pool` (package CHEM of the review-modes run). Sam asked for it on 2026-11-17 (the lead's record of that ask is not on this branch); how it is built here is D-0032, provisional.
+
+**Changed**
+- `src/chem/exercises.ts`: `EXERCISES` holds 43 molecules in six `EXERCISE_SETS`: the worksheet's 20 in the sheet's order (six are the guided problems' own objects), 8 two-atom molecules, then single bonds, double bonds, ions, and fewer or more than 8 electrons. `hasResonance` counts only drawings with the same bonds and charges.
+- `src/chem/problems.ts`: `Problem.geometry` (the electron geometry) is required, and set on all 20 guided problems.
+- `src/chem/vsepr.ts`: aliases `ElectronGeometry` and `MolecularGeometry`; the `ShapeInfo` comment says what the counts mean for two atoms.
+- `src/chem/assess.ts`: `shortCenter` lets a middle atom finish short when the electron count leaves no other drawing and it has no unshared electrons (CH3+). A named atom of a two-atom molecule gets no room past 8.
+- `tests/exercises.test.ts` (new, 279 tests) and `drawn()` in `tests/helpers.ts`. Docs: D-0032, `docs/chemistry/sources.md`, `src/chem/AGENTS.md`, `tests/AGENTS.md`.
+
+**Checked.** `pnpm verify` exits 0. With the baseline `assess.ts` four of the new tests fail (CH3+ and I=F), so they test the change.
+
+**Asks.**
+- Lead: add `{ "path": "tests/exercises.test.ts", "team": "chem" }` to `docs/ownership.json`; it falls under the EXERCISE package's `tests/exercise*.test.ts` pattern by name.
+- Lewis: code that compares an atom's count with its target will still call carbon in CH3+ short; read `AtomReport.status` or the issues. For two atoms, `ShapeInfo.groups` is not an electron-group count that sets the geometry, so do not print it as one. SCl2, HCl, N2, O2, F2, O3, NO3−, BeCl2, BCl3, CCl4, NF3 are also term-card samples (`SAMPLES` in `src/modules/lewis/guide.ts`): the L10 rule needs those cards to pick another example when one of these is the exercise on screen.
+- Sam: CH3− (nonpolar) and PH2− (polar) follow the app's rules literally; see the known gaps in `docs/chemistry/sources.md`.
+
+**Next.** Learning reads the names and set titles. Sam confirms D-0032.
+## 2026-11-17 (lewis) The exercises: one molecule worked as the worksheet's row, part by part, with no steps and no hints
+
+**State.** Built on the branch `lewis/exercises` in the worktree `chem-review-exercise`, package EXERCISE of the
+review-modes run. Committed on that branch only. Sam's ask is D-0030 and is quoted in D-0035; how it is built is this session's
+design and is provisional (D-0035).
+
+**Changed**
+- `src/modules/lewis/exercise/`: `sheet.ts` (each part's answer from the engine's finished structure, and the picks),
+  `state.ts` (the checks, locks, reset on a board change, the next-molecule rule, saved ids), `words.ts` (every
+  sentence), `terms.ts` (which key terms stay plain), `part.ts` (the panel, counter, strip of checks, cue, presses,
+  keys, angle labels), `exercise.css`, `AGENTS.md` (EX3 to EX5).
+- `tests/exercise.test.ts`, `tests/exercise-words.test.ts`, `tests/exercise-terms.test.ts`, `tests/exercise-pool.ts`:
+  69 tests over the pool and the 20 worksheet molecules plus 8 of two atoms, answers worked by hand.
+- `scripts/check-exercise.mjs`: the real-input browser check of the exercises.
+- Docs: `docs/learning/exercises.md` (new, in the map), D-0035, the lists in `tests/AGENTS.md` and `scripts/AGENTS.md`.
+- No file outside these. The part contract was enough: no part hook was added.
+
+**Checked.** `pnpm verify` exit 0 (524 tests). `node scripts/check-exercise.mjs desktop` and `phone` against the
+build served on port 5233: see the report for the numbers. Screenshots looked at: the empty sheet, a wrong-answer
+card and the finished sheet with the model, at both sizes.
+
+**Asks**
+- shell or lewis (owner of `src/modules/lewis/ui.ts`): `window.__mb.cue().cue` returns `store.cue()`, which is null
+  in a part's mode. Return `PARTS[s.mode]?.cue?.(s) ?? null` there for a part, as `render` does, so a check can read
+  a part's cue. `scripts/check-exercise.mjs` reads the glows instead until then.
+- lewis (owner of `ui.ts`): outside the guided steps a key term's card opens with no molecule (`termCard(id, null,
+  null)`), so in the exercises `src/modules/lewis/exercise/terms.ts` keeps plain every term whose card could give a
+  part away. Passing the exercise's molecule there would let more terms open.
+- chem: `src/chem/polarity.ts` calls a bond polar from formal charges whenever ΔEN is 0, so P–H in PH2− is polar
+  and the ion's dipoles "do not cancel". The slides use that rule only for two atoms of one element (ozone).
+  `tests/exercise-pool.ts` keeps PH2− in `ENGINE_GAPS` with a test that fails once the engine is fixed.
+- lead: add `docs/ownership.json` rows for `tests/exercise*.ts` (team lewis, review learning) and cite the lead's record of Sam's request in
+  D-0035 once that record is on the branch (the repo check fails on a decision id that is not in `docs/decisions/`).
+
+**Next.** Run the exercise tests against the full pool at the merge, and Sam's answer on D-0035.
+## 2026-11-17 (lewis) The shapes quiz: a series of all 13 shapes, then a quiz that brings missed ones back until each is known
+
+**State.** Built by the QUIZ session on the branch `lewis/shapes-quiz`, in its own worktree, on top of be3fa65 (the lead's part hooks). Sam asked for the feature on 2026-11-17 (the lead's record of the ask is D-0030). How it works is this session's design: D-0034, provisional.
+
+**Changed** (all inside the files the QUIZ package owns)
+- `src/modules/lewis/shapes/deck.ts` (new): the 13 rows, one guided example per row (13 different molecules), the choices, a seeded random source, and the deck: a missed row comes back after one other question, a row is known after 2 questions on it in a row are right on the first try, known rows are saved with `markSolved('shape:<bonded>,<lone pairs>')`.
+- `src/modules/lewis/shapes/words.ts` (new): every sentence the quiz shows, the wrong-answer cards (the electron geometry given for the molecular geometry and the other way round, the lone pairs left out, the ideal angle where lone pairs squeeze it, a squeezed angle where nothing does), and `blockedTerms`, which leaves a key term plain while a question is open when its card or a related card states the answer.
+- `src/modules/lewis/shapes/state.ts`, `part.ts`, `shapes.css`: the series (card, readout, how the two geometries differ, why the angle is what it is, list of all 13 by electron geometry, the switch under the model that hands the board `groupsView`), and the quiz (13 dots for progress, the question, plain-text choices, the cards, the result with the model's angle marks, the known list, a burst when a row becomes known and when all 13 are).
+- `tests/shapes.test.ts`, `tests/shapes-words.test.ts` (new, 49 tests), `scripts/check-shapes.mjs` (new).
+- Docs: `docs/learning/shapes-quiz.md` (new), D-0034, the map line in `docs/README.md`, the file lists in `src/modules/lewis/shapes/AGENTS.md`, `tests/AGENTS.md`, `scripts/AGENTS.md`.
+
+**Not done here, on purpose.** `groupsView` is passed to the board but this worktree's `scene.ts` does not draw it yet (package BOARD/GUIDED does). No part hook was added: nothing in `ui.ts`, `store.ts`, `guide.ts`, `scene.ts` or `parts.ts` changed. The quiz writes its own wrong-answer words instead of `shapeFeedback`, whose first card gives the answer.
+
+**Checked.** `pnpm verify` exits 0 (504 unit tests, 49 of them new; `check-repo: ok`; web export). Against the served build on port 5232, each run under the shared browser lock: `node scripts/check-shapes.mjs desktop` 103 passed, 0 failed; `phone` 107 passed, 0 failed; `node scripts/check-browser.mjs desktop 0 2` 132 passed, 0 failed. Screenshots looked at by eye at both sizes: a series card, an open question, a wrong-answer card, the known screen. On a phone the model stays in view above the switch, and the choices of the longest question (the bond angle) fit under the board without scrolling once the dots wait for the answer.
+
+**Found and fixed on the way.** "counts the the lone pair" on the series cards (the scan now fails on a doubled word). On a phone the choices sat below the fold and could not glow as a whole: the choices now come straight after the question, the definition and the how-to line follow them, and the dots and the question number are hidden on a narrow screen while a question is open (the heading says how many are known). On a phone the result scrolled out of view: the result and "known" lines now come first once a question is finished.
+
+**Asks.**
+- Lead: owners for the two new test files in `docs/ownership.json` (team lewis; reviewers chem and learning); D-0030 is cited in code spans because it is not in this worktree, drop the backticks after the merge; a `docs/verified.md` entry from the numbers above.
+- Lead (seen, not mine): at 390 px wide the four mode tabs cover the Modules back button in the top bar (`topbar()` in `src/modules/lewis/ui.ts` and its styles).
+- GUIDED: when `groupsView: 'atoms'` is drawn, `node scripts/check-shapes.mjs` still only checks that the flag is passed. A check that the lone pairs disappear belongs with the drawing.
+- Sam: the rule of 2, the four kinds of question, the 13 examples (D-0034).
+
+**Next.** Merge, then look at the switch with the real drawing of `groupsView`.
 ## 2026-11-17 (lewis) The net dipole label stays clear of the strip of checks on a phone
 
 Sam wrote on 2026-11-17: "fix the net dipole label on phone". On a phone the board reaches under the lower half of the strip of checks (see `measure()` in `ui.ts`), and the "net dipole" label past the arrowhead landed there, hidden.
@@ -41,6 +192,25 @@ Sam wrote on 2026-11-17: "check the chemistry review module we made, i want to a
 - design: on a phone the "net dipole" label above the 3D model sits under the strip of checks. Guided step 6 does the same (`shots/phone-H2O-polar.png`), so it is older than this change. On the flat drawing a δ+ tag can cover an atom's electron count.
 
 **Next step.** Sam reads the free build lines and the key terms cards on the live site and confirms or changes D-0028 and the wording in D-0029.
+## 2026-11-17 (lewis) Step 5 asks for the electron geometry and then the molecular geometry, and every sentence uses the two names
+
+**State.** Package FLOW of the review-modes run, on the branch `lewis/geometry-names` in the worktree `chem-review-flow`. Committed on that branch only; nothing pushed.
+
+Sam asked on 2026-11-17 for the app to tell electron geometry and molecular geometry apart through the whole app, and for 3D models of molecules with no middle atom (D-0030). How the guided steps, the cards and free build carry it is this session's design (D-0033, provisional).
+
+**Changed**
+- `src/modules/lewis/guide.ts`: `groupsQuestion`, `geometryQuestion` and `shapeQuestion` hold step 5's three questions (they were inline in `ui.ts`). `geometryFeedback` is real: it names the wrong idea (the molecular geometry's own name, the bonded atoms alone, each shared pair counted as a group, or what the pick goes with), gives the rule on the second miss and the answer on the third. Its signature is the lead's, with two optional arguments added at the end (`tries`, the board's group facts). `shapeFeedback`, step 6's reasons, the hints, `finishedLine`, the shape-name cards and the dipole cards say "electron geometry" or "molecular geometry". New card `electron-geometry`; the card with id `shape` is now "Molecular geometry". `plainTerms(step, namesOpen)` keeps the names of the geometries plain in step 5 until the molecular geometry is picked. `twoAtomsLine`, and `shapeReadout`, `netReason` and `bondKindsOn` handle a molecule of two atoms.
+- `src/modules/lewis/store.ts`: `ShapeState` gains `geometry`, `geometryRight`, `geometryTries`, `geometryFeedback`, `geometryCoach`; `pickGeometry()`; `pickShape()` waits for the electron geometry; `cue()` names `geometry`; hints follow the open question and start again after each right answer.
+- `src/modules/lewis/ui.ts`: `stepShape` asks the three questions (chips `geo-<name>`, `data-cue="geometry"`), `readout` rows are Molecular geometry, Electron geometry, Electron groups, Bond angle (no groups row and no drag line for two atoms), the board rings the groups a wrong electron geometry is about, and free build says plainly when a molecule has two atoms. One change in the shared cue code: once a question has arrived, if its choices are cut off at the edge of the panel, the panel scrolls them into view once (`cueBrought` in `controlGlow`); on a phone the five electron geometry names take three rows and were cut off. Not touched: `topbar()`, `dock()`, the `groupsView` line, `scene.ts`, `styles.css`.
+- Tests: `tests/guide.test.ts`, `tests/store.test.ts`, `tests/terms.test.ts`. `scripts/check-browser.mjs`: the guided run answers the electron geometry with real input and checks the readout rows; `extras` adds a wrong electron geometry for CO2 and H2O and hydrogen chloride in free build; `terms` opens the two new cards.
+- From the lead's two notes (CHEM's findings): `geometryFeedback` and `shapeFeedback` have their own lines for a molecule of two atoms, with no middle atom and no group count; every card's example skips the molecule on screen (`pick()` in `src/modules/lewis/guide.ts`), with a second example for each card and 8 new samples. `tests/terms.test.ts` checks it for every guided problem and every entry of `EXERCISES`.
+- Docs: D-0033, `docs/learning/guided-steps.md`, `docs/learning/wrong-answers.md`.
+
+**Checked.** `pnpm verify` and the browser runs at both sizes; the numbers are in the report at `/Users/sam/Documents/Claude/chem-review-review-modes-2026-11-17/reports/FLOW.md`.
+
+**Asks.** Chem: cite a source for "the electron geometry of a molecule of two atoms is linear" in `docs/chemistry/sources.md`, or tell Sam that some texts give HCl's chlorine a tetrahedral electron-pair geometry. Lead: the QUIZ and EXERCISE parts can pass `tries` and `groupFacts(s)` to `geometryFeedback` to get the second and third miss and the double-bond case.
+
+**Next.** Sam to confirm D-0033: the electron geometry asked before the molecular geometry, the three tries, and the two-atom wording.
 
 ## 2026-11-16 (lewis) Key terms are highlighted, and each opens a card with its meaning, an example and a picture
 

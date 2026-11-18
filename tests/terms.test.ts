@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { ELEMENTS, type El } from '../src/chem/elements'
 import { sigmaPi } from '../src/chem/orbitals'
 import { bondPolarity, moleculePolarity } from '../src/chem/polarity'
+import { EXERCISES } from '../src/chem/exercises'
 import { PROBLEMS, speciesOf, type Problem } from '../src/chem/problems'
 import { EMPTY } from '../src/chem/structure'
 import type { ShapeName } from '../src/chem/vsepr'
@@ -80,6 +81,16 @@ describe('the molecules the cards use as examples', () => {
       'ICl4-': [[1, 1, 1, 1], 4, [6, 6, 6, 6]],
       'OH-': [[1], 6, [0]],
       'BF4-': [[1, 1, 1, 1], 0, [6, 6, 6, 6]],
+      // the second examples, worked from valence electrons: BeF2 2 + 14 = 16, CS2 4 + 12 = 16 (S=C=S),
+      // AsF5 5 + 35 = 40, SeCl4 6 + 28 = 34, ICl3 7 + 21 = 28, PF6− 5 + 42 + 1 = 48, ClF5 7 + 35 = 42, BrF4− 7 + 28 + 1 = 36
+      BeF2: [[1, 1], 0, [6, 6]],
+      CS2: [[2, 2], 0, [4, 4]],
+      AsF5: [[1, 1, 1, 1, 1], 0, [6, 6, 6, 6, 6]],
+      SeCl4: [[1, 1, 1, 1], 2, [6, 6, 6, 6]],
+      ICl3: [[1, 1, 1], 4, [6, 6, 6]],
+      'PF6-': [[1, 1, 1, 1, 1, 1], 0, [6, 6, 6, 6, 6, 6]],
+      ClF5: [[1, 1, 1, 1, 1], 2, [6, 6, 6, 6, 6]],
+      'BrF4-': [[1, 1, 1, 1], 4, [6, 6, 6, 6]],
     }
     for (const m of Object.values(SAMPLES)) {
       if (m.id === 'O3' || m.id === 'NO3-') continue // the two with resonance structures, checked below
@@ -143,6 +154,14 @@ describe('the molecules the cards use as examples', () => {
       SeF6: [6, 0, 'octahedral', '90°'],
       IF5: [5, 1, 'square pyramidal', 'less than 90°'],
       'ICl4-': [4, 2, 'square planar', '90°'],
+      BeF2: [2, 0, 'linear', '180°'],
+      CS2: [2, 0, 'linear', '180°'],
+      AsF5: [5, 0, 'trigonal bipyramidal', '90° and 120°'],
+      SeCl4: [4, 1, 'seesaw', 'less than 90° and less than 120°'],
+      ICl3: [3, 2, 'T-shaped', 'less than 90°'],
+      'PF6-': [6, 0, 'octahedral', '90°'],
+      ClF5: [5, 1, 'square pyramidal', 'less than 90°'],
+      'BrF4-': [4, 2, 'square planar', '90°'],
     }
     for (const [id, want] of Object.entries(expected)) {
       const m = Object.values(SAMPLES).find((x) => x.id === id)!
@@ -171,6 +190,10 @@ describe('the molecules the cards use as examples', () => {
     expect(count(SAMPLES.F2)).toEqual({ sigma: 1, pi: 0 })
     expect(count(SAMPLES.O2)).toEqual({ sigma: 1, pi: 1 })
     expect(count(SAMPLES.N2)).toEqual({ sigma: 1, pi: 2 })
+    expect(count(SAMPLES.H2)).toEqual({ sigma: 1, pi: 0 })
+    expect(count(SAMPLES.CN)).toEqual({ sigma: 1, pi: 2 })
+    // carbon disulfide: two C=S bonds, each 1 sigma and 1 pi
+    expect(sigmaPi(star(['C', 'S', 'S'], [2, 2]).s)).toEqual({ sigma: 2, pi: 2 })
   })
 
   it('are written with subscripts and a raised charge', () => {
@@ -186,8 +209,8 @@ describe('the molecules the cards use as examples', () => {
 
 describe('what the cards say', () => {
   it('gives every term a name, a meaning, an example and a picture', () => {
-    expect(BASE_TERMS.length).toBe(29)
-    expect(ALL_TERMS.length).toBe(40)
+    expect(BASE_TERMS.length).toBe(30)
+    expect(ALL_TERMS.length).toBe(41)
     for (const id of ALL_TERMS) {
       const c = termCard(id)
       expect(c.name.length, id).toBeGreaterThan(1)
@@ -260,9 +283,17 @@ describe('what the cards say', () => {
     expect(bondPolarity('F', 'F').kind).toBe('nonpolar')
   })
 
-  it('names shapes, groups, angles and hybrid orbitals as section 7.6 and the chapter 8 slides do', () => {
+  it('names geometries, groups, angles and hybrid orbitals as section 7.6 and the chapter 8 slides do', () => {
     expect(termCard('electron-group').example).toBe('In nitrogen trifluoride, NF₃, nitrogen has 3 bonded atoms and 1 lone pair, which is 4 electron groups.')
-    expect(termCard('shape').example).toBe('In nitrogen trifluoride, NF₃, nitrogen has 3 bonded atoms and 1 lone pair. The 4 groups spread out, and the atoms make a trigonal pyramidal shape.')
+    // the card for the molecular geometry keeps the id 'shape'
+    expect(termName('shape')).toBe('Molecular geometry')
+    expect(termName('electron-geometry')).toBe('Electron geometry')
+    expect(termCard('shape').example).toBe('In nitrogen trifluoride, NF₃, nitrogen has 3 bonded atoms and 1 lone pair. The 4 electron groups point to the corners of a tetrahedron, and the 3 fluorine atoms sit at 3 of them, so the molecular geometry is trigonal pyramidal.')
+    expect(termCard('electron-geometry').example).toBe('In nitrogen trifluoride, NF₃, nitrogen has 3 bonded atoms and 1 lone pair, which is 4 electron groups. The electron geometry is tetrahedral, and the molecular geometry is trigonal pyramidal.')
+    // with methane on screen (4 groups, tetrahedral and tetrahedral) both cards turn to bromine trifluoride: 3 bonded atoms and 2 lone pairs
+    const ch4 = PROBLEMS.find((p) => p.id === 'CH4')!
+    expect(termCard('electron-geometry', ch4).example).toBe('In bromine trifluoride, BrF₃, bromine has 3 bonded atoms and 2 lone pairs, which is 5 electron groups. The electron geometry is trigonal bipyramidal, and the molecular geometry is T-shaped.')
+    expect(termCard('shape', ch4).example).toBe('In bromine trifluoride, BrF₃, bromine has 3 bonded atoms and 2 lone pairs. The 5 electron groups point to the corners of a trigonal bipyramid, and the 3 fluorine atoms sit at 3 of them, so the molecular geometry is T-shaped.')
     expect(termCard('bond-angle').example).toBe('In boron trichloride, BCl₃, the angle between any 2 B–Cl bonds is 120°.')
     expect(termCard('hybridization').example).toBe('In boron trichloride, BCl₃, boron has 3 electron groups. Boron mixes 1 s orbital and 2 p orbitals into 3 sp² orbitals, so boron is sp².')
     // with a molecule of 3 groups on screen the card shows 2 groups
@@ -271,11 +302,15 @@ describe('what the cards say', () => {
     expect(termCard('bond-angle', bf3).example).toBe('In carbon tetrachloride, CCl₄, the angle between any 2 C–Cl bonds is 109.5°.')
     expect(termCard('cancel').example).toBe('In beryllium chloride, BeCl₂, the 2 Be–Cl arrows are the same size and point in opposite directions, so they cancel.')
     expect(termCard('cancel', PROBLEMS.find((p) => p.id === 'CO2')!).example).toBe('In boron trichloride, BCl₃, the 3 B–Cl arrows are the same size and are 120° apart in a flat triangle, so they cancel.')
-    expect(termCard('net-dipole', PROBLEMS.find((p) => p.id === 'NH3')!).example).toBe('In sulfur dichloride, SCl₂, each of the 2 S–Cl arrows points at chlorine. In the bent shape the arrows all lean toward the same side, so they add up to a net dipole.')
-    expect(termCard('shape:bent').means).toBe('2 atoms sit on the same side of the middle atom, so the 3 atoms make a V. A middle atom with 2 bonded atoms and 1 lone pair, or with 2 bonded atoms and 2 lone pairs, has this shape.')
-    expect(termCard('shape:square planar').example).toBe('The shape of the tetrachloroiodate ion, ICl₄⁻, is square planar. The bond angle is 90°.')
-    expect(termCard('shape:trigonal bipyramidal').example).toBe('The shape of phosphorus pentafluoride, PF₅, is trigonal bipyramidal. The bond angles are 90° and 120°.')
-    expect(termCard('shape:tetrahedral').note).toBeNull()
+    expect(termCard('net-dipole', PROBLEMS.find((p) => p.id === 'NH3')!).example).toBe('In sulfur dichloride, SCl₂, each of the 2 S–Cl arrows points at chlorine. In the bent molecular geometry the arrows all lean toward the same side, so they add up to a net dipole.')
+    expect(termCard('shape:bent').means).toBe('2 atoms sit on the same side of the middle atom, so the 3 atoms make a V. A middle atom with 2 bonded atoms and 1 lone pair, or with 2 bonded atoms and 2 lone pairs, has this molecular geometry.')
+    expect(termCard('shape:square planar').example).toBe('The molecular geometry of the tetrachloroiodate ion, ICl₄⁻, is square planar. The bond angle is 90°.')
+    expect(termCard('shape:trigonal bipyramidal').example).toBe('The molecular geometry of phosphorus pentafluoride, PF₅, is trigonal bipyramidal. The bond angles are 90° and 120°.')
+    // the five names that are also electron geometries say so; a name that leaves out lone pairs says that
+    expect(termCard('shape:tetrahedral').note).toBe('Tetrahedral is also the electron geometry of a middle atom with 4 electron groups, lone pairs included.')
+    expect(termCard('shape:linear').note).toBe('Linear is also the electron geometry of a middle atom with 2 electron groups, lone pairs included. A molecular geometry names where the atoms are. The lone pairs on the middle atom take up room and are left out of the name.')
+    expect(termCard('shape:bent').note).toBe('A molecular geometry names where the atoms are. The lone pairs on the middle atom take up room and are left out of the name.')
+    expect(termCard('shape:bent').related.map((r) => r.id)).toEqual(['shape', 'electron-geometry', 'bond-angle'])
   })
 })
 
@@ -390,6 +425,33 @@ describe('a card never works on the molecule on screen', () => {
     expect(termCard('resonance', PROBLEMS.find((p) => p.id === 'CO3 2-')!).about.samples[0]!.id).toBe('O3')
   })
 
+  it('never uses the molecule on screen as its example, for every guided problem and every exercise', () => {
+    // an exercise can be one of the cards' own examples (sulfur dichloride is the bent card's), so each card has a second one
+    const screens = [...PROBLEMS, ...EXERCISES]
+    expect(EXERCISES.length).toBeGreaterThan(0)
+    for (const p of screens) {
+      for (const id of ALL_TERMS) {
+        const c = termCard(id, p)
+        for (const m of c.about.samples) expect(sameSpecies(m, p), `${id} with ${p.id} on screen shows ${m.id}`).toBe(false)
+        expect(textOf(id, p).toLowerCase(), `${id} for ${p.id}`).not.toContain(p.name.replace(/^the /, '').toLowerCase())
+      }
+    }
+    // sulfur dichloride on screen: the bent card shows hydrogen sulfide
+    const scl2 = screens.find((p) => p.id === 'SCl2')!
+    expect(termCard('shape:bent', scl2).example).toBe('The molecular geometry of hydrogen sulfide, H₂S, is bent. The bond angle is less than 109.5°.')
+    // a nitrogen or oxygen molecule on screen: the cards about bonds turn to the cyanide ion and carbon disulfide
+    const n2: Problem = { id: 'N2', formula: [['N', 2]], charge: 0, center: 'N', name: 'nitrogen', group: PROBLEMS[0]!.group, geometry: 'linear', shape: 'linear' }
+    const o2: Problem = { ...n2, id: 'O2', formula: [['O', 2]], center: 'O', name: 'oxygen' }
+    expect(termCard('pi', n2).example).toBe('An oxygen molecule, O₂, has a double bond: 1 sigma bond and 1 pi bond. The cyanide ion, CN⁻, has a triple bond: 1 sigma bond and 2 pi bonds.')
+    expect(termCard('pi', o2).example).toBe('Carbon disulfide, CS₂, has 2 double bonds, and each is 1 sigma bond and 1 pi bond. A nitrogen molecule, N₂, has a triple bond: 1 sigma bond and 2 pi bonds.')
+    expect(termCard('pi', o2).pictureLabel).toBe('A carbon atom joined to 2 sulfur atoms by 2 lines marked σ and π each, and two nitrogen atoms joined by 3 lines marked σ, π and π.')
+    for (const p of [n2, o2]) for (const id of ALL_TERMS) for (const m of termCard(id, p).about.samples) expect(sameSpecies(m, p), `${id} with ${p.id}`).toBe(false)
+    // with nothing on screen the cards keep their first examples
+    expect(termCard('pi').pictureLabel).toBe('Two oxygen atoms joined by 2 lines marked σ and π, and two nitrogen atoms joined by 3 lines marked σ, π and π.')
+    expect(termCard('multiple').pictureLabel).toBe('Two fluorine atoms joined by 1 line, two oxygen atoms joined by 2 lines, and two nitrogen atoms joined by 3 lines.')
+    expect(termCard('sigma').example).toBe('A fluorine molecule, F₂, has a single bond, which is 1 sigma bond. An oxygen molecule, O₂, has a double bond: 1 sigma bond and 1 pi bond.')
+  })
+
   it('never shows a guided problem or names the molecule on screen', () => {
     for (const p of PROBLEMS) {
       for (const id of ALL_TERMS) {
@@ -403,11 +465,34 @@ describe('a card never works on the molecule on screen', () => {
   it('shows another count of electron groups than the middle atom has, in the cards about groups and hybridization', () => {
     expect(Object.keys(GROUPS).sort()).toEqual(PROBLEMS.map((p) => p.id).sort())
     for (const p of PROBLEMS) {
-      for (const id of ['electron-group', 'hybridization'] as const) {
+      for (const id of ['electron-group', 'hybridization', 'electron-geometry', 'shape'] as const) {
         const m = termCard(id, p).about.samples[0]!
         expect(sampleShape(m).groups, `${id} for ${p.id}`).not.toBe(GROUPS[p.id])
       }
     }
+  })
+
+  it('names neither of the molecule’s geometries in the cards about the electron geometry and the molecular geometry', () => {
+    // section 7.6: the electron geometry follows the number of groups around the middle atom
+    const BY_GROUPS: Record<number, string> = { 2: 'linear', 3: 'trigonal planar', 4: 'tetrahedral', 5: 'trigonal bipyramidal', 6: 'octahedral' }
+    for (const p of PROBLEMS) {
+      for (const id of ['electron-geometry', 'shape'] as const) {
+        const text = textOf(id, p)
+        for (const name of [BY_GROUPS[GROUPS[p.id]!]!, p.shape]) expect(text, `${id} for ${p.id} names ${name}`).not.toMatch(new RegExp(`(?<![\\w-])${name}(?![\\w-])`, 'i'))
+      }
+    }
+  })
+
+  it('leaves the names of the geometries plain in step 5 until the molecular geometry is picked', () => {
+    const shapeNames = ALL_TERMS.filter((id) => id.startsWith('shape:'))
+    expect(shapeNames).toHaveLength(11)
+    for (const id of shapeNames) {
+      expect(plainTerms('shape', true), id).toContain(id)
+      expect(plainTerms('shape', false), id).not.toContain(id)
+      expect(plainTerms('polar', true), id).not.toContain(id)
+    }
+    // the line that confirms the electron geometry: its name stays plain, and the two terms that open are the ones the question itself already opened
+    expect(terms('The electron geometry is tetrahedral: 4 electron groups around carbon.', plainTerms('shape', true))).toEqual(['electron geometry=electron-geometry', 'electron groups=electron-group'])
   })
 
   it('shows another shape than the molecule has, in the cards about shape, angles and dipoles', () => {
@@ -458,6 +543,9 @@ describe('which words are highlighted', () => {
     expect(terms('Oxygen pulls the shared electrons harder, so oxygen is δ− and carbon is δ+.')).toEqual(['shared electrons=bond', 'δ−=partial', 'δ+=partial'])
     expect(terms('The first bond between two atoms is a sigma bond. A second or third bond between the same two atoms is a pi bond.')).toEqual(['bond=bond', 'sigma bond=sigma', 'bond=bond', 'pi bond=pi'])
     expect(terms('How many electron groups are around carbon?')).toEqual(['electron groups=electron-group'])
+    expect(terms('What is the electron geometry around carbon?')).toEqual(['electron geometry=electron-geometry'])
+    expect(terms('The molecular geometry names where the atoms are.')).toEqual(['molecular geometry=shape'])
+    expect(terms('Tetrahedral is the electron geometry: all 4 electron groups around nitrogen.')).toEqual(['Tetrahedral=shape:tetrahedral', 'electron geometry=electron-geometry', 'electron groups=electron-group'])
     expect(terms('Every atom has a full shell. The formal charges are as small as they can be.')).toEqual(['full shell=full-shell', 'formal charges=formal-charge'])
     expect(terms('Nitrogen is in group 15. For groups 13 to 18, subtract 10 from the group number.')).toEqual(['group 15=group', 'groups 13 to 18=group', 'group number=group'])
     expect(terms('Atoms from period 3 onward can hold more than 8.')).toEqual(['period 3=group', 'more than 8=expanded'])
@@ -472,6 +560,7 @@ describe('which words are highlighted', () => {
     expect(terms('Trigonal bipyramidal, with bond angles of 90° and 120°.')).toEqual(['Trigonal bipyramidal=shape:trigonal bipyramidal', 'bond angles=bond-angle'])
     expect(terms('A T-shaped molecule and a square planar ion.')).toEqual(['T-shaped=shape:T-shaped', 'square planar=shape:square planar', 'ion=ion'])
     expect(terms('What shape do the atoms make?')).toEqual(['shape=shape'])
+    expect(terms('Bromine trifluoride drawn in 3D. Its molecular geometry is T-shaped.')).toEqual(['molecular geometry=shape', 'T-shaped=shape:T-shaped'])
   })
 
   it('leaves "bond" plain where it is the verb, and "cancel" plain where the sentence is not about dipoles', () => {

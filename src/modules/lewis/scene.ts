@@ -90,6 +90,10 @@ export interface SceneInput {
   } | null
   /** An atom dropped from the tray onto an atom on the board is bonded to it in the same move. */
   dropBonds: boolean
+  /** Which electron groups of the middle atom the lifted model shows. 'all' (the default) draws the
+   *  lone pairs with the bonded atoms: the electron geometry. 'atoms' leaves the lone pairs out, so
+   *  only the atoms are seen: the molecular geometry. The groups keep their places either way. */
+  groupsView?: 'all' | 'atoms'
 }
 
 interface ArrowView {

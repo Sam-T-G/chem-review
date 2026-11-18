@@ -1,0 +1,43 @@
+/* The exercises. Colors, radii and font names come from the tokens (L5). The sheet reuses the
+   module's question, choice, card and table styles; this file lays out the parts of the sheet. */
+
+/* each part of the sheet is a card with its column name on top */
+.mb .ex-part { margin: 0 0 14px; padding: 12px 14px 4px; border-radius: var(--r-m); background: var(--paper); box-shadow: inset 0 0 0 2px var(--tint-2), 0 3px 0 var(--paper-lip); }
+.mb .ex-part[data-state='right'], .mb .ex-part[data-state='given'] { box-shadow: inset 0 0 0 2px var(--mint-line), 0 3px 0 var(--mint-lip); }
+.mb .ex-h { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-family: var(--display); font-size: 15px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; color: var(--ink-2); }
+.mb .ex-h .mb-mark { width: 22px; height: 22px; }
+.mb .ex-h .mb-mark svg { width: 13px; height: 13px; }
+.mb .ex-h .mb-mark[data-wait='true'] { background: var(--tint); box-shadow: inset 0 0 0 1.5px var(--tint-2); }
+/* the open part's mark breathes, so the sheet never sits still */
+.mb .ex-part[data-state='open'] .ex-h .mb-mark { animation: ex-breathe 2.4s var(--ease) infinite; animation-delay: calc(var(--now, 0) * -1s); }
+@keyframes ex-breathe { 50% { scale: 1.12; } }
+.mb .ex-part .mb-q { font-size: 17px; }
+.mb .ex-part .mb-how { margin-bottom: 10px; }
+.mb .ex-part > .mb-btn { margin: 0 0 12px; }
+.mb .ex-part .mb-choice { font-size: 15px; }
+
+/* bond polarity: one row per kind of bond */
+.mb .ex-bonds { display: grid; gap: 8px; margin: 0 0 12px; }
+.mb .ex-bond { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.mb .ex-bond .mb-choices { margin: 0; }
+.mb .ex-bond-name { min-width: 3.4em; font-family: var(--display); font-size: 19px; font-weight: 600; }
+.mb .ex-bond .ex-den { width: 5.2em; }
+.mb .ex-den-v { font-weight: 800; color: var(--mint-deep); }
+.mb .ex-bond[data-state='done'] { display: none; }
+.mb .ex-part .mb-en { margin-bottom: 12px; }
+
+/* "Finished" under the molecule's name once it is saved */
+.mb .ex-done { display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; padding: 2px 10px 2px 4px; border-radius: 999px; background: var(--mint-soft); color: var(--mint-deep); font-size: 13px; font-weight: 800; }
+.mb .ex-done svg { width: 16px; height: 16px; padding: 2px; border-radius: 50%; background: var(--mint-deep); color: #fff; stroke-width: 3; }
+
+/* the finished row of the worksheet */
+.mb .ex-row { margin: 0 0 16px; }
+.mb .ex-row .mb-readout div { grid-template-columns: 132px 1fr; }
+
+@media (max-width: 420px) {
+  .mb .ex-part { padding: 10px 10px 2px; }
+  .mb .ex-row .mb-readout div { grid-template-columns: 1fr; gap: 2px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mb .ex-part[data-state='open'] .ex-h .mb-mark { animation: none; }
+}

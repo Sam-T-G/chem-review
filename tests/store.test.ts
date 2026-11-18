@@ -3,10 +3,13 @@ import type { El } from '../src/chem/elements'
 import type { SeenBond } from '../src/chem/polarity'
 import { PROBLEMS } from '../src/chem/problems'
 import type { V3 } from '../src/chem/repulsion'
+import type { Geometry } from '../src/chem/vsepr'
 import { polarity } from '../src/modules/lewis/guide'
 import * as store from '../src/modules/lewis/store'
 
 const idx = (id: string) => PROBLEMS.findIndex((p) => p.id === id)
+/** The electron geometry for each number of electron groups, from section 7.6. */
+const GEOMETRY_FOR: Record<number, Geometry> = { 2: 'linear', 3: 'trigonal planar', 4: 'tetrahedral', 5: 'trigonal bipyramidal', 6: 'octahedral' }
 
 /** Answer the count step for the current problem through the store's own actions. */
 function finishCount() {
@@ -69,6 +72,7 @@ function toStep(id: string, step: 'shape' | 'polar' | 'orbitals') {
   const st = store.getState()
   const groups = st.s.bonds.length + Math.floor((st.s.atoms.find((a) => a.id === c)!.lone ?? 0) / 2)
   store.answerGroups(groups)
+  store.pickGeometry(GEOMETRY_FOR[groups]!)
   store.pickShape(p.shape)
   if (step === 'shape') return
   store.next()
@@ -164,11 +168,37 @@ describe('guided steps', () => {
     expect(store.getState().shape.groupsCoach!.n).toBeGreaterThan(first.n)
     store.answerGroups(4)
     expect(store.getState().shape).toMatchObject({ groupsRight: true, groupsCoach: null })
+    // the electron geometry comes next, and the molecular geometry waits for it
+    expect(store.cue()).toEqual({ kind: 'ask', key: 'geometry' })
+    store.pickShape('tetrahedral')
+    expect(store.getState().shape.pick).toBeNull()
+    store.moreHint()
+    expect(store.currentHints()).toEqual(['Each electron group around carbon is a bonded atom or a lone pair, and the groups spread as far apart as they can.'])
+    store.pickGeometry('trigonal planar')
+    const miss = store.getState().shape
+    expect(miss).toMatchObject({ geometry: 'trigonal planar', geometryRight: false, geometryTries: 1, geometryFeedback: null })
+    expect(miss.geometryCoach).toMatchObject({ lead: 'Trigonal planar is the electron geometry for 3 electron groups.', why: 'Carbon has 4 electron groups around it.' })
+    // the same wrong pick pressed again is not a new try
+    store.pickGeometry('trigonal planar')
+    expect(store.getState().shape.geometryTries).toBe(1)
+    expect(store.getState().shape.geometryCoach!.n).toBe(miss.geometryCoach!.n)
+    // each miss gets a new number, so the board rings the groups it is about once per answer
+    store.pickGeometry('octahedral')
+    expect(store.getState().shape.geometryCoach!.n).toBeGreaterThan(miss.geometryCoach!.n)
+    expect(store.getState().shape.geometryCoach!.ask).toMatch(/^The electron geometry follows the number of electron groups/)
+    store.pickGeometry('tetrahedral')
+    expect(store.getState().shape).toMatchObject({ geometry: 'tetrahedral', geometryRight: true, geometryTries: 2, geometryCoach: null, geometryFeedback: 'The electron geometry is tetrahedral: 4 electron groups around carbon.' })
+    // a right pick is final, and the hints start again for the next question
+    store.pickGeometry('octahedral')
+    expect(store.getState().shape.geometry).toBe('tetrahedral')
+    expect(store.getState().hints).toBe(0)
+    expect(store.cue()).toEqual({ kind: 'ask', key: 'shapes' })
+    expect(store.getState().view).toBe('flat')
     store.pickShape('square planar')
     const s = store.getState()
     expect(s.shape.pickRight).toBe(false)
     expect(s.shape.pickFeedback).toBeNull()
-    expect(s.shape.pickCoach).toMatchObject({ lead: 'Square planar is how the 4 bonds look in a flat drawing, 90° apart.', ask: 'The shape is tetrahedral.' })
+    expect(s.shape.pickCoach).toMatchObject({ lead: 'Square planar is how the 4 bonds look in a flat drawing, 90° apart.', ask: 'The molecular geometry is tetrahedral.' })
     expect(s.view).toBe('shape')
     // the shape is not the end any more: polarity and bonding come first
     expect(s.solved).not.toContain('CH4')
@@ -371,6 +401,7 @@ describe('guided steps', () => {
     const bond = store.getState().s.bonds[0]!
     store.unbond(bond.id)
     expect(store.getState().shape.pick).toBeNull()
+    expect(store.getState().shape).toMatchObject({ geometry: null, geometryRight: false, geometryTries: 0 })
     expect(store.getState().polar).toEqual({ bonds: {}, net: { right: false, tries: 0, text: null, coach: null, pick: null }, arrow: { right: false, tries: 0, text: null, coach: null, drawn: null }, aim: 0 })
     expect(store.unlocked()).toBeLessThan(5)
   })
@@ -535,6 +566,8 @@ describe('where the next action is', () => {
     store.next()
     expect(store.cue()).toEqual({ kind: 'ask', key: 'groups' })
     store.answerGroups(2)
+    expect(store.cue()).toEqual({ kind: 'ask', key: 'geometry' })
+    store.pickGeometry('linear')
     expect(store.cue()).toEqual({ kind: 'ask', key: 'shapes' })
     store.pickShape('linear')
     expect(store.cue()).toEqual({ kind: 'next' })

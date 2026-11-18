@@ -11,6 +11,8 @@
 //
 // The slides' one odd case is ozone: its bonds have ΔEN = 0, but the formal charges (+1 on the
 // middle oxygen, −1 shared by the outer two) make them polar, and the bent shape does not cancel.
+// The app applies that rule only to a bond between two atoms of the same element, and shares the
+// formal charges of like outer atoms equally, so ozone's two arrows are the same length.
 //
 // Pure TypeScript. The directions come from the textbook arrangement, never from the 3D model.
 import { topologyOf } from './assess'
@@ -159,7 +161,7 @@ export function netAsSeen(m: MoleculePolarity, seen: SeenBond[]): SeenNet | null
   return flat < 1e-6 ? { x: 0, y: 0, across: 0 } : { x: sum[0] / flat, y: sum[1] / flat, across: flat / length }
 }
 
-/** A formal charge difference of 1 across a bond between identical atoms counts like this much ΔEN, in tenths. */
+/** A formal charge difference of 1 across a bond between two atoms of the same element counts like this much ΔEN, in tenths. */
 const CHARGE_AS_TENTHS = 10
 
 /** Bond dipoles and the net dipole of a molecule with one middle atom. Null for anything else
@@ -172,14 +174,24 @@ export function moleculePolarity(s: Structure): MoleculePolarity | null {
   const d = centerDomains(s, top.center)
   if (d.unpaired) return null
 
+  // Outer atoms of one element share their formal charges equally: ozone's −1 is shared by the outer two
+  // (the slides), so both bonds get the same arrow whichever resonance drawing is on the board.
+  const sharedCharge = new Map<El, number>()
+  for (const b of d.bonds) {
+    const el = atomById(s, b.atomId)!.el
+    const same = d.bonds.filter((x) => atomById(s, x.atomId)!.el === el)
+    if (!sharedCharge.has(el)) sharedCharge.set(el, same.reduce((n, x) => n + formalCharge(s, x.atomId), 0) / same.length)
+  }
+
   let byCharge = false
   const bonds: BondDipole[] = d.bonds.map((b) => {
     const el = atomById(s, b.atomId)!.el
     const polarity = bondPolarity(centerAtom.el, el)
     if (polarity.kind !== 'nonpolar') return { atomId: b.atomId, el, polarity, out: polarity.negative === el ? 1 : -1, size: polarity.tenths }
-    // identical atoms pull equally, but a formal charge on one of them still shifts the electrons
-    const gap = formalCharge(s, top.center) - formalCharge(s, b.atomId)
-    if (polarity.tenths === 0 && gap !== 0) {
+    // two atoms of the same element pull equally, but a formal charge on one of them still shifts the
+    // electrons (ozone). Two different elements with the same table value (P–H, C–S) get no arrow.
+    const gap = formalCharge(s, top.center) - sharedCharge.get(el)!
+    if (el === centerAtom.el && Math.abs(gap) > 1e-9) {
       byCharge = true
       return { atomId: b.atomId, el, polarity, out: gap > 0 ? 1 : -1, size: Math.abs(gap) * CHARGE_AS_TENTHS }
     }

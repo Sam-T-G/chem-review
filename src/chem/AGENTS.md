@@ -15,6 +15,7 @@ from React, the DOM, Three.js, modules or screens.
 - `orbitals.ts`: counts sigma and pi bonds, and gives the hybridization for a number of electron groups.
 - `layout2d.ts`: where things sit in the flat drawing. Geometry only.
 - `problems.ts`: the guided problems in teaching order. Learning design reviews changes to it.
+- `exercises.ts`: the exercise pool in its sets (the class worksheet first), the finished Lewis structure of any problem, and whether it has resonance. Learning design reviews changes to it.
 
 ## Read first
 - `docs/chemistry/sources.md`: where each rule and number comes from, the conventions, the known gaps.

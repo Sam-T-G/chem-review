@@ -5,7 +5,9 @@ Every file here is a screen (Expo Router). `_layout.tsx` files define navigators
 ## Files
 - `_layout.tsx`: loads the fonts and sets up the stack.
 - `index.tsx`: the home screen. It lists the modules from the registry.
-- `lewis.tsx`: hosts the Lewis module and hands it the saved progress.
+- `lewis.tsx`: hosts the Lewis module and hands it the saved progress. Its `LewisScreen` is the one screen all three routes of the module use.
+- `shapes.tsx`: the Lewis module opened on its shapes quiz.
+- `exercises.tsx`: the Lewis module opened on its exercises.
 
 ## Read first
 - `docs/architecture.md`, "A module": what a route gives a module.

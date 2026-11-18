@@ -122,6 +122,30 @@ function countEls(els: El[]): Map<El, number> {
   return m
 }
 
+const OCTET = 8
+
+/** A middle atom that the electron count leaves short, and the count it is finished at (D-0032).
+ *  CH3+ has 6 valence electrons in all: three C–H bonds use all 6, hydrogen cannot take a double bond, so
+ *  carbon ends with 6, the way boron does in BF3. [TBD: the OpenStax Chemistry 2e, 7.3, citation for this is
+ *  unread; see docs/chemistry/sources.md.] The middle atom is finished short only when the
+ *  best drawing for the species (or, in free build, for the atoms and charge on the board) leaves it short,
+ *  it holds exactly that many, and none of its electrons are unshared. A carbon with a lone pair and 6
+ *  electrons (CH2, which is also what a half-built CH4 looks like) is still called short.
+ *  In free build the charge is read off the board, so taking a middle atom's unshared electrons away would
+ *  make it match its own best drawing (OH2 4+, NH2 3+, BH2+). There the rule also needs the CH3+ case
+ *  itself: an octet atom left at 6 (two short of 8) with a formal charge of at most +1. */
+function shortCenter(s: Structure, topology: Topology, species: Species | undefined, use: Convention): { id: string; count: number } | null {
+  if (topology.kind !== 'star') return null
+  const center = s.atoms.find((a) => a.id === topology.center)
+  if (!center || center.lone !== 0) return null
+  const termEls = topology.terminals.map((id) => s.atoms.find((a) => a.id === id)!.el)
+  const ref = solveStar(center.el, termEls, species ? species.charge : netCharge(s))
+  const best = ref ? bestStructures(ref, use)[0] : undefined
+  if (!best || best.centerCount >= shellTarget(center.el)) return null
+  if (!species && (best.centerCount !== OCTET - 2 || formalCharge(s, center.id) > 1)) return null
+  return { id: center.id, count: best.centerCount }
+}
+
 export function assess(s: Structure, species?: Species, use: Convention = DEFAULT_CONVENTION): Assessment {
   const topology = topologyOf(s, species?.center)
   const have = electronsOnBoard(s)
@@ -129,7 +153,10 @@ export function assess(s: Structure, species?: Species, use: Convention = DEFAUL
 
   // In a guided problem the middle atom is known before it has its bonds, so a period 3 middle atom
   // (xenon in XeF2) is not called over-full while the student is still bonding the outer atoms.
-  const namedCenterId = species ? (s.atoms.find((a) => a.el === species.center)?.id ?? null) : null
+  // A molecule of two atoms has no middle atom that could hold more than 8 (I=F is over-full on iodine
+  // whichever atom the problem names), so there the named atom gets no such room.
+  const namedCenterId = species && species.terminals.length >= 2 ? (s.atoms.find((a) => a.el === species.center)?.id ?? null) : null
+  const allowedShort = shortCenter(s, topology, species, use)
   const atoms: AtomReport[] = s.atoms.map((a) => {
     const count = shellCount(s, a.id)
     const target = shellTarget(a.el)
@@ -138,7 +165,8 @@ export function assess(s: Structure, species?: Species, use: Convention = DEFAUL
     // or a period 3+ atom in the middle (two or more neighbors). A lone atom or an outer atom may not.
     const mayExceed = (target < 8 && count <= 8) || (canExpand(a.el) && (degree >= 2 || a.id === namedCenterId))
     const unpaired = a.lone % 2 === 1
-    const status: AtomReport['status'] = count < target || unpaired ? 'short' : count === target || mayExceed ? 'full' : 'over'
+    const shortOk = allowedShort !== null && allowedShort.id === a.id && allowedShort.count === count
+    const status: AtomReport['status'] = (count < target && !shortOk) || unpaired ? 'short' : count <= target || mayExceed ? 'full' : 'over'
     return { id: a.id, el: a.el, count, target, status, unpaired, fc: formalCharge(s, a.id) }
   })
 
@@ -179,7 +207,7 @@ export function assess(s: Structure, species?: Species, use: Convention = DEFAUL
   const onlyCountIssues: boolean = issues.filter((i) => i.kind !== 'electrons').length === 0
   if (topology.kind !== 'empty' && onlyCountIssues) {
     const over = atoms.filter((a) => a.status === 'over').map((a) => a.id)
-    const short = atoms.filter((a) => a.count < a.target).map((a) => a.id)
+    const short = atoms.filter((a) => a.count < a.target && !(allowedShort?.id === a.id && allowedShort.count === a.count)).map((a) => a.id)
     const unpaired = atoms.filter((a) => a.unpaired && a.count >= a.target).map((a) => a.id)
     if (over.length) issues.push({ kind: 'over', ids: over })
     if (short.length) issues.push({ kind: 'short', ids: short })
